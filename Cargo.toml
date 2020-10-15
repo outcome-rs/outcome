@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "outcome-core",
+    "outcome-cli",
+    "outcome-net",
+]

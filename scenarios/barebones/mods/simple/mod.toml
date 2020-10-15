@@ -1,0 +1,4 @@
+[mod]
+name = "simple" # has to match name of mod directory
+version = "0.1.0"
+engine = "*"

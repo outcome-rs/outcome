@@ -1,0 +1,31 @@
+[package]
+name = "outcome-net"
+version = "0.1.0"
+authors = ["adamsky <adamsky@enum.space>"]
+edition = "2018"
+repository = "https://github.com/outcome-rs/outcome"
+homepage = "https://theoutcomeproject.com"
+description = "Networking for distributed outcome simulations."
+keywords = ["distributed", "simulation", "engine", "modeling", "multiplayer"]
+readme = "README.md"
+license = "AGPL-3.0"
+
+[features]
+default = []
+transport_zmq = ["zmq"]
+transport_nng = ["nng"]
+
+# zmq-sys version collision if both zmq crates are present
+#transport_zmq_modern = ["libzmq"]
+
+[dependencies]
+outcome-core = { version = "0.1.0", path = "../outcome-core" }
+
+serde = "1.0.114"
+rmp-serde = "0.14.3"
+lz4 = "1.23.2"
+thiserror = "1.0.20"
+
+zmq = { version = "0.9.2", optional = true }
+nng = { version = "0.5.1", optional = true }
+#libzmq = { version = "0.2.5", optional = true }
