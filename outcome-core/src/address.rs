@@ -1,9 +1,5 @@
 //! Defines common interface for referencing simulation data.
 
-#[cfg(test)]
-#[path = "test/address.rs"]
-mod test;
-
 use std::str::FromStr;
 
 use crate::entity::{Storage, StorageIndex};

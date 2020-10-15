@@ -1,9 +1,5 @@
 //! Defines the local simulation abstraction.
 
-#[cfg(test)]
-#[path = "../test/sim.rs"]
-mod test;
-
 pub mod interface;
 pub mod step;
 
