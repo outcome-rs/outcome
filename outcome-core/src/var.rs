@@ -416,14 +416,6 @@ impl Var {
             }
         }
     }
-    pub fn from_serde_value(val: &serde_yaml::Value) -> Option<Var> {
-        match val {
-            serde_yaml::Value::Null => return None,
-            serde_yaml::Value::String(v) => return Some(Var::Str(v.clone())),
-            // serde_yaml::Value::Number(v) => return Some()
-            _ => unimplemented!(),
-        }
-    }
     pub fn to_string(&self) -> String {
         match self {
             Var::Str(v) => v.clone(),

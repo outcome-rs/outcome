@@ -21,9 +21,8 @@ pub enum Error {
 
     #[error("toml deserialization error: {0}")]
     TomlDeserError(#[from] toml::de::Error),
-    #[error("yaml deserialization error")]
-    YamlDeserError(#[from] serde_yaml::Error),
-
+    // #[error("yaml deserialization error")]
+    // YamlDeserError(#[from] serde_yaml::Error),
     #[error("semver req parse error")]
     SemverReqParseError(#[from] semver::ReqParseError),
     #[error("semver error")]

@@ -9,7 +9,7 @@
 
 extern crate semver;
 extern crate serde;
-extern crate serde_yaml;
+// extern crate serde_yaml;
 extern crate toml;
 
 // mod dyn_deser;

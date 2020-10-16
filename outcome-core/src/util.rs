@@ -93,15 +93,15 @@ pub fn get_yaml_files_at_dir(dir: PathBuf, exclude: &str) -> Vec<PathBuf> {
     paths
 }
 
-/// Deserialize an object at the given path.
-pub fn deser_obj_from_path<T>(file_path: PathBuf) -> Result<T>
-where
-    for<'de> T: serde::Deserialize<'de>,
-{
-    let file_data = read(file_path)?;
-    let d: T = serde_yaml::from_slice(&file_data)?;
-    Ok(d)
-}
+// /// Deserialize an object at the given path.
+// pub fn deser_obj_from_path<T>(file_path: PathBuf) -> Result<T>
+// where
+//     for<'de> T: serde::Deserialize<'de>,
+// {
+//     let file_data = read(file_path)?;
+//     let d: T = serde_yaml::from_slice(&file_data)?;
+//     Ok(d)
+// }
 /// Read a file at the given path to a String.
 pub fn read_file(path: &str) -> Result<String> {
     // Create a path to the desired file

@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 
 use arrayvec::ArrayVec;
 use fnv::FnvHashMap;
-use serde_yaml::Value;
+// use serde_yaml::Value;
 use smallvec::SmallVec;
 
 #[cfg(feature = "machine_dynlib")]
