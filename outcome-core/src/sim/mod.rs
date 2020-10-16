@@ -76,7 +76,7 @@ impl Sim {
     ///
     /// Optional compression using LZ4 algorithm can be performed.
     pub fn to_snapshot(&self, compress: bool) -> Result<Vec<u8>> {
-        let mut data = rmp_serde::to_vec(&self).unwrap();
+        let mut data = bincode::serialize(&self).unwrap();
         if compress {
             data = lz4::block::compress(&data, None, true)?;
         }
@@ -87,7 +87,7 @@ impl Sim {
     pub fn from_snapshot(mut buf: Vec<u8>, compressed: bool) -> Result<Self> {
         if compressed {
             let data = lz4::block::decompress(&buf, None)?;
-            let mut sim: Self = match rmp_serde::from_read_ref(&data) {
+            let mut sim: Self = match bincode::deserialize(&data) {
                 Ok(ms) => ms,
                 Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
             };
@@ -96,7 +96,7 @@ impl Sim {
             // sim.setup_lua_state_ent();
             return Ok(sim);
         } else {
-            let mut sim: Self = match rmp_serde::from_read_ref(&buf) {
+            let mut sim: Self = match bincode::deserialize(&buf) {
                 Ok(ms) => ms,
                 Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
             };

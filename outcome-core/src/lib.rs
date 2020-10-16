@@ -76,7 +76,6 @@ extern crate dunce;
 extern crate fnv;
 extern crate lz4;
 extern crate rand;
-extern crate rmp_serde;
 extern crate semver;
 extern crate toml;
 
