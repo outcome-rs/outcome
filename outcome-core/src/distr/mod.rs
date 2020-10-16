@@ -3,8 +3,6 @@
 //! Definitions are kept generic to allow implementation using different
 //! transports and network topographies.
 
-extern crate image;
-
 pub mod central;
 pub mod node;
 

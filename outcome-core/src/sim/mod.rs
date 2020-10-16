@@ -3,14 +3,14 @@
 pub mod interface;
 pub mod step;
 
-extern crate image;
-
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "grids")]
+use image;
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
 #[cfg(feature = "machine_lua")]
@@ -208,6 +208,7 @@ impl Sim {
 
         // apply data as found in user files
         sim.apply_data_reg();
+        #[cfg(feature = "grids")]
         sim.apply_data_img();
 
         // apply settings from scenario manifest
@@ -818,6 +819,7 @@ impl Sim {
 
     // TODO support more image types
     /// Apply image data as found in data declarations in user files.
+    #[cfg(feature = "grids")]
     fn apply_data_img(&mut self) {
         use self::image::GenericImageView;
         for die in &self.model.data_imgs.clone() {

@@ -24,7 +24,7 @@ machine_sandbox = ["machine", "machine_script"] # don't allow execution of user-
 machine_complete = ["machine", "machine_script", "machine_dynlib", "machine_lua", "machine_sysinfo"]
 
 short_stringid = [] # make the fixed-size string ids 10 chars long (default is 23)
-# grids = [] # add 2d array variable types for each basic variable type
+grids = [] # add 2d array variable type for each basic variable type
 # small_nums = [] # use 32 bit integers and floating point numbers instead of default 64 bit
 # byte_var = [] # add 8 bit uint variable type
 # static_model = [] # disallow changes to model after initialization
@@ -41,21 +41,21 @@ fnv = "1.0.7"
 strsim = "0.10.0"
 lz4 = "1.23.2"
 id-pool = { version = "0.1.0", features = ["serde"] }
-image = { version = "0.23.4", default-features = false, features = ["png"] }
 dunce = "1.0.0"
 arrayvec = { version = "0.5.1", features = ["serde"] }
 rand = "0.7.3"
 thiserror = "1.0.20"
 
 getopts = { version = "0.2.21", optional = true }
-rlua = { version = "0.17.0", optional = true }
-libloading = { version = "0.6.2", optional = true }
+shlex = { version = "0.1.1", optional = true }
+rayon = { version = "1.3.1", optional = true }
 fasteval = { git = "https://github.com/adamsky/fasteval", optional = true }
 smallvec = { version = "1.4.0", features = ["serde"], optional = true }
 annotate-snippets = { version = "0.9.0", features = ["color"], optional = true }
-rayon = { version = "1.3.1", optional = true }
-shlex = { version = "0.1.1", optional = true }
 sysinfo = { version = "0.14.2", optional = true }
+rlua = { version = "0.17.0", optional = true }
+libloading = { version = "0.6.2", optional = true }
+image = { version = "0.23.4", default-features = false, features = ["png"], optional = true }
 
 [dev-dependencies]
 simplelog = "0.7.6"
