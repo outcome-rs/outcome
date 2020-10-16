@@ -71,14 +71,6 @@ extern crate serde;
 #[macro_use]
 extern crate log;
 
-extern crate arrayvec;
-extern crate dunce;
-extern crate fnv;
-extern crate lz4;
-extern crate rand;
-extern crate semver;
-extern crate toml;
-
 pub mod address;
 pub mod component;
 pub mod distr;
@@ -109,8 +101,6 @@ pub const FEATURE_NAME_MACHINE_SYSINFO: &str = "machine_sysinfo";
 pub const FEATURE_MACHINE_SYSINFO: bool = false;
 #[cfg(feature = "machine_sysinfo")]
 pub const FEATURE_MACHINE_SYSINFO: bool = true;
-#[cfg(feature = "machine_sysinfo")]
-extern crate sysinfo;
 
 pub const FEATURE_NAME_MACHINE_SCRIPT: &str = "machine_script";
 #[cfg(not(feature = "machine_script"))]
@@ -124,14 +114,6 @@ pub const FEATURE_MACHINE: bool = true;
 #[cfg(not(feature = "machine"))]
 pub const FEATURE_MACHINE: bool = false;
 #[cfg(feature = "machine")]
-extern crate fasteval;
-#[cfg(feature = "machine")]
-extern crate rayon;
-#[cfg(feature = "machine")]
-extern crate shlex;
-#[cfg(feature = "machine")]
-extern crate smallvec;
-#[cfg(feature = "machine")]
 pub mod machine;
 
 pub const FEATURE_NAME_MACHINE_DYNLIB: &str = "machine_dynlib";
@@ -139,16 +121,12 @@ pub const FEATURE_NAME_MACHINE_DYNLIB: &str = "machine_dynlib";
 pub const FEATURE_MACHINE_DYNLIB: bool = false;
 #[cfg(feature = "machine_dynlib")]
 pub const FEATURE_MACHINE_DYNLIB: bool = true;
-#[cfg(feature = "machine_dynlib")]
-extern crate libloading;
 
 pub const FEATURE_NAME_MACHINE_LUA: &str = "machine_lua";
 #[cfg(not(feature = "machine_lua"))]
 pub const FEATURE_MACHINE_LUA: bool = false;
 #[cfg(feature = "machine_lua")]
 pub const FEATURE_MACHINE_LUA: bool = true;
-#[cfg(feature = "machine_lua")]
-extern crate rlua;
 
 // TODO are these necessary?
 // aggregate features
