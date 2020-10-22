@@ -12,7 +12,7 @@ readme = "README.md"
 license = "AGPL-3.0"
 
 [features]
-default = ["machine_sandbox", "load_img"]
+default = []
 
 machine = ["fasteval", "shlex", "getopts", "smallvec",  "rayon"] # enable runtime-level logic execution
 machine_script = ["annotate-snippets"] # enable script processor

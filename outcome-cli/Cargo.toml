@@ -15,7 +15,7 @@ name = "outcome"
 path = "src/main.rs"
 
 [features]
-default = ["outcome-core/default", "psutils", "transport_zmq", "img_print"]
+default = ["outcome-core/machine_sandbox", "outcome-core/load_img", "psutils", "img_print", "transport_zmq"]
 complete = ["outcome-core/machine_complete", "outcome-core/load_img", "psutils", "img_print"]
 
 transport_nng = ["outcome-net/transport_nng"]
