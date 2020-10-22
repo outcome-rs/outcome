@@ -15,9 +15,8 @@ name = "outcome"
 path = "src/main.rs"
 
 [features]
-default = ["outcome-core/machine_sandbox", "psutils", "transport_zmq", "img_print"]
-basic = ["outcome-core/default"]
-complete = ["outcome-core/machine_complete", "psutils", "img_print"]
+default = ["outcome-core/default", "psutils", "transport_zmq", "img_print"]
+complete = ["outcome-core/machine_complete", "outcome-core/load_img", "psutils", "img_print"]
 
 transport_nng = ["outcome-net/transport_nng"]
 transport_zmq = ["outcome-net/transport_zmq"]
@@ -27,7 +26,7 @@ img_print = ["image"]
 
 
 [dependencies]
-outcome-core = { version = "0.1.0", path = "../outcome-core" }
+outcome-core = { version = "0.1.0", path = "../outcome-core"  }
 outcome-net = { version = "0.1.0", path = "../outcome-net" }
 
 clap = { version = "2.33.3", default-features = false, features = ["suggestions", "color"] }

@@ -12,7 +12,7 @@ readme = "README.md"
 license = "AGPL-3.0"
 
 [features]
-default = []
+default = ["machine_sandbox", "load_img"]
 
 machine = ["fasteval", "shlex", "getopts", "smallvec",  "rayon"] # enable runtime-level logic execution
 machine_script = ["annotate-snippets"] # enable script processor
@@ -24,7 +24,7 @@ machine_sandbox = ["machine", "machine_script"] # don't allow execution of user-
 machine_complete = ["machine", "machine_script", "machine_dynlib", "machine_lua", "machine_sysinfo"]
 
 short_stringid = [] # make the fixed-size string ids 10 chars long (default is 23)
-grids = [] # add 2d array variable type for each basic variable type
+load_img = ["image"] # enable loading images as grid data
 # small_nums = [] # use 32 bit integers and floating point numbers instead of default 64 bit
 # byte_var = [] # add 8 bit uint variable type
 # static_model = [] # disallow changes to model after initialization
