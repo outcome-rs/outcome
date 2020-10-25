@@ -179,7 +179,10 @@ impl Server {
             event_trigger: "".to_string(),
             passwd: "".to_string(),
             name: "".to_string(),
-            furthest_tick: 0,
+            furthest_tick: match &self.sim {
+                SimConnection::Local(sim) => sim.get_clock(),
+                _ => unimplemented!(),
+            },
         };
         self.clients.insert(self.driver.port_count, client);
         Ok((self.driver.port_count, client_socket))
@@ -777,6 +780,10 @@ pub fn handle_turn_advance_request(
         let mut common_furthest_tick = current_tick + 99999;
         for (id, client) in &mut server.clients {
             if &client.id == client_id {
+                println!(
+                    "client.furthest_tick: {}, current_tick: {}",
+                    client.furthest_tick, current_tick
+                );
                 if client.furthest_tick - current_tick < req.tick_count as usize {
                     client.furthest_tick = client.furthest_tick + req.tick_count as usize;
                 }
