@@ -39,6 +39,11 @@ pub enum Error {
     #[error("failed reading scenario: missing modules")]
     ScenarioMissingModules,
 
+    #[error("model: no entity prefab named: {0}")]
+    NoEntityPrefab(String),
+    #[error("model: no component named: {0}")]
+    NoComponentModel(String),
+
     #[error("other error: {0}")]
     Other(String),
     #[cfg(feature = "machine")]

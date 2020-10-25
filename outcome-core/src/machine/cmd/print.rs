@@ -1,31 +1,30 @@
-//use std::collections::HashMap;
 use std::collections::BTreeMap;
 
 use shlex;
 
 use crate::{CompId, MedString, VarType};
 
-use crate::address::Address;
+use crate::address::{Address, PartialAddress};
 use crate::component::Component;
 use crate::entity::Storage;
 use crate::model::ComponentModel;
 
 use super::super::{error::Error, LocationInfo};
 use super::CommandResult;
-use crate::machine::error::ErrorKind;
+use crate::machine::error::{ErrorKind, Result};
 
 /// Print format
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PrintFmt {
     pub fmt: String,
-    pub inserts: BTreeMap<usize, Address>,
+    pub inserts: BTreeMap<usize, String>,
 }
 
 impl PrintFmt {
     pub fn get_type() -> String {
         return "printfmt".to_string();
     }
-    pub fn new(args: Vec<String>) -> Result<Self, Error> {
+    pub fn new(args: Vec<String>) -> Result<Self> {
         let mut fmt = args[0].to_string();
         let mut inserts = BTreeMap::new();
         loop {
@@ -33,7 +32,8 @@ impl PrintFmt {
                 Some(index) => {
                     let substring_end = fmt[index..].find(' ').unwrap_or(fmt.len());
                     let substring = &fmt[index..substring_end];
-                    inserts.insert(index, Address::from_str(&substring[1..]).unwrap());
+                    // inserts.insert(index, Address::from_str(&substring[1..]).unwrap());
+                    inserts.insert(index, substring[1..].to_string());
                     fmt = format!(
                         "{}{}",
                         fmt[..index].to_string(),
@@ -45,17 +45,6 @@ impl PrintFmt {
         }
         //println!("fmt_string: {}, inserts_map: {:?}", &fmt, &inserts);
         Ok(PrintFmt { fmt, inserts })
-    }
-    pub fn from_str(args_str: &str, comp_uid: &CompId) -> Result<Self, String> {
-        let shl_split = match shlex::split(args_str) {
-            Some(s) => s,
-            None => return Err(format!("failed parsing command arguments: {}", args_str)),
-        };
-
-        Ok(PrintFmt {
-            fmt: shl_split[0].to_string(),
-            inserts: BTreeMap::new(),
-        })
     }
 }
 impl PrintFmt {
@@ -72,15 +61,24 @@ impl PrintFmt {
             let mut output = self.fmt.clone();
             let mut track_added = 0;
             for (index, addr) in &self.inserts {
-                let substring = match entity_db.get_coerce_to_string(&addr, Some(&addr.component)) {
-                    Some(s) => s,
-                    None => {
-                        return CommandResult::Err(Error::new(
-                            *location,
-                            ErrorKind::FailedGettingFromStorage(addr.to_string()),
-                        ))
-                    }
+                let part_addr = PartialAddress::from_str(addr).unwrap();
+                let substring = match part_addr {
+                    PartialAddress::ComponentLocal { var_type, var_id } => entity_db
+                        .get_var(&(*comp_uid, var_id), Some(var_type))
+                        .unwrap()
+                        .to_string(),
+                    _ => unimplemented!(),
                 };
+
+                // let substring = match entity_db.get_coerce_to_string(&addr, Some(&addr.component)) {
+                //     Some(s) => s,
+                //     None => {
+                //         return CommandResult::Err(Error::new(
+                //             *location,
+                //             ErrorKind::FailedGettingFromStorage(addr.to_string()),
+                //         ))
+                //     }
+                // };
                 output.insert_str(*index + track_added, &substring);
                 track_added += substring.len();
             }
@@ -98,11 +96,11 @@ pub struct Print {
     pub source: Address,
 }
 impl Print {
-    pub fn new(args: Vec<String>) -> Result<Self, Error> {
+    pub fn new(args: Vec<String>) -> Result<Self> {
         let addr = Address::from_str(&args[0]).unwrap();
         Ok(Print { source: addr })
     }
-    pub fn from_str(args_str: &str, comp_uid: &CompId) -> Result<Self, String> {
+    pub fn from_str(args_str: &str, comp_uid: &CompId) -> Result<Self> {
         //todo
         unimplemented!()
         // let split: Vec<&str> = args_str.split(" ").collect();

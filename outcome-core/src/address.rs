@@ -20,7 +20,7 @@ pub struct Address {
 
 impl Address {
     /// Creates a new Address from a &str
-    pub fn from_str(mut input: &str) -> Result<Address> {
+    pub fn from_str(input: &str) -> Result<Address> {
         let split = input.split(SEPARATOR_SYMBOL).collect::<Vec<&str>>();
         if split.len() != 4 {
             return Err(Error::Other(format!(
@@ -36,5 +36,38 @@ impl Address {
     }
     pub fn get_storage_index(&self) -> StorageIndex {
         unimplemented!()
+    }
+}
+
+/// Partial reference to simulation data point.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum PartialAddress {
+    EntityLocal {
+        component: StringId,
+        var_type: VarType,
+        var_id: StringId,
+    },
+    ComponentLocal {
+        var_type: VarType,
+        var_id: StringId,
+    },
+}
+
+impl PartialAddress {
+    pub fn from_str(input: &str) -> Result<Self> {
+        let split = input.split(SEPARATOR_SYMBOL).collect::<Vec<&str>>();
+        if split.len() == 2 {
+            Ok(PartialAddress::ComponentLocal {
+                var_type: VarType::from_str(split[0]).unwrap(),
+                var_id: StringId::from(split[1]).unwrap(),
+            })
+        } else {
+            //if split.len() == 3 {
+            Ok(PartialAddress::EntityLocal {
+                component: StringId::from(split[0]).unwrap(),
+                var_type: VarType::from_str(split[1]).unwrap(),
+                var_id: StringId::from(split[2]).unwrap(),
+            })
+        }
     }
 }

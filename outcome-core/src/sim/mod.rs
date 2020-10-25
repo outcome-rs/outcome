@@ -149,9 +149,9 @@ impl Sim {
         let model = SimModel::from_scenario(scenario)?;
         // create a sim struct using the model we made
         let mut sim = Sim::from_model(model)?;
-        sim.add_entity(
-            &StringId::from("singleton").unwrap(),
-            &StringId::from("singleton").unwrap(),
+        sim.spawn_entity(
+            Some(&StringId::from("singleton").unwrap()),
+            StringId::from("singleton").unwrap(),
         )?;
         // execute cmds from initializer
         // let commands = sim
@@ -229,12 +229,18 @@ impl Sim {
         // self.apply_model_entities_par();
     }
 
-    pub fn add_entity(&mut self, prefab_name: &StringId, name: &StringId) -> Result<()> {
-        let mut ent = Entity::from_model_ref(prefab_name, &self.model).unwrap();
+    /// Spawns a new entity based on the given prefab.
+    ///
+    /// If prefab is `None` then an empty entity is spawned.
+    pub fn spawn_entity(&mut self, prefab: Option<&StringId>, name: StringId) -> Result<()> {
+        let mut ent = match prefab {
+            Some(p) => Entity::from_prefab(p, &self.model)?,
+            None => Entity::empty(),
+        };
 
-        if !self.entities_idx.contains_key(name) {
+        if !self.entities_idx.contains_key(&name) {
             let new_uid = self.entity_idpool.request_id().unwrap();
-            self.entities_idx.insert(*name, new_uid);
+            self.entities_idx.insert(name, new_uid);
             self.entities.insert(new_uid, ent);
             Ok(())
         } else {
@@ -272,7 +278,7 @@ impl Sim {
                 // println!("script files: {:?}",
                 // comp.script_files);
             }
-            map.insert(StringId::from_str(&ent_type.id).unwrap(), scripts_vec);
+            map.insert(StringId::from(&ent_type.id).unwrap(), scripts_vec);
         }
 
         for ((mut ent_type, mut ent_id), mut entity) in &mut self.entities {

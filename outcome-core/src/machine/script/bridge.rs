@@ -20,7 +20,7 @@ use crate::machine;
 use crate::machine::cmd::{CentralExtCommand, Command, CommandResult, ExtCommand};
 use crate::machine::{cmd, exec, CommandPrototype, ErrorKind, LocationInfo};
 use crate::model::{
-    ComponentModel, EntityModel, EventModel, LogicModel, Scenario, SimModel, VarModel,
+    ComponentModel, EntityPrefabModel, EventModel, LogicModel, Scenario, SimModel, VarModel,
 };
 use crate::sim::interface::SimInterface;
 use crate::sim::Sim;

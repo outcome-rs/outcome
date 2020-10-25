@@ -8,7 +8,7 @@ use shlex::Shlex;
 use crate::address::Address;
 use crate::entity::Storage;
 // use crate::error::Error;
-use crate::model::{ComponentModel, EntityModel, EventModel, SimModel};
+use crate::model::{ComponentModel, EntityPrefabModel, EventModel, SimModel};
 use crate::sim::interface::SimInterface;
 use crate::sim::Sim;
 use crate::var::Var;
@@ -279,7 +279,7 @@ impl Register {
                 // debug!("registering entity");
                 // let signature = Address::from_str(&self.args[0]).unwrap().resolve(sim);
                 // println!("{:?}", signature);
-                let mut ent_model = EntityModel {
+                let mut ent_model = EntityPrefabModel {
                     name: ShortString::from(&reg.signature.to_string()).unwrap(),
                     components: Vec::new(),
                 };

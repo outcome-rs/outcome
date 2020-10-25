@@ -182,6 +182,7 @@ impl Command {
             "extend" => Ok(Command::Extend(assembly::Extend::new(args, location)?)),
             "register" => Ok(Command::Register(assembly::Register::new(args, location)?)),
             "print" => Ok(Command::PrintFmt(print::PrintFmt::new(args)?)),
+            "spawn" => Ok(Command::Spawn(Spawn::new(args, location)?)),
 
             "range" => Ok(Command::Range(range::Range::new(args)?)),
 
@@ -262,7 +263,7 @@ impl Command {
             //Command::Get(cmd) => out_res.push(cmd.execute_loc()),
 
             //Command::Invoke(cmd) => out_res.push(cmd.execute_loc()),
-            //Command::Spawn(cmd) => out_res.push(cmd.execute_loc()),
+            Command::Spawn(cmd) => out_res.push(cmd.execute_loc()),
             Command::If(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
             Command::Else(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
             Command::Call(cmd) => {
@@ -555,10 +556,31 @@ impl Invoke {
 /// Spawn
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Spawn {
-    pub prefab: StringId,
+    pub prefab: Option<StringId>,
     pub spawn_id: StringId,
 }
 impl Spawn {
+    fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
+        if args.len() == 0 {
+            return Err(Error::new(
+                *location,
+                ErrorKind::InvalidCommandBody(
+                    "`spawn` needs at least a single argument".to_string(),
+                ),
+            ));
+        }
+        if args.len() == 2 {
+            Ok(Self {
+                prefab: Some(StringId::from(&args[0]).unwrap()),
+                spawn_id: StringId::from(&args[1]).unwrap(),
+            })
+        } else {
+            Ok(Self {
+                prefab: None,
+                spawn_id: StringId::from(&args[0]).unwrap(),
+            })
+        }
+    }
     // pub fn from_str(args_str: &str) -> MachineResult<Self> {
     //     let split: Vec<&str> = args_str.split(" ").collect();
     //     if split.len() < 3 {
@@ -590,7 +612,7 @@ impl Spawn {
         //.find(|(n, &e.id == self.model_id.as_str())
         //.map(|(n, _)| n)
         //.unwrap();
-        sim.add_entity(&self.prefab, &self.spawn_id);
+        sim.spawn_entity(self.prefab.as_ref(), self.spawn_id);
         #[cfg(feature = "machine_lua")]
         sim.setup_lua_state_ent();
         Ok(())

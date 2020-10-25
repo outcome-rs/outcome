@@ -54,7 +54,7 @@ pub struct SimModel {
     pub scenario: Scenario,
     pub events: Vec<EventModel>,
     pub scripts: Vec<String>,
-    pub entities: Vec<EntityModel>,
+    pub entities: Vec<EntityPrefabModel>,
     pub components: Vec<ComponentModel>,
     pub data: Vec<DataEntry>,
     pub data_files: Vec<DataFileEntry>,
@@ -75,7 +75,7 @@ impl SimModel {
             data_imgs: Vec::new(),
         };
 
-        let singleton_model = EntityModel {
+        let singleton_model = EntityPrefabModel {
             name: ShortString::from("singleton").unwrap(),
             components: vec![ShortString::from("mod_init").unwrap()],
         };
@@ -232,13 +232,13 @@ impl SimModel {
 
 impl SimModel {
     /// Get reference to entity prefab using `type_` and `id` str args.
-    pub fn get_entity(&self, name: &StringId) -> Option<&EntityModel> {
+    pub fn get_entity(&self, name: &StringId) -> Option<&EntityPrefabModel> {
         self.entities
             .iter()
             .find(|entity| &entity.name.as_ref() == &name.as_str())
     }
     /// Get mutable reference to entity prefab using `type_` and `id` args.
-    pub fn get_entity_mut(&mut self, name: &StringId) -> Option<&mut EntityModel> {
+    pub fn get_entity_mut(&mut self, name: &StringId) -> Option<&mut EntityPrefabModel> {
         self.entities.iter_mut().find(|entity| &entity.name == name)
     }
     /// Get reference to component model using `type_` and `id` args.
@@ -691,7 +691,7 @@ pub struct EventModel {
 
 /// Entity prefab.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityModel {
+pub struct EntityPrefabModel {
     pub name: ShortString,
     pub components: Vec<ShortString>,
 }
