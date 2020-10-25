@@ -238,5 +238,4 @@ fn format_err_no_arguments(location: &LocationInfo) -> String {
 
     let dl = DisplayList::from(snippet);
     format!("{}", dl)
-    // println!("{}\n", dl);
 }

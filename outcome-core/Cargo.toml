@@ -25,8 +25,8 @@ machine_complete = ["machine", "machine_script", "machine_dynlib", "machine_lua"
 
 short_stringid = [] # make the fixed-size string ids 10 chars long (default is 23)
 load_img = ["image"] # enable loading images as grid data
-# small_nums = [] # use 32 bit integers and floating point numbers instead of default 64 bit
-# byte_var = [] # add 8 bit uint variable type
+# big_nums = [] # use 32 bit integers and floating point numbers instead of default 32 bit
+# byte_var = [] # add 8 bit unsigned integer variable type
 # static_model = [] # disallow changes to model after initialization
 
 [dependencies]

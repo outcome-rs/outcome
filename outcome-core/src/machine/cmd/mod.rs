@@ -226,10 +226,7 @@ impl Command {
         location: &LocationInfo,
     ) -> CommandResultVec {
         let line = location.line.unwrap();
-        // debug!("execute cmd at line {}", line);
-        // let (ent_model_type, _) = ent_uid;
         let mut out_res = CommandResultVec::new();
-        // let comp_context = &mut comp.storage;
         match self {
             Command::Sim(cmd) => {
                 out_res.push(cmd.execute_loc(ent_storage, comp, comp_uid, location))
@@ -351,26 +348,15 @@ pub enum ExtCommand {
     Get(Get),
     Set(ExtSet),
     SetVar(ExtSetVar),
-    /*    RemoteExec(Command),
-     * CentralizedExec(CentralExtCommand), */
+    // RemoteExec(Command),
+    // CentralizedExec(CentralExtCommand),
 }
 impl ExtCommand {
-    pub fn execute(
-        &self,
-        mut sim: &mut Sim,
-        // entities: &mut FnvHashMap<EntityUid, Entity>,
-        // model: &mut SimModel,
-        ent_uid: &EntityId,
-        comp_uid: &CompId,
-    ) -> Result<()> {
+    pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityId, comp_uid: &CompId) -> Result<()> {
         match self {
             ExtCommand::Get(cmd) => return cmd.execute_ext(sim, ent_uid),
             ExtCommand::Set(cmd) => return cmd.execute_ext(sim, ent_uid),
             ExtCommand::SetVar(cmd) => return cmd.execute_ext(sim, ent_uid),
-            //            ExtCommand::Eval(cmd) => return cmd.execute_ext(sim),
-            //            ExtCommand::Equal(cmd) => return cmd.execute_ext(sim),
-            //            ExtCommand::Invoke(cmd) => return cmd.execute_ext(sim),
-            //            ExtCommand::Spawn(cmd) => return cmd.execute_ext(sim, model),
             _ => return Ok(()),
         }
     }
@@ -388,31 +374,10 @@ impl ExtCommand {
 
     pub fn get_type_as_str(&self) -> &str {
         match self {
-            //            ExtCommand::Set(_) => "set",
+            // ExtCommand::Set(_) => "set",
             _ => "not implemented",
         }
     }
-    // pub fn from_str(s: &str, comp_uid: &CompUid) -> MachineResult<ExtCommand> {
-    //     let cmd_s: Vec<&str> = s.splitn(2, " ").collect();
-    //     if cmd_s.len() < 2 {
-    //         return Err(MachineError::new(MachineErrorKind::Initialization(format!("err")));
-    //     }
-    //     match cmd_s[0] {
-    //         //            "set" => Ok(ExtCommand::Set(Set::from_str(cmd_s[1], ext_vars_ref,
-    //         // comp_uid).unwrap())),
-    //         "get" => Ok(ExtCommand::Get(Get::from_str(cmd_s[1])?)),
-    //         //            "eval" => Ok(ExtCommand::Eval(ExtEval::from_str(cmd_s[1], comp_uid)?)),
-    //         //            "equal" => Ok(ExtCommand::Equal(ExtEqual::from_str(cmd_s[1], comp_uid)?)),
-    //         //            "invoke" => Ok(ExtCommand::Invoke(Invoke::from_str(cmd_s[1])?)),
-    //         c => {
-    //             // TODO show similar cmds in error
-    //             Err(MachineError::Initialization(format!(
-    //                 "\"{}\" is not a valid ext command",
-    //                 cmd_s[0]
-    //             )))
-    //         }
-    //     }
-    // }
 }
 
 /// Attach

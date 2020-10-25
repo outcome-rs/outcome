@@ -1,5 +1,5 @@
 //! Implements runtime's logic execution capability.
-//!
+
 pub mod cmd;
 pub mod error;
 pub mod exec;
@@ -20,7 +20,6 @@ pub struct LocalAddress {
     var_id: StringId,
 }
 impl LocalAddress {
-    // pub fn new()
     pub fn from_str(input: &str, location: &LocationInfo) -> Result<Self> {
         let split = input
             .split(crate::address::SEPARATOR_SYMBOL)

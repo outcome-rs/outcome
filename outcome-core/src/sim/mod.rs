@@ -138,39 +138,20 @@ impl Sim {
         let scenario = Scenario::from_dir_at(path.clone())?;
         Sim::from_scenario(scenario)
     }
-    /// Convenience method that uses &str instead of PathBuf.
+
+    /// Creates new simulation instance from a &str path to scenario directory.
     pub fn from_scenario_at(path: &str) -> Result<Sim> {
         let path = PathBuf::from(path).canonicalize()?;
-        Self::from_scenario_at_path(path)
+        Sim::from_scenario_at_path(path)
     }
 
     /// Creates new simulation instance from a scenario struct.
     pub fn from_scenario(scenario: Scenario) -> Result<Sim> {
+        // first create a model using the given scenario
         let model = SimModel::from_scenario(scenario)?;
-        // create a sim struct using the model we made
+        // then create a sim struct using that model
         let mut sim = Sim::from_model(model)?;
-        sim.spawn_entity(
-            Some(&StringId::from("singleton").unwrap()),
-            StringId::from("singleton").unwrap(),
-        )?;
-        // execute cmds from initializer
-        // let commands = sim
-        //     .model
-        //     .get_component_mut(&IndexString::from("mod_init").unwrap())
-        //     .unwrap()
-        //     .logic
-        //     .commands
-        //     .clone();
-        // crate::machine::exec::execute(
-        //     &commands,
-        //     &IndexString::from("singleton").unwrap(),
-        //     &IndexString::from("mod_init").unwrap(),
-        //     &mut sim,
-        //     None,
-        //     None,
-        // );
         Ok(sim)
-        // Sim::from_model(model)
     }
 
     /// Creates a new simulation instance from a model struct.
@@ -179,14 +160,13 @@ impl Sim {
         let mut sim: Sim = Sim {
             model,
             clock: 0,
-            // event_queue: Vec::new(),
-            event_queue: vec![StringId::from("init").unwrap()],
+            event_queue: Vec::new(),
             entities: FnvHashMap::default(),
             entities_idx: FnvHashMap::default(),
             entity_idpool: id_pool::IdPool::new(),
         };
 
-        // TODO work on loading dynlibs
+        // TODO load dynlibs
         // load dynamic libraries as seen in component models
         // let mut libs = HashMap::new();
         // for comp_model in &sim.model.components {
@@ -199,13 +179,13 @@ impl Sim {
         //     }
         // }
         // let mut arc_libs = Arc::new(Mutex::new(libs));
+        // TODO setup lua state
 
         // add entities
         // sim.apply_model_entities();
 
         // setup entities' lua_state
         // sim.setup_lua_state_ent();
-
         // apply data as found in user files
         sim.apply_data_reg();
         #[cfg(feature = "load_img")]
@@ -213,9 +193,6 @@ impl Sim {
 
         // apply settings from scenario manifest
         sim.apply_settings();
-
-        // process initial tick
-        // sim.process_tick(&model);
 
         Ok(sim)
     }
@@ -618,14 +595,6 @@ impl Sim {
             return entity.storage.get_bool_grid(&(addr.get_storage_index()));
         }
         None
-
-        // if let Some(entity) = self
-        //     .entities
-        //     .get(self.entities_idx.get(&addr.entity.unwrap()).unwrap())
-        // {
-        //     return entity.storage.get_bool_grid(&(addr.get_storage_index()));
-        // }
-        // None
     }
     /// Get a mut reference to `BoolGrid` variable from the
     /// sim using an absolute address.
@@ -824,7 +793,7 @@ impl Sim {
     }
 
     // TODO support more image types
-    /// Apply image data as found in data declarations in user files.
+    /// Apply image data as found in the model.
     #[cfg(feature = "load_img")]
     fn apply_data_img(&mut self) {
         use self::image::GenericImageView;
@@ -929,7 +898,6 @@ impl Sim {
     }
 
     /// Apply settings as found in scenario manifest.
-    /// Settings here are simply variable setters.
     fn apply_settings(&mut self) {
         for (addr, val) in &self.model.scenario.manifest.settings.clone() {
             let addr = match Address::from_str(&addr) {

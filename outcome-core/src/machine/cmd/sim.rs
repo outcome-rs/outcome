@@ -1,10 +1,9 @@
 use crate::component::Component;
 use crate::entity::Storage;
+use crate::machine::cmd::{CentralExtCommand, Command, CommandResult};
+use crate::machine::{error::Error, LocationInfo};
 use crate::sim::interface::SimInterface;
 use crate::{Address, CompId, Sim};
-
-use super::super::{error::Error, LocationInfo};
-use super::{CentralExtCommand, Command, CommandResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimControl {
@@ -35,9 +34,6 @@ impl SimControl {
             "apply_model" => sim.apply_model().unwrap(),
             _ => (),
         }
-        // println!("{:?}", sim.model.components[0].entity_type);
-        // println!("{:?}", sim.model.components[1]);
-        // println!("{:?}", sim.entities.iter().nth(24425).unwrap().1.storage);
         Ok(())
     }
 }

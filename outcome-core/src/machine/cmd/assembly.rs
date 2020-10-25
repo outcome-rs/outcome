@@ -7,7 +7,6 @@ use shlex::Shlex;
 
 use crate::address::Address;
 use crate::entity::Storage;
-// use crate::error::Error;
 use crate::model::{ComponentModel, EntityPrefabModel, EventModel, SimModel};
 use crate::sim::interface::SimInterface;
 use crate::sim::Sim;
