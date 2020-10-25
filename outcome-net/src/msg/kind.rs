@@ -175,7 +175,7 @@ pub struct SimDataPack {
     pub bool_grids: HashMap<String, Vec<Vec<bool>>>,
 }
 impl SimDataPack {
-    pub fn new() -> SimDataPack {
+    pub fn empty() -> SimDataPack {
         SimDataPack {
             strings: HashMap::new(),
             ints: HashMap::new(),

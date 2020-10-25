@@ -401,7 +401,7 @@ pub fn handle_data_transfer_request(
             // return Ok(());
         }
     };
-    let mut data_pack = SimDataPack::new();
+    let mut data_pack = SimDataPack::empty();
     let sim_instance = match &server.sim {
         SimConnection::Local(s) => s,
         SimConnection::ClusterCoord(c) => unimplemented!(),

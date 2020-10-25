@@ -265,7 +265,7 @@ pub fn handle_data_transfer_request(
     server_arc: Arc<Mutex<Worker>>,
 ) -> Result<()> {
     let dtr: DataTransferRequest = unpack_payload(&payload, false, None)?;
-    let mut data_pack = SimDataPack::new();
+    let mut data_pack = SimDataPack::empty();
     let mut server = server_arc.lock().unwrap();
     match dtr.transfer_type.as_str() {
         "Full" => {

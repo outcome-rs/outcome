@@ -325,7 +325,11 @@ pub fn start(mut sim_driver: SimDriver, config_path: &str) -> io::Result<()> {
                                 }
                             }
                         }
-                        _ => unimplemented!(),
+                        SimDriver::Remote(client) => {
+                            let data = client.get_vars();
+                            // TODO proper formatting
+                            println!("{:?}", data);
+                        }
                     },
                     // Write an uncompressed snapshot to disk.
                     "snap" => {

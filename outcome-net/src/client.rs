@@ -1,6 +1,6 @@
 use crate::msg::{
-    Message, RegisterClientRequest, RegisterClientResponse, StatusRequest, StatusResponse,
-    TurnAdvanceRequest,
+    DataTransferRequest, DataTransferResponse, Message, RegisterClientRequest,
+    RegisterClientResponse, SimDataPack, StatusRequest, StatusResponse, TurnAdvanceRequest,
 };
 use crate::transport::{ClientDriverInterface, SocketInterface};
 use crate::ClientDriver;
@@ -99,14 +99,6 @@ impl Client {
         self.driver.send(req_msg)?;
         println!("sent server status request to server");
         let msg = self.driver.read()?;
-        //let mut msg;
-        //loop {
-        //if let Ok(_m) = self.driver.try_read() {
-        //msg = _m;
-        //} else {
-        //continue;
-        //}
-        //}
         let resp: StatusResponse = msg.unpack_payload()?;
         let mut out_map = HashMap::new();
         out_map.insert("uptime".to_string(), format!("{}", resp.uptime));
@@ -129,7 +121,19 @@ impl Client {
         unimplemented!();
     }
 
-    pub fn get_vars_of_type(&self) -> Result<()> {
-        unimplemented!();
+    pub fn get_vars(&self) -> Result<SimDataPack> {
+        let msg = Message::from_payload(
+            DataTransferRequest {
+                transfer_type: "Full".to_string(),
+                selection: vec![],
+            },
+            false,
+        )?;
+        self.driver.send(msg)?;
+        let resp: DataTransferResponse = self.driver.read()?.unpack_payload()?;
+        if let Some(data_pack) = resp.data {
+            return Ok(data_pack);
+        }
+        Ok(SimDataPack::empty())
     }
 }
