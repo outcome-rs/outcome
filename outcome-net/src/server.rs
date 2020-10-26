@@ -81,7 +81,7 @@ impl Server {
         Ok(Server {
             name: "".to_string(),
             description: "".to_string(),
-            address: "".to_string(),
+            address: my_addr.split(":").collect::<Vec<&str>>()[0].to_string(),
             clients: HashMap::new(),
             driver: ServerDriver::new(my_addr)?,
             use_auth: false,
@@ -148,7 +148,7 @@ impl Server {
         let msg = self.driver.greeter.try_read()?;
         let req: RegisterClientRequest = msg.unpack_payload()?;
         self.driver.port_count += 1;
-        let newport = format!("127.0.0.1:{}", self.driver.port_count);
+        let newport = format!("{}:{}", self.address, self.driver.port_count);
         println!("newport: {}", newport);
         let mut client_socket = self.driver.new_connection()?;
         client_socket.bind(&newport)?;

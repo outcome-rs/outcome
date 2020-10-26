@@ -73,6 +73,7 @@ impl Client {
     /// Registration
     pub fn connect(&mut self, addr: String, password: Option<String>) -> Result<()> {
         // let my_addr = self.driver.my_addr();
+        println!("public_addr: {:?}", self.public_addr);
         let msg = Message::from_payload(
             RegisterClientRequest {
                 name: self.name.clone(),
