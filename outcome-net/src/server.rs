@@ -20,7 +20,7 @@ use crate::transport::{ServerDriverInterface, SocketInterface};
 use crate::{Coord, PairSocket, ServerDriver, Worker};
 
 use crate::{error::Error, Result};
-use std::thread::sleep;
+use std::thread::{current, sleep};
 use zmq::PollEvents;
 
 pub const SERVER_ADDRESS: &str = "0.0.0.0:9124";
@@ -63,7 +63,7 @@ pub struct Server {
     /// Entry point for incoming connections
     driver: ServerDriver,
 
-    /// Whether the server uses a password to authorize connecting clients
+    /// Ues a password to authorize connecting clients
     pub use_auth: bool,
     /// Passwords used for new client authorization
     pub passwd_list: Vec<String>,
@@ -71,12 +71,9 @@ pub struct Server {
     /// Connection point with the simulation
     pub sim: SimConnection,
 
-    /// Uptime in seconds.
-    pub uptime: f32,
-    /// Time since last message
-    pub time_since_last_msg: f32,
-
-    /// Use lz4 compression for all messages if true.
+    /// Uptime in milliseconds
+    pub uptime: usize,
+    /// Compress outgoing messages
     pub use_compression: bool,
 }
 impl Server {
@@ -90,8 +87,8 @@ impl Server {
             use_auth: false,
             passwd_list: vec![],
             sim,
-            uptime: 0.0,
-            time_since_last_msg: 0.0,
+            uptime: 0,
+            // time_since_last_msg: HashMap::new(),
             use_compression: false,
         })
     }
@@ -147,9 +144,6 @@ impl Server {
     }
 }
 impl Server {
-    // pub fn accept_client(&mut self) -> Result<(u32, Message)> {
-    //     self.driver.accept()
-    // }
     pub fn try_accept_client(&mut self, redirect: bool) -> Result<(u32, PairSocket)> {
         let msg = self.driver.greeter.try_read()?;
         let req: RegisterClientRequest = msg.unpack_payload()?;
@@ -170,12 +164,12 @@ impl Server {
             .greeter
             .send(Message::from_payload(resp, false)?)?;
         println!("responded to client: {}", self.driver.port_count);
-
+        println!("client is blocking? {}", req.is_blocking);
         let client = Client {
             id: self.driver.port_count,
             addr: "".to_string(),
             // connection: client_socket.clone(),
-            is_blocking: false,
+            is_blocking: req.is_blocking,
             event_trigger: "".to_string(),
             passwd: "".to_string(),
             name: "".to_string(),
@@ -184,32 +178,59 @@ impl Server {
                 _ => unimplemented!(),
             },
         };
+
         self.clients.insert(self.driver.port_count, client);
         Ok((self.driver.port_count, client_socket))
     }
+
     /// Handle new client connection.
+    ///
+    /// # Idle Timeout
+    ///
+    /// `idle_timeout` argument specifies the time after which client is
+    /// dropped if there are not messages being received. `None` means idle
+    /// client will not get dropped.
     pub fn handle_new_client_connection(
         server: Arc<Mutex<Server>>,
         client_id: &ClientId,
         client_socket: &mut PairSocket,
+        idle_timeout: Option<usize>,
     ) -> Result<()> {
-        // let _server = server.clone();
+        let mut timeout_counter = 0;
         loop {
-            // println!("start loop");
             // sleep a little to make this thread less expensive
-            // sleep(Duration::from_millis(10));
-            let msg = match client_socket.read() {
+            sleep(Duration::from_millis(10));
+
+            let msg = match client_socket.try_read() {
                 Ok(m) => m,
-                Err(e) => {
-                    // println!("{:?}", e);
-                    continue;
-                }
+                Err(e) => match e {
+                    Error::WouldBlock => {
+                        if let Some(t) = idle_timeout {
+                            if timeout_counter > t {
+                                break;
+                            } else {
+                                timeout_counter += 10;
+                            }
+                        };
+                        continue;
+                    }
+                    Error::HostUnreachable => {
+                        println!("{:?}", e);
+                        break;
+                    }
+                    _ => unimplemented!(),
+                },
             };
-            println!("about to handle");
+
+            // got a new message, reset the timeout counter
+            timeout_counter = 0;
             handle_message(msg, &server, client_id, client_socket)?;
         }
-        // TODO
-        // stream.shutdown(Shutdown::Both);
+
+        // drop client
+        println!("dropping client {}!", client_id);
+        server.lock().unwrap().clients.remove(client_id);
+        Ok(())
     }
 }
 pub struct MsgChannel {
@@ -255,7 +276,6 @@ fn handle_message(
     client_conn: &PairSocket,
 ) -> Result<()> {
     let mut server = server.lock().unwrap();
-    server.time_since_last_msg = 0.0;
     let payload = msg.payload.clone();
     match msg.kind.as_str() {
         // TODO enabling compression for incoming requests would require
@@ -281,7 +301,8 @@ fn handle_message(
         // LOAD_REMOTE_SCENARIO_REQUEST => {
         //     handle_load_remote_scenario_request(payload, server_arc, client_id)
         // }
-        _ => (),
+        HEARTBEAT => (),
+        _ => println!("unknown message type: {}", msg.kind.as_str()),
     }
     println!("handled message: {}", &msg.kind);
     drop(server);
@@ -686,7 +707,9 @@ pub fn handle_data_transfer_request(
     //     println!("sent DataTransferResponse ({} KB)", ms as f32 / 1000.0);
     // }
 }
+
 fn handle_single_address(server: &Server) {}
+
 pub fn handle_data_pull_request(
     payload: Vec<u8>,
     server: &mut Server,
@@ -781,9 +804,12 @@ pub fn handle_turn_advance_request(
         for (id, client) in &mut server.clients {
             if &client.id == client_id {
                 println!(
-                    "client.furthest_tick: {}, current_tick: {}",
-                    client.furthest_tick, current_tick
+                    "({}) furthest_tick: {}, current_tick: {}",
+                    client.id, client.furthest_tick, current_tick
                 );
+                if client.furthest_tick < current_tick {
+                    client.furthest_tick = current_tick;
+                }
                 if client.furthest_tick - current_tick < req.tick_count as usize {
                     client.furthest_tick = client.furthest_tick + req.tick_count as usize;
                 }

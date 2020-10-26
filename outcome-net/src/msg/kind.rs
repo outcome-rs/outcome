@@ -1,6 +1,16 @@
 use crate::msg::Payload;
 use std::collections::HashMap;
 
+/// One-way heartbeat message.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Heartbeat {}
+pub(crate) const HEARTBEAT: &str = "Heartbeat";
+impl Payload for Heartbeat {
+    fn kind_str(&self) -> &str {
+        HEARTBEAT
+    }
+}
+
 /// Requests a simple `PingResponse` message. Can be used to check
 /// the connection to the server.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -50,7 +60,7 @@ pub struct StatusResponse {
     pub address: String,
     pub connected_clients: Vec<String>,
     pub endgame_version: String,
-    pub uptime: f32,
+    pub uptime: usize,
     pub current_tick: usize,
 
     pub scenario_name: String,

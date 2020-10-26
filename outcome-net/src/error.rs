@@ -14,6 +14,7 @@ pub enum Error {
     HostUnreachable,
     #[error("other: {0}")]
     Other(String),
+
     #[error("data store disconnected")]
     Disconnect(#[from] std::io::Error),
 

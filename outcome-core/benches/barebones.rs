@@ -18,8 +18,8 @@ fn add_entity(c: &mut Criterion) {
         b.iter(|| {
             for n in 0..100 {
                 sim.spawn_entity(
-                    &StringId::from("bench_ent").unwrap(),
-                    &StringId::from(&format!("ent_{}", n)).unwrap(),
+                    Some(&StringId::from("bench_ent").unwrap()),
+                    StringId::from(&format!("ent_{}", n)).unwrap(),
                 );
             }
         })

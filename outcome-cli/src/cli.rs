@@ -568,17 +568,18 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     loop {
         thread::sleep(Duration::from_millis(100));
         let mut server_guard = server.lock().unwrap();
-        server_guard.uptime += 0.1;
-        server_guard.time_since_last_msg += 0.1;
-        if keep_alive_secs != -1.0 && server_guard.time_since_last_msg >= keep_alive_secs {
-            println!(
-                "no activity for {} seconds, terminating",
-                keep_alive_secs as u32
-            );
-            drop(server_guard);
-            break;
-        }
-        //println!("trying to accept client..");
+        server_guard.uptime += 100;
+        // TODO keepalive mechanism
+        // server_guard.time_since_last_msg += 100;
+        // if keep_alive_secs != -1.0 && server_guard.time_since_last_msg >= keep_alive_secs {
+        //     println!(
+        //         "no activity for {} seconds, terminating",
+        //         keep_alive_secs as u32
+        //     );
+        //     drop(server_guard);
+        //     break;
+        // }
+
         let (client_id, mut client_socket) = match server_guard.try_accept_client(true) {
             Ok(cc) => cc,
             Err(e) => {
@@ -590,7 +591,13 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
 
         let server_clone = Arc::clone(&server);
         thread::spawn(move || {
-            Server::handle_new_client_connection(server_clone, &client_id, &mut client_socket);
+            Server::handle_new_client_connection(
+                server_clone,
+                &client_id,
+                &mut client_socket,
+                Some(2000),
+                // None,
+            );
             // serv.lock().unwrap().prune_clients();
         });
         // match listener.accept() {
@@ -616,9 +623,11 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
 fn start_client(matches: &ArgMatches) -> Result<()> {
     let mut client = outcome_net::Client::new(
         matches.value_of("name").unwrap_or("cli-client"),
-        matches.value_of("compress").is_some(),
-        matches.value_of("blocking").is_some(),
+        matches.is_present("blocking"),
+        matches.is_present("compress"),
         matches.value_of("public-addr").map(|s| s.to_string()),
+        // TODO
+        Some(1000),
     )?;
     println!("created new client");
     client.connect(

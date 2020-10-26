@@ -18,12 +18,13 @@ mod remote;
 #[cfg(feature = "img_print")]
 mod img_print;
 
-use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::{fs, thread};
 
+use anyhow::Result;
 use linefeed::inputrc::parse_text;
 use linefeed::{Interface, Prompter, ReadResult};
 use outcome::{Address, Sim, SimModel};
@@ -158,7 +159,7 @@ pub enum SimDriver {
 }
 
 /// Entry point for the interactive interface.
-pub fn start(mut sim_driver: SimDriver, config_path: &str) -> io::Result<()> {
+pub fn start(mut sim_driver: SimDriver, config_path: &str) -> Result<()> {
     let interface = Arc::new(Interface::new("interactive")?);
     let driver_arc = Arc::new(Mutex::new(sim_driver));
     //interface.set_completer(Arc::new(MainCompleter));
@@ -532,6 +533,12 @@ show_list               {show_list}
         }
     }
 
+    if let SimDriver::Remote(client) = &mut driver_arc.lock().unwrap().deref_mut() {
+        println!("Disconnecting...");
+        client.disconnect();
+        thread::sleep(Duration::from_millis(500));
+    }
+
     println!("Leaving interactive mode.");
 
     Ok(())
@@ -546,12 +553,8 @@ pub fn create_prompt(driver: &SimDriver, cfg: &Config) -> String {
 
 static APP_COMMANDS: &[(&str, &str)] = &[
     ("run", "Run a number of simulation ticks (hours), takes in an integer number"),
-//    ("run-until", "Run continuously until the specified tick is reached, \
-//        takes in a date-time formatted either as \"DD-MM-YYYY\" or \"DD-MM-YYYY hh:mm\""),
     ("runf", "Similar to `run` but doesn't listen to interupt signals, `f` stands for \"fast\" \
         (it's faster, but you will have to wait until it's finished processing)"),
-//    ("runf-until", "Similar to `run-until` but doesn't listen to interupt signals \
-//        (it's faster, but you will have to wait until it's finished processing)"),
     ("test", "Run quick mem+proc test. Takes in a number of secs to run the average processing speed test (default=2)"),
     ("ls", "List simple variables (no lists or grids). Takes in a string argument, returns only vars that contain that string in their address"),
     ("snap", "Export current sim state to snapshot file. Takes a path to target file, relative to where endgame is running."),

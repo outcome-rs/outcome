@@ -41,6 +41,10 @@ impl ClientDriver {
         self.conn.connect(&tcp_endpoint(addr))?;
         Ok(())
     }
+    pub fn disconnect(&self) -> Result<()> {
+        self.conn.disconnect("")?;
+        Ok(())
+    }
     pub fn try_read(&self) -> Result<Message> {
         let id = self.conn.recv_bytes(zmq::DONTWAIT)?;
         let msg = self.conn.recv_bytes(0).unwrap();
@@ -95,7 +99,9 @@ impl SocketInterface for PairSocket {
     }
     fn try_read(&self) -> Result<Message> {
         // println!("reading");
-        let poll = self.inner.poll(PollEvents::POLLIN, 1)?;
+        let events = self.inner.get_events().unwrap();
+        // if events.contains()
+        let poll = self.inner.poll(PollEvents::POLLIN, 0)?;
 
         if poll == 0 {
             return Err(Error::WouldBlock);
