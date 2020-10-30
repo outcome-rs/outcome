@@ -1,4 +1,4 @@
-//! Defines all the available variable types and their transformations.
+//! Variable types and their transformations.
 
 use std::fmt;
 
@@ -49,12 +49,14 @@ pub enum VarType {
     FloatGrid,
     BoolGrid,
 }
+
 impl fmt::Display for VarType {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
         write!(formatter, "{}", self.to_str())
     }
 }
-/// List of all possible types of values.
+
+/// List of all possible variable types.
 pub static VAR_TYPES: &[&str; 12] = &[
     STR_VAR_TYPE_NAME,
     INT_VAR_TYPE_NAME,
@@ -69,7 +71,9 @@ pub static VAR_TYPES: &[&str; 12] = &[
     FLOAT_GRID_VAR_TYPE_NAME,
     BOOL_GRID_VAR_TYPE_NAME,
 ];
+
 impl VarType {
+    /// Creates new `VarType` from str.
     pub fn from_str(s: &str) -> Option<VarType> {
         let var_type = match s {
             STR_VAR_TYPE_NAME | STR_VAR_TYPE_NAME_ALT => VarType::Str,
@@ -88,6 +92,8 @@ impl VarType {
         };
         Some(var_type)
     }
+
+    /// Creates new `VarType` from str. Panics on invalid input.
     pub fn from_str_unchecked(s: &str) -> VarType {
         let var_type = match s {
             STR_VAR_TYPE_NAME | STR_VAR_TYPE_NAME_ALT => VarType::Str,
@@ -106,10 +112,8 @@ impl VarType {
         };
         var_type
     }
-    pub fn from_string(string: String) -> Option<VarType> {
-        VarType::from_str(string.as_str())
-    }
-    /// Get the name of the VarType.
+
+    /// Returns string literal name of the `VarType`.
     pub fn to_str(&self) -> &str {
         match self {
             VarType::Str => STR_VAR_TYPE_NAME,
@@ -127,20 +131,20 @@ impl VarType {
         }
     }
 
-    /// Get default value as string.
-    pub fn default_value_str(&self) -> String {
+    /// Get default value of the `VarType`.
+    pub fn default_value(&self) -> Var {
         match self {
-            VarType::Str => DEFAULT_STR_VALUE.to_string(),
-            VarType::Int => DEFAULT_INT_VALUE.to_string(),
-            VarType::Float => DEFAULT_FLOAT_VALUE.to_string(),
-            VarType::Bool => DEFAULT_BOOL_VALUE.to_string(),
+            VarType::Str => Var::Str(DEFAULT_STR_VALUE.to_string()),
+            VarType::Int => Var::Int(DEFAULT_INT_VALUE),
+            VarType::Float => Var::Float(DEFAULT_FLOAT_VALUE),
+            VarType::Bool => Var::Bool(DEFAULT_BOOL_VALUE),
             // TODO implement other var types
-            _ => "err".to_string(),
+            _ => unimplemented!(),
         }
     }
 }
 
-/// Abstraction over all possible values.
+/// Abstraction over all available variables.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Var {
     Str(String),
@@ -156,6 +160,7 @@ pub enum Var {
     FloatGrid(Vec<Vec<f32>>),
     BoolGrid(Vec<Vec<bool>>),
 }
+
 /// Type-strict `is_type` checkers.
 impl Var {
     pub fn is_str(&self) -> bool {
@@ -164,66 +169,77 @@ impl Var {
             _ => false,
         }
     }
+
     pub fn is_int(&self) -> bool {
         match self {
             Var::Int(_) => true,
             _ => false,
         }
     }
+
     pub fn is_float(&self) -> bool {
         match self {
             Var::Float(_) => true,
             _ => false,
         }
     }
+
     pub fn is_bool(&self) -> bool {
         match self {
             Var::Bool(_) => true,
             _ => false,
         }
     }
+
     pub fn is_str_list(&self) -> bool {
         match self {
             Var::StrList(_) => true,
             _ => false,
         }
     }
+
     pub fn is_int_list(&self) -> bool {
         match self {
             Var::IntList(_) => true,
             _ => false,
         }
     }
+
     pub fn is_float_list(&self) -> bool {
         match self {
             Var::FloatList(_) => true,
             _ => false,
         }
     }
+
     pub fn is_bool_list(&self) -> bool {
         match self {
             Var::BoolList(_) => true,
             _ => false,
         }
     }
+
     pub fn is_str_grid(&self) -> bool {
         match self {
             Var::StrGrid(_) => true,
             _ => false,
         }
     }
+
     pub fn is_int_grid(&self) -> bool {
         match self {
             Var::IntGrid(_) => true,
             _ => false,
         }
     }
+
     pub fn is_float_grid(&self) -> bool {
         match self {
             Var::FloatGrid(_) => true,
             _ => false,
         }
     }
+
     pub fn is_bool_grid(&self) -> bool {
         match self {
             Var::BoolGrid(_) => true,
@@ -231,6 +247,7 @@ impl Var {
         }
     }
 }
+
 /// Type-strict `as_type` getters.
 impl Var {
     pub fn as_str(&self) -> Option<&String> {
@@ -239,138 +256,161 @@ impl Var {
             _ => None,
         }
     }
+
     pub fn as_str_mut(&mut self) -> Option<&mut String> {
         match self {
             Var::Str(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_int(&self) -> Option<&i32> {
         match self {
             Var::Int(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_int_mut(&mut self) -> Option<&mut i32> {
         match self {
             Var::Int(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_float(&self) -> Option<&f32> {
         match self {
             Var::Float(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_float_mut(&mut self) -> Option<&mut f32> {
         match self {
             Var::Float(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_bool(&self) -> Option<&bool> {
         match self {
             Var::Bool(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_bool_mut(&mut self) -> Option<&mut bool> {
         match self {
             Var::Bool(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_str_list(&self) -> Option<&Vec<String>> {
         match self {
             Var::StrList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_str_list_mut(&mut self) -> Option<&mut Vec<String>> {
         match self {
             Var::StrList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_int_list(&self) -> Option<&Vec<i32>> {
         match self {
             Var::IntList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_int_list_mut(&mut self) -> Option<&mut Vec<i32>> {
         match self {
             Var::IntList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_float_list(&self) -> Option<&Vec<f32>> {
         match self {
             Var::FloatList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_float_list_mut(&mut self) -> Option<&mut Vec<f32>> {
         match self {
             Var::FloatList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_bool_list(&self) -> Option<&Vec<bool>> {
         match self {
             Var::BoolList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_bool_list_mut(&mut self) -> Option<&mut Vec<bool>> {
         match self {
             Var::BoolList(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_str_grid(&self) -> Option<&Vec<Vec<String>>> {
         match self {
             Var::StrGrid(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_str_grid_mut(&mut self) -> Option<&mut Vec<Vec<String>>> {
         match self {
             Var::StrGrid(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_int_grid(&self) -> Option<&Vec<Vec<i32>>> {
         match self {
             Var::IntGrid(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_int_grid_mut(&mut self) -> Option<&mut Vec<Vec<i32>>> {
         match self {
             Var::IntGrid(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_float_grid(&self) -> Option<&Vec<Vec<f32>>> {
         match self {
             Var::FloatGrid(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_float_grid_mut(&mut self) -> Option<&mut Vec<Vec<f32>>> {
         match self {
             Var::FloatGrid(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_bool_grid(&self) -> Option<&Vec<Vec<bool>>> {
         match self {
             Var::BoolGrid(v) => Some(v),
             _ => None,
         }
     }
+
     pub fn as_bool_grid_mut(&mut self) -> Option<&mut Vec<Vec<bool>>> {
         match self {
             Var::BoolGrid(v) => Some(v),
@@ -416,6 +456,7 @@ impl Var {
             }
         }
     }
+
     pub fn to_string(&self) -> String {
         match self {
             Var::Str(v) => v.clone(),
@@ -432,6 +473,7 @@ impl Var {
             Var::BoolGrid(v) => format!("{:?}", v),
         }
     }
+
     pub fn to_int(&self) -> i32 {
         match self {
             Var::Str(v) => v.len() as i32,
@@ -454,6 +496,7 @@ impl Var {
             Var::BoolGrid(v) => v.len() as i32,
         }
     }
+
     pub fn to_float(&self) -> f32 {
         match self {
             Var::Str(v) => v.len() as f32,
@@ -476,6 +519,7 @@ impl Var {
             Var::BoolGrid(v) => v.len() as f32,
         }
     }
+
     pub fn to_bool(&self) -> bool {
         let num: i32 = match self {
             Var::Str(v) => v.len() as i32,

@@ -1,4 +1,4 @@
-//! Defines entity structure related functionality.
+//! Entity structure related definitions.
 
 mod storage;
 pub use self::storage::Storage;

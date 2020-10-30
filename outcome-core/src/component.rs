@@ -1,4 +1,4 @@
-//! Provides component related definitions.
+//! Component related definitions.
 
 use crate::{error::Result, model, ShortString, StringId};
 

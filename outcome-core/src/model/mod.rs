@@ -1,4 +1,4 @@
-//! Contains definitions for model objects, as well as logic for turning
+//! Definitions for model contents, as well as logic for turning
 //! deserialized data into model objects.
 //!
 //! `SimModel` object contains a collection of all the model objects as found

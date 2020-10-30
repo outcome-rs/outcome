@@ -1,4 +1,4 @@
-//! Implements runtime's logic execution capability.
+//! Runtime's logic execution capability.
 
 pub mod cmd;
 pub mod error;

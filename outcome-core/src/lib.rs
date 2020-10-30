@@ -144,13 +144,10 @@ pub const FEATURE_MACHINE_COMPLETE: bool = true;
 
 // reexports
 pub use address::Address;
+pub use error::Result;
 pub use model::SimModel;
 pub use sim::Sim;
 pub use var::{Var, VarType};
-
-pub use error::Result;
-
-use arrayvec::ArrayString;
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -167,7 +164,7 @@ const DEFAULT_SCENARIO_MODULE_DEP_VERSION: &str = "*";
 
 #[cfg(feature = "machine")]
 const DEFAULT_INACTIVE_STATE: &str = "idle";
-// #[cfg(feature = "machine")]
+#[cfg(feature = "machine")]
 const DEFAULT_TRIGGER_EVENT: &str = "step";
 
 /// Fixed-size string used internally for indexing objects.
@@ -177,15 +174,23 @@ const DEFAULT_TRIGGER_EVENT: &str = "step";
 /// Default length is 23 characters, but it can be restricted to just
 /// 10 characters using the `short_stringid` feature.
 #[cfg(not(feature = "short_stringid"))]
-pub type StringId = ArrayString<[u8; 23]>;
+pub type StringId = arrayvec::ArrayString<[u8; 23]>;
 #[cfg(feature = "short_stringid")]
 pub type StringId = ArrayString<[u8; 10]>;
 
-pub type ShortString = ArrayString<[u8; 23]>;
-type MedString = ArrayString<[u8; 40]>;
-type LongString = ArrayString<[u8; 100]>;
+/// Short fixed-size string type.
+pub type ShortString = arrayvec::ArrayString<[u8; 23]>;
+/// Medium-length fixed-size string type.
+type MedString = arrayvec::ArrayString<[u8; 40]>;
+/// Long fixed-size string type.
+type LongString = arrayvec::ArrayString<[u8; 100]>;
 
-pub type EntityUid = usize;
+/// Entity identifier type.
 pub type EntityId = StringId;
+/// Component identifier type.
 pub type CompId = StringId;
+/// Event identifier type.
 pub type EventId = StringId;
+
+/// Unique entity identifier type.
+pub type EntityUid = usize;

@@ -1,4 +1,4 @@
-//! Defines common interface for referencing simulation data.
+//! Common interface for referencing simulation data.
 
 use std::str::FromStr;
 

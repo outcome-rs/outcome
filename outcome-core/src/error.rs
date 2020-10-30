@@ -1,4 +1,4 @@
-//! Defines error types.
+//! Error types.
 
 use std::fmt::Display;
 use std::io;

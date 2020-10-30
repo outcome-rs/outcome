@@ -1,4 +1,4 @@
-//! Provides functionality related to distributed storage and computation.
+//! Distributed storage and computation functionality.
 //!
 //! Definitions are kept generic to allow implementation using different
 //! transports and network topographies.

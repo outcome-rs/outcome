@@ -1,13 +1,13 @@
-/// Implements data query system.
-///
-/// # Design
-///
-/// - single query is represented by a `Query` struct
-/// - each `Query` defines a set of restrictions that are
-/// used to narrow down what data should be returned
-/// - processing of a `Query` is not certain to return
-/// data
-///
+//! Data query system.
+//!
+//! # Design
+//!
+//! - single query is represented by a `Query` struct
+//! - each `Query` defines a set of restrictions that are
+//! used to narrow down what data should be returned
+//! - processing of a `Query` is not certain to return
+//! data
+
 use crate::{Address, Sim, StringId, Var};
 
 pub struct Query {

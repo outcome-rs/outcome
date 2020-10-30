@@ -1,4 +1,4 @@
-//! Defines the local simulation abstraction.
+//! Local simulation abstraction.
 
 pub mod interface;
 pub mod step;
