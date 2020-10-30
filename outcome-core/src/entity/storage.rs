@@ -85,25 +85,25 @@ impl Storage {
             _ => None,
         }
     }
-    pub fn get_int(&self, idx: &StorageIndex) -> Option<&i32> {
+    pub fn get_int(&self, idx: &StorageIndex) -> Option<&crate::Int> {
         match self.map.get(&(*idx, VarType::Int))? {
             Var::Int(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_int_mut(&mut self, idx: &StorageIndex) -> Option<&mut i32> {
+    pub fn get_int_mut(&mut self, idx: &StorageIndex) -> Option<&mut crate::Int> {
         match self.map.get_mut(&(*idx, VarType::Int))? {
             Var::Int(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_float(&self, idx: &StorageIndex) -> Option<&f32> {
+    pub fn get_float(&self, idx: &StorageIndex) -> Option<&crate::Float> {
         match self.map.get(&(*idx, VarType::Float))? {
             Var::Float(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_float_mut(&mut self, idx: &StorageIndex) -> Option<&mut f32> {
+    pub fn get_float_mut(&mut self, idx: &StorageIndex) -> Option<&mut crate::Float> {
         match self.map.get_mut(&(*idx, VarType::Float))? {
             Var::Float(s) => Some(s),
             _ => None,
@@ -136,25 +136,25 @@ impl Storage {
             _ => None,
         }
     }
-    pub fn get_int_list(&self, idx: &StorageIndex) -> Option<&Vec<i32>> {
+    pub fn get_int_list(&self, idx: &StorageIndex) -> Option<&Vec<crate::Int>> {
         match self.map.get(&(*idx, VarType::IntList))? {
             Var::IntList(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_int_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<i32>> {
+    pub fn get_int_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<crate::Int>> {
         match self.map.get_mut(&(*idx, VarType::IntList))? {
             Var::IntList(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_float_list(&self, idx: &StorageIndex) -> Option<&Vec<f32>> {
+    pub fn get_float_list(&self, idx: &StorageIndex) -> Option<&Vec<crate::Float>> {
         match self.map.get(&(*idx, VarType::FloatList))? {
             Var::FloatList(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_float_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<f32>> {
+    pub fn get_float_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<crate::Float>> {
         match self.map.get_mut(&(*idx, VarType::FloatList))? {
             Var::FloatList(s) => Some(s),
             _ => None,
@@ -187,25 +187,28 @@ impl Storage {
             _ => None,
         }
     }
-    pub fn get_int_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<i32>>> {
+    pub fn get_int_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<crate::Int>>> {
         match self.map.get(&(*idx, VarType::IntGrid))? {
             Var::IntGrid(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_int_grid_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<Vec<i32>>> {
+    pub fn get_int_grid_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<Vec<crate::Int>>> {
         match self.map.get_mut(&(*idx, VarType::IntGrid))? {
             Var::IntGrid(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_float_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<f32>>> {
+    pub fn get_float_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<crate::Float>>> {
         match self.map.get(&(*idx, VarType::FloatGrid))? {
             Var::FloatGrid(s) => Some(s),
             _ => None,
         }
     }
-    pub fn get_float_grid_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<Vec<f32>>> {
+    pub fn get_float_grid_mut(
+        &mut self,
+        idx: &StorageIndex,
+    ) -> Option<&mut Vec<Vec<crate::Float>>> {
         match self.map.get_mut(&(*idx, VarType::FloatGrid))? {
             Var::FloatGrid(s) => Some(s),
             _ => None,
@@ -243,14 +246,14 @@ impl Storage {
             .map(|((k, _), v)| (k, v.as_str().unwrap()))
             .collect()
     }
-    pub fn get_all_int(&self) -> Vec<(&StorageIndex, &i32)> {
+    pub fn get_all_int(&self) -> Vec<(&StorageIndex, &crate::Int)> {
         self.map
             .iter()
             .filter(|(_, v)| v.is_int())
             .map(|((k, _), v)| (k, v.as_int().unwrap()))
             .collect()
     }
-    pub fn get_all_float(&self) -> Vec<(&StorageIndex, &f32)> {
+    pub fn get_all_float(&self) -> Vec<(&StorageIndex, &crate::Float)> {
         self.map
             .iter()
             .filter(|(_, v)| v.is_float())
@@ -278,28 +281,28 @@ impl Storage {
     //         .map(|(k, v)| (k, v.as_str_list_mut().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_int_list(&self) -> Vec<(&SmallStorageIndex, &Vec<i32>)> {
+    // pub fn get_all_int_list(&self) -> Vec<(&SmallStorageIndex, &Vec<crate::Int>)> {
     //     self.map
     //         .iter()
     //         .filter(|(_, v)| v.is_int_list())
     //         .map(|(k, v)| (k, v.as_int_list().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_int_list_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<i32>)> {
+    // pub fn get_all_int_list_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<crate::Int>)> {
     //     self.map
     //         .iter_mut()
     //         .filter(|(_, v)| v.is_int_list())
     //         .map(|(k, v)| (k, v.as_int_list_mut().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_float_list(&self) -> Vec<(&SmallStorageIndex, &Vec<f32>)> {
+    // pub fn get_all_float_list(&self) -> Vec<(&SmallStorageIndex, &Vec<crate::Float>)> {
     //     self.map
     //         .iter()
     //         .filter(|(_, v)| v.is_float_list())
     //         .map(|(k, v)| (k, v.as_float_list().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_float_list_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<f32>)> {
+    // pub fn get_all_float_list_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<crate::Float>)> {
     //     self.map
     //         .iter_mut()
     //         .filter(|(_, v)| v.is_float_list())
@@ -334,28 +337,28 @@ impl Storage {
     //         .map(|(k, v)| (k, v.as_str_grid_mut().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_int_grid(&self) -> Vec<(&SmallStorageIndex, &Vec<Vec<i32>>)> {
+    // pub fn get_all_int_grid(&self) -> Vec<(&SmallStorageIndex, &Vec<Vec<crate::Int>>)> {
     //     self.map
     //         .iter()
     //         .filter(|(_, v)| v.is_int_grid())
     //         .map(|(k, v)| (k, v.as_int_grid().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_int_grid_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<Vec<i32>>)> {
+    // pub fn get_all_int_grid_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<Vec<crate::Int>>)> {
     //     self.map
     //         .iter_mut()
     //         .filter(|(_, v)| v.is_int_grid())
     //         .map(|(k, v)| (k, v.as_int_grid_mut().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_float_grid(&self) -> Vec<(&SmallStorageIndex, &Vec<Vec<f32>>)> {
+    // pub fn get_all_float_grid(&self) -> Vec<(&SmallStorageIndex, &Vec<Vec<crate::Float>>)> {
     //     self.map
     //         .iter()
     //         .filter(|(_, v)| v.is_float_grid())
     //         .map(|(k, v)| (k, v.as_float_grid().unwrap()))
     //         .collect()
     // }
-    // pub fn get_all_float_grid_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<Vec<f32>>)> {
+    // pub fn get_all_float_grid_mut(&mut self) -> Vec<(&SmallStorageIndex, &mut Vec<Vec<crate::Float>>)> {
     //     self.map
     //         .iter_mut()
     //         .filter(|(_, v)| v.is_float_grid())
@@ -386,14 +389,14 @@ impl Storage {
 //             .map(|((k, _), ref mut v)| (k, v.as_str_mut().as_deref_mut().unwrap()))
 //             .collect()
 //     }
-//     pub fn get_all_int_mut(&mut self) -> Vec<(&StorageIndex, &mut i32)> {
+//     pub fn get_all_int_mut(&mut self) -> Vec<(&StorageIndex, &mut crate::Int)> {
 //         self.map
 //             .iter_mut()
 //             .filter(|(_, v)| v.is_int())
 //             .map(|((k, _), ref mut v)| (k, v.as_int_mut().unwrap()))
 //             .collect()
 //     }
-//     pub fn get_all_float_mut(&mut self) -> Vec<(&StorageIndex, &mut f32)> {
+//     pub fn get_all_float_mut(&mut self) -> Vec<(&StorageIndex, &mut crate::Float)> {
 //         self.map
 //             .iter_mut()
 //             .filter(|(_, v)| v.is_float())
@@ -411,10 +414,10 @@ impl Storage {
 
 /// Type-strict inserts
 impl Storage {
-    pub fn insert_int(&mut self, idx: &StorageIndex, val: i32) {
+    pub fn insert_int(&mut self, idx: &StorageIndex, val: crate::Int) {
         self.map.insert((*idx, VarType::Int), Var::Int(val));
     }
-    pub fn insert_int_list(&mut self, idx: &StorageIndex, val: Vec<i32>) {
+    pub fn insert_int_list(&mut self, idx: &StorageIndex, val: Vec<crate::Int>) {
         self.map.insert((*idx, VarType::Int), Var::IntList(val));
     }
 }

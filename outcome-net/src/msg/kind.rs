@@ -172,16 +172,16 @@ impl Payload for DataTransferResponse {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SimDataPack {
     pub strings: HashMap<String, String>,
-    pub ints: HashMap<String, i32>,
-    pub floats: HashMap<String, f32>,
+    pub ints: HashMap<String, outcome_core::Int>,
+    pub floats: HashMap<String, outcome_core::Float>,
     pub bools: HashMap<String, bool>,
     pub string_lists: HashMap<String, Vec<String>>,
-    pub int_lists: HashMap<String, Vec<i32>>,
-    pub float_lists: HashMap<String, Vec<f32>>,
+    pub int_lists: HashMap<String, Vec<outcome_core::Int>>,
+    pub float_lists: HashMap<String, Vec<outcome_core::Float>>,
     pub bool_lists: HashMap<String, Vec<bool>>,
     pub string_grids: HashMap<String, Vec<Vec<String>>>,
-    pub int_grids: HashMap<String, Vec<Vec<i32>>>,
-    pub float_grids: HashMap<String, Vec<Vec<f32>>>,
+    pub int_grids: HashMap<String, Vec<Vec<outcome_core::Int>>>,
+    pub float_grids: HashMap<String, Vec<Vec<outcome_core::Float>>>,
     pub bool_grids: HashMap<String, Vec<Vec<bool>>>,
 }
 impl SimDataPack {
@@ -207,12 +207,16 @@ impl SimDataPack {
                 self.strings.insert(addr.to_string(), value_str.to_owned());
             }
             outcome::VarType::Int => {
-                self.ints
-                    .insert(addr.to_string(), value_str.parse::<i32>().unwrap());
+                self.ints.insert(
+                    addr.to_string(),
+                    value_str.parse::<outcome_core::Int>().unwrap(),
+                );
             }
             outcome::VarType::Float => {
-                self.floats
-                    .insert(addr.to_string(), value_str.parse::<f32>().unwrap());
+                self.floats.insert(
+                    addr.to_string(),
+                    value_str.parse::<outcome_core::Float>().unwrap(),
+                );
             }
             outcome::VarType::Bool => {
                 self.bools

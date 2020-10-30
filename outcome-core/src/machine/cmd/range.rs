@@ -35,8 +35,8 @@ impl Range {
     ) -> CommandResult {
         // println!("{:?}", self);
         let mut list = Vec::new();
-        let start_int = self.start.parse::<i32>().unwrap();
-        let end_int = self.end.parse::<i32>().unwrap();
+        let start_int = self.start.parse::<crate::Int>().unwrap();
+        let end_int = self.end.parse::<crate::Int>().unwrap();
         // println!("{}, {}", start_int, end_int);
         let mut pointer = start_int;
         for _ in 0..(end_int - start_int) {

@@ -4,8 +4,8 @@ use std::fmt;
 
 // default values for base var types
 const DEFAULT_STR_VALUE: &str = "";
-const DEFAULT_INT_VALUE: i32 = 0;
-const DEFAULT_FLOAT_VALUE: f32 = 0.0;
+const DEFAULT_INT_VALUE: crate::Int = 0;
+const DEFAULT_FLOAT_VALUE: crate::Float = 0.0;
 const DEFAULT_BOOL_VALUE: bool = false;
 
 const STR_VAR_TYPE_NAME: &str = "str";
@@ -148,16 +148,16 @@ impl VarType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Var {
     Str(String),
-    Int(i32),
-    Float(f32),
+    Int(crate::Int),
+    Float(crate::Float),
     Bool(bool),
     StrList(Vec<String>),
-    IntList(Vec<i32>),
-    FloatList(Vec<f32>),
+    IntList(Vec<crate::Int>),
+    FloatList(Vec<crate::Float>),
     BoolList(Vec<bool>),
     StrGrid(Vec<Vec<String>>),
-    IntGrid(Vec<Vec<i32>>),
-    FloatGrid(Vec<Vec<f32>>),
+    IntGrid(Vec<Vec<crate::Int>>),
+    FloatGrid(Vec<Vec<crate::Float>>),
     BoolGrid(Vec<Vec<bool>>),
 }
 
@@ -264,28 +264,28 @@ impl Var {
         }
     }
 
-    pub fn as_int(&self) -> Option<&i32> {
+    pub fn as_int(&self) -> Option<&crate::Int> {
         match self {
             Var::Int(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_int_mut(&mut self) -> Option<&mut i32> {
+    pub fn as_int_mut(&mut self) -> Option<&mut crate::Int> {
         match self {
             Var::Int(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_float(&self) -> Option<&f32> {
+    pub fn as_float(&self) -> Option<&crate::Float> {
         match self {
             Var::Float(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_float_mut(&mut self) -> Option<&mut f32> {
+    pub fn as_float_mut(&mut self) -> Option<&mut crate::Float> {
         match self {
             Var::Float(v) => Some(v),
             _ => None,
@@ -320,28 +320,28 @@ impl Var {
         }
     }
 
-    pub fn as_int_list(&self) -> Option<&Vec<i32>> {
+    pub fn as_int_list(&self) -> Option<&Vec<crate::Int>> {
         match self {
             Var::IntList(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_int_list_mut(&mut self) -> Option<&mut Vec<i32>> {
+    pub fn as_int_list_mut(&mut self) -> Option<&mut Vec<crate::Int>> {
         match self {
             Var::IntList(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_float_list(&self) -> Option<&Vec<f32>> {
+    pub fn as_float_list(&self) -> Option<&Vec<crate::Float>> {
         match self {
             Var::FloatList(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_float_list_mut(&mut self) -> Option<&mut Vec<f32>> {
+    pub fn as_float_list_mut(&mut self) -> Option<&mut Vec<crate::Float>> {
         match self {
             Var::FloatList(v) => Some(v),
             _ => None,
@@ -376,28 +376,28 @@ impl Var {
         }
     }
 
-    pub fn as_int_grid(&self) -> Option<&Vec<Vec<i32>>> {
+    pub fn as_int_grid(&self) -> Option<&Vec<Vec<crate::Int>>> {
         match self {
             Var::IntGrid(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_int_grid_mut(&mut self) -> Option<&mut Vec<Vec<i32>>> {
+    pub fn as_int_grid_mut(&mut self) -> Option<&mut Vec<Vec<crate::Int>>> {
         match self {
             Var::IntGrid(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_float_grid(&self) -> Option<&Vec<Vec<f32>>> {
+    pub fn as_float_grid(&self) -> Option<&Vec<Vec<crate::Float>>> {
         match self {
             Var::FloatGrid(v) => Some(v),
             _ => None,
         }
     }
 
-    pub fn as_float_grid_mut(&mut self) -> Option<&mut Vec<Vec<f32>>> {
+    pub fn as_float_grid_mut(&mut self) -> Option<&mut Vec<Vec<crate::Float>>> {
         match self {
             Var::FloatGrid(v) => Some(v),
             _ => None,
@@ -424,11 +424,11 @@ impl Var {
         match target_type {
             Some(tt) => match tt {
                 VarType::Str => Some(Var::Str(string.to_string())),
-                VarType::Int => match string.parse::<i32>() {
+                VarType::Int => match string.parse::<crate::Int>() {
                     Ok(p) => Some(Var::Int(p)),
                     Err(_) => None,
                 },
-                VarType::Float => match string.parse::<f32>() {
+                VarType::Float => match string.parse::<crate::Float>() {
                     Ok(p) => Some(Var::Float(p)),
                     Err(_) => None,
                 },
@@ -448,7 +448,7 @@ impl Var {
                 } else if string == "true" || string == "false" {
                     return Some(Var::Bool(string.parse::<bool>().unwrap()));
                 } else {
-                    match string.parse::<i32>() {
+                    match string.parse::<crate::Int>() {
                         Ok(i) => return Some(Var::Int(i)),
                         Err(e) => return None,
                     }
@@ -474,11 +474,11 @@ impl Var {
         }
     }
 
-    pub fn to_int(&self) -> i32 {
+    pub fn to_int(&self) -> crate::Int {
         match self {
-            Var::Str(v) => v.len() as i32,
+            Var::Str(v) => v.len() as crate::Int,
             Var::Int(v) => *v,
-            Var::Float(v) => *v as i32,
+            Var::Float(v) => *v as crate::Int,
             Var::Bool(v) => {
                 if *v {
                     1
@@ -486,21 +486,21 @@ impl Var {
                     0
                 }
             }
-            Var::StrList(v) => v.len() as i32,
-            Var::IntList(v) => v.len() as i32,
-            Var::FloatList(v) => v.len() as i32,
-            Var::BoolList(v) => v.len() as i32,
-            Var::StrGrid(v) => v.len() as i32,
-            Var::IntGrid(v) => v.len() as i32,
-            Var::FloatGrid(v) => v.len() as i32,
-            Var::BoolGrid(v) => v.len() as i32,
+            Var::StrList(v) => v.len() as crate::Int,
+            Var::IntList(v) => v.len() as crate::Int,
+            Var::FloatList(v) => v.len() as crate::Int,
+            Var::BoolList(v) => v.len() as crate::Int,
+            Var::StrGrid(v) => v.len() as crate::Int,
+            Var::IntGrid(v) => v.len() as crate::Int,
+            Var::FloatGrid(v) => v.len() as crate::Int,
+            Var::BoolGrid(v) => v.len() as crate::Int,
         }
     }
 
-    pub fn to_float(&self) -> f32 {
+    pub fn to_float(&self) -> crate::Float {
         match self {
-            Var::Str(v) => v.len() as f32,
-            Var::Int(v) => *v as f32,
+            Var::Str(v) => v.len() as crate::Float,
+            Var::Int(v) => *v as crate::Float,
             Var::Float(v) => *v,
             Var::Bool(v) => {
                 if *v {
@@ -509,31 +509,31 @@ impl Var {
                     0.0
                 }
             }
-            Var::StrList(v) => v.len() as f32,
-            Var::IntList(v) => v.len() as f32,
-            Var::FloatList(v) => v.len() as f32,
-            Var::BoolList(v) => v.len() as f32,
-            Var::StrGrid(v) => v.len() as f32,
-            Var::IntGrid(v) => v.len() as f32,
-            Var::FloatGrid(v) => v.len() as f32,
-            Var::BoolGrid(v) => v.len() as f32,
+            Var::StrList(v) => v.len() as crate::Float,
+            Var::IntList(v) => v.len() as crate::Float,
+            Var::FloatList(v) => v.len() as crate::Float,
+            Var::BoolList(v) => v.len() as crate::Float,
+            Var::StrGrid(v) => v.len() as crate::Float,
+            Var::IntGrid(v) => v.len() as crate::Float,
+            Var::FloatGrid(v) => v.len() as crate::Float,
+            Var::BoolGrid(v) => v.len() as crate::Float,
         }
     }
 
     pub fn to_bool(&self) -> bool {
-        let num: i32 = match self {
-            Var::Str(v) => v.len() as i32,
+        let num: crate::Int = match self {
+            Var::Str(v) => v.len() as crate::Int,
             Var::Int(v) => *v,
-            Var::Float(v) => *v as i32,
+            Var::Float(v) => *v as crate::Int,
             Var::Bool(v) => return *v,
-            Var::StrList(v) => v.len() as i32,
-            Var::IntList(v) => v.len() as i32,
-            Var::FloatList(v) => v.len() as i32,
-            Var::BoolList(v) => v.len() as i32,
-            Var::StrGrid(v) => v.len() as i32,
-            Var::IntGrid(v) => v.len() as i32,
-            Var::FloatGrid(v) => v.len() as i32,
-            Var::BoolGrid(v) => v.len() as i32,
+            Var::StrList(v) => v.len() as crate::Int,
+            Var::IntList(v) => v.len() as crate::Int,
+            Var::FloatList(v) => v.len() as crate::Int,
+            Var::BoolList(v) => v.len() as crate::Int,
+            Var::StrGrid(v) => v.len() as crate::Int,
+            Var::IntGrid(v) => v.len() as crate::Int,
+            Var::FloatGrid(v) => v.len() as crate::Int,
+            Var::BoolGrid(v) => v.len() as crate::Int,
         };
         match num {
             0 => false,

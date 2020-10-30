@@ -167,6 +167,19 @@ const DEFAULT_INACTIVE_STATE: &str = "idle";
 #[cfg(feature = "machine")]
 const DEFAULT_TRIGGER_EVENT: &str = "step";
 
+/// Floating point numer type used throughout the library.
+#[cfg(feature = "small_nums")]
+pub type Float = f32;
+/// Floating point numer type used throughout the library.
+#[cfg(not(feature = "small_nums"))]
+pub type Float = f64;
+/// Integer number type used throughout the library.
+#[cfg(feature = "small_nums")]
+pub type Int = i32;
+/// Integer number type used throughout the library.
+#[cfg(not(feature = "small_nums"))]
+pub type Int = i64;
+
 /// Fixed-size string used internally for indexing objects.
 ///
 /// # Length
@@ -175,6 +188,7 @@ const DEFAULT_TRIGGER_EVENT: &str = "step";
 /// 10 characters using the `short_stringid` feature.
 #[cfg(not(feature = "short_stringid"))]
 pub type StringId = arrayvec::ArrayString<[u8; 23]>;
+/// Fixed-size string used internally for indexing objects.
 #[cfg(feature = "short_stringid")]
 pub type StringId = ArrayString<[u8; 10]>;
 

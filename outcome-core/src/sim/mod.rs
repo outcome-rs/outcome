@@ -306,7 +306,7 @@ impl Sim {
     }
 
     /// Get any var by absolute address and coerce it to integer.
-    pub fn get_as_int(&self, addr: &Address) -> Option<i32> {
+    pub fn get_as_int(&self, addr: &Address) -> Option<crate::Int> {
         if let Some(var) = self.get_var(addr) {
             return Some(var.to_int());
         }
@@ -361,7 +361,7 @@ impl Sim {
     }
     /// Get a reference to `Int` variable from the sim using
     /// an absolute address.
-    pub fn get_int(&self, addr: &Address) -> Option<&i32> {
+    pub fn get_int(&self, addr: &Address) -> Option<&crate::Int> {
         if let Some(entity) = self
             .entities
             .get(self.entities_idx.get(&addr.entity).unwrap())
@@ -372,7 +372,7 @@ impl Sim {
     }
     /// Get a mut reference to `Int` variable from the sim
     /// using an absolute address.
-    pub fn get_int_mut(&mut self, addr: &Address) -> Option<&mut i32> {
+    pub fn get_int_mut(&mut self, addr: &Address) -> Option<&mut crate::Int> {
         if let Some(entity) = self
             .entities
             .get_mut(self.entities_idx.get(&addr.entity).unwrap())
@@ -383,7 +383,7 @@ impl Sim {
     }
     /// Get a reference to `Float` variable from the sim
     /// using an absolute address.
-    pub fn get_float(&self, addr: &Address) -> Option<&f32> {
+    pub fn get_float(&self, addr: &Address) -> Option<&crate::Float> {
         if let Some(entity) = self
             .entities
             .get(self.entities_idx.get(&addr.entity).unwrap())
@@ -394,7 +394,7 @@ impl Sim {
     }
     /// Get a mut reference to `Float` variable from the sim
     /// using an absolute address.
-    pub fn get_float_mut(&mut self, addr: &Address) -> Option<&mut f32> {
+    pub fn get_float_mut(&mut self, addr: &Address) -> Option<&mut crate::Float> {
         if let Some(entity) = self
             .entities
             .get_mut(self.entities_idx.get(&addr.entity).unwrap())
@@ -449,7 +449,7 @@ impl Sim {
     }
     /// Get a reference to `IntList` variable from the sim
     /// using an absolute address.
-    pub fn get_int_list(&self, addr: &Address) -> Option<&Vec<i32>> {
+    pub fn get_int_list(&self, addr: &Address) -> Option<&Vec<crate::Int>> {
         if let Some(entity) = self
             .entities
             .get(self.entities_idx.get(&addr.entity).unwrap())
@@ -460,7 +460,7 @@ impl Sim {
     }
     /// Get a mut reference to `IntList` variable from the
     /// sim using an absolute address.
-    pub fn get_int_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<i32>> {
+    pub fn get_int_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<crate::Int>> {
         if let Some(entity) = self
             .entities
             .get_mut(self.entities_idx.get(&addr.entity).unwrap())
@@ -471,7 +471,7 @@ impl Sim {
     }
     /// Get a reference to `FloatList` variable from the sim
     /// using an absolute address.
-    pub fn get_float_list(&self, addr: &Address) -> Option<&Vec<f32>> {
+    pub fn get_float_list(&self, addr: &Address) -> Option<&Vec<crate::Float>> {
         if let Some(entity) = self
             .entities
             .get(self.entities_idx.get(&addr.entity).unwrap())
@@ -482,7 +482,7 @@ impl Sim {
     }
     /// Get a mut reference to `FloatList` variable from the
     /// sim using an absolute address.
-    pub fn get_float_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<f32>> {
+    pub fn get_float_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<crate::Float>> {
         if let Some(entity) = self
             .entities
             .get_mut(self.entities_idx.get(&addr.entity).unwrap())
@@ -541,7 +541,7 @@ impl Sim {
     }
     /// Get a reference to `IntGrid` variable from the sim
     /// using an absolute address.
-    pub fn get_int_grid(&self, addr: &Address) -> Option<&Vec<Vec<i32>>> {
+    pub fn get_int_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Int>>> {
         if let Some(entity) = self
             .entities
             .get(self.entities_idx.get(&addr.entity).unwrap())
@@ -552,7 +552,7 @@ impl Sim {
     }
     /// Get a mut reference to `IntGrid` variable from the
     /// sim using an absolute address.
-    pub fn get_int_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<i32>>> {
+    pub fn get_int_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Int>>> {
         if let Some(entity) = self
             .entities
             .get_mut(self.entities_idx.get(&addr.entity).unwrap())
@@ -563,7 +563,7 @@ impl Sim {
     }
     /// Get a reference to `FloatGrid` variable from the sim
     /// using an absolute address.
-    pub fn get_float_grid(&self, addr: &Address) -> Option<&Vec<Vec<f32>>> {
+    pub fn get_float_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Float>>> {
         if let Some(entity) = self
             .entities
             .get(self.entities_idx.get(&addr.entity).unwrap())
@@ -574,7 +574,7 @@ impl Sim {
     }
     /// Get a mut reference to `FloatGrid` variable from the
     /// sim using an absolute address.
-    pub fn get_float_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<f32>>> {
+    pub fn get_float_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Float>>> {
         if let Some(entity) = self
             .entities
             .get_mut(self.entities_idx.get(&addr.entity).unwrap())
@@ -615,8 +615,8 @@ impl Sim {
         match addr.var_type {
             //            VarType::Str => *self.get_str_mut(addr).unwrap() = val,
             //            VarType::Int => *self.get_int_mut(addr).unwrap() =
-            // val.parse::<i32>().unwrap(),            VarType::Float =>
-            // *self.get_float_mut(addr).unwrap() = val.parse::<f32>().unwrap(),
+            // val.parse::<crate::Int>().unwrap(),            VarType::Float =>
+            // *self.get_float_mut(addr).unwrap() = val.parse::<crate::Float>().unwrap(),
             //            VarType::Bool => *self.get_bool_mut(addr).unwrap() =
             // val.parse::<bool>().unwrap(),            _ =>
             // unimplemented!("set_from_string not yet implemented for var type {:?}",
@@ -633,7 +633,7 @@ impl Sim {
             }
             VarType::Int => {
                 if let Some(v) = self.get_int_mut(&addr) {
-                    *v = val.parse::<i32>().unwrap();
+                    *v = val.parse::<crate::Int>().unwrap();
                 } else {
                     debug!(
                         "failed setting int from data at addr: {}",
@@ -641,7 +641,9 @@ impl Sim {
                     );
                 }
             }
-            VarType::Float => *self.get_float_mut(&addr).unwrap() = val.parse::<f32>().unwrap(),
+            VarType::Float => {
+                *self.get_float_mut(&addr).unwrap() = val.parse::<crate::Float>().unwrap()
+            }
             VarType::Bool => *self.get_bool_mut(&addr).unwrap() = val.parse::<bool>().unwrap(),
             _ => debug!(
                 "set_from_string not yet implemented for var type {:?}",
@@ -665,7 +667,10 @@ impl Sim {
             }
             VarType::IntList => {
                 if let Some(v) = self.get_int_list_mut(&addr) {
-                    *v = vec.iter().map(|is| is.parse::<i32>().unwrap()).collect();
+                    *v = vec
+                        .iter()
+                        .map(|is| is.parse::<crate::Int>().unwrap())
+                        .collect();
                 } else {
                     error!(
                         "failed setting int_list from data at addr: {}",
@@ -675,7 +680,10 @@ impl Sim {
             }
             VarType::FloatList => {
                 if let Some(v) = self.get_float_list_mut(&addr) {
-                    *v = vec.iter().map(|fs| fs.parse::<f32>().unwrap()).collect();
+                    *v = vec
+                        .iter()
+                        .map(|fs| fs.parse::<crate::Float>().unwrap())
+                        .collect();
                 } else {
                     error!(
                         "failed setting float_list from data at addr: {}",
@@ -717,7 +725,11 @@ impl Sim {
                 if let Some(v) = self.get_int_grid_mut(&addr) {
                     *v = vec2d
                         .iter()
-                        .map(|v| v.iter().map(|is| is.parse::<i32>().unwrap()).collect())
+                        .map(|v| {
+                            v.iter()
+                                .map(|is| is.parse::<crate::Int>().unwrap())
+                                .collect()
+                        })
                         .collect();
                 } else {
                     error!(
@@ -730,7 +742,11 @@ impl Sim {
                 if let Some(v) = self.get_float_grid_mut(&addr) {
                     *v = vec2d
                         .iter()
-                        .map(|v| v.iter().map(|fs| fs.parse::<f32>().unwrap()).collect())
+                        .map(|v| {
+                            v.iter()
+                                .map(|fs| fs.parse::<crate::Float>().unwrap())
+                                .collect()
+                        })
                         .collect();
                 } else {
                     error!(
@@ -811,10 +827,10 @@ impl Sim {
                     );
                     //                    println!("{}", img.);
                     let img = img.to_luma();
-                    let mut out_grid: Vec<Vec<i32>> = Vec::new();
-                    let mut row: Vec<i32> = Vec::new();
+                    let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
+                    let mut row: Vec<crate::Int> = Vec::new();
                     for (w, h, luma) in img.enumerate_pixels() {
-                        row.push(luma[0] as i32);
+                        row.push(luma[0] as crate::Int);
                         if (w + 1) % img.width() == 0 {
                             out_grid.push(row);
                             row = Vec::new();
@@ -837,13 +853,13 @@ impl Sim {
                     let width = img.width();
                     let img = img.to_rgb();
 
-                    let mut out_grid: Vec<Vec<i32>> = Vec::new();
-                    let mut row: Vec<i32> = Vec::new();
+                    let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
+                    let mut row: Vec<crate::Int> = Vec::new();
                     for (w, h, rgb) in img.enumerate_pixels() {
                         let combined = (rgb.0[0] as u32 * 10_u32.pow(3) + rgb.0[1] as u32)
                             * 10_u32.pow(3)
                             + rgb.0[2] as u32;
-                        row.push(combined as i32);
+                        row.push(combined as crate::Int);
 
                         if (w + 1) % img.width() == 0 {
                             out_grid.push(row);
@@ -877,11 +893,11 @@ impl Sim {
                     let width = img.width();
                     let img = img.to_rgb();
 
-                    let mut out_grid: Vec<Vec<i32>> = Vec::new();
-                    let mut row: Vec<i32> = Vec::new();
+                    let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
+                    let mut row: Vec<crate::Int> = Vec::new();
                     for (w, h, rgb) in img.enumerate_pixels() {
                         let c = 65536 * rgb.0[0] as u32 + 256 * rgb.0[1] as u32 + rgb.0[2] as u32;
-                        row.push(c as i32);
+                        row.push(c as crate::Int);
                         if (w + 1) % img.width() == 0 {
                             out_grid.push(row);
                             row = Vec::new();
