@@ -207,4 +207,4 @@ pub type CompId = StringId;
 pub type EventId = StringId;
 
 /// Unique entity identifier type.
-pub type EntityUid = usize;
+pub type EntityUid = u32;

@@ -40,7 +40,7 @@ log = "0.4.11"
 fnv = "1.0.7"
 strsim = "0.10.0"
 lz4 = "1.23.2"
-id-pool = { version = "0.1.0", features = ["serde"] }
+id-pool = { version = "0.1.0", default-features = false, features = ["u32", "serde"] }
 dunce = "1.0.1"
 arrayvec = { version = "0.5.1", features = ["serde"] }
 rand = "0.7.3"
