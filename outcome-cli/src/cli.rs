@@ -20,7 +20,7 @@ use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
 use outcome::Sim;
 use outcome_net::{Coord, Server, SimConnection, Worker};
 
-use self::simplelog::{ConfigBuilder, Level, LevelPadding};
+use self::simplelog::{Level, LevelPadding};
 use crate::init;
 use crate::interactive;
 use crate::test;
@@ -42,7 +42,14 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
         .author(AUTHORS)
         .about("Create, run and analyze outcome simulations from the command line.\n\
                 Learn more at https://theoutcomeproject.com")
-
+        .arg(Arg::with_name("verbosity")
+            .long("verbosity")
+            .short("v")
+            .takes_value(true)
+            .default_value("info")
+            .value_name("verb")
+            .global(true)
+            .help("Set the verbosity of the log output"))
         //init subcommand
         .subcommand(SubCommand::with_name("new")
             .setting(AppSettings::DisableHelpSubcommand)
@@ -128,13 +135,6 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
             // Note: If there are no arguments supplied \
             //     the program will look for a scenario, snapshot or proof \
             //     (in that order) in the current working directory.")
-            .arg(Arg::with_name("verbosity")
-                .long("verbosity")
-                .short("v")
-                .takes_value(true)
-                .default_value("info")
-                .value_name("verb")
-                .help("Set the verbosity of the log output"))
             .arg(Arg::with_name("path")
                 .value_name("path"))
             .arg(Arg::with_name("interactive")
@@ -310,12 +310,11 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
                 .help("Set the ip address for the worker, together with port")
                 .value_name("ip-address"))
             .arg(Arg::with_name("coord")
-//                .required(true)
                 .takes_value(true)
                 .long("coord")
                 .short("c")
-                .help("Set the ip address of the cluster coordinator")
-                .value_name("ip-address"))
+                .help("Set the address of the cluster coordinator")
+                .value_name("address"))
             .arg(Arg::with_name("passwd")
                 .takes_value(true)
                 .long("passwd")
@@ -395,6 +394,7 @@ fn start_run(matches: &ArgMatches) -> Result<()> {
     };
     Ok(())
 }
+
 fn start_run_scenario(matches: &ArgMatches) -> Result<()> {
     let mut path = env::current_dir()?;
     match matches.value_of("path") {
@@ -412,33 +412,10 @@ fn start_run_scenario(matches: &ArgMatches) -> Result<()> {
     }
     path = path.canonicalize().unwrap_or(path);
 
-    use self::simplelog::{Config, LevelFilter, TermLogger};
-    let level_filter = match matches.value_of("verbosity") {
-        Some(s) => match s {
-            "0" | "none" => LevelFilter::Off,
-            "1" | "err" | "error" | "min" => LevelFilter::Error,
-            "2" | "warn" | "warning" | "default" => LevelFilter::Warn,
-            "3" | "info" => LevelFilter::Info,
-            "4" | "debug" => LevelFilter::Debug,
-            "5" | "trace" | "max" => LevelFilter::Trace,
-            _ => LevelFilter::Warn,
-        },
-        _ => LevelFilter::Warn,
-    };
+    setup_log_verbosity(matches);
 
     if matches.is_present("interactive") {
         println!("Running interactive session using scenario at: {:?}", path);
-        let mut config_builder = ConfigBuilder::new();
-        let logger_conf = config_builder
-            .set_time_level(LevelFilter::Error)
-            .set_target_level(LevelFilter::Debug)
-            .set_location_level(LevelFilter::Trace)
-            .build();
-        TermLogger::init(
-            LevelFilter::Debug,
-            logger_conf,
-            simplelog::TerminalMode::Mixed,
-        );
         let sim = outcome::Sim::from_scenario_at_path(path)?;
         let driver = interactive::SimDriver::Local(sim);
         interactive::start(
@@ -469,7 +446,7 @@ fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
     println!("Running interactive session using snapshot at: {:?}", path);
     if matches.is_present("interactive") {
         use self::simplelog::{Config, LevelFilter, TermLogger};
-        let mut config_builder = ConfigBuilder::new();
+        let mut config_builder = simplelog::ConfigBuilder::new();
         let logger_conf = config_builder
             .set_time_level(LevelFilter::Error)
             .set_target_level(LevelFilter::Debug)
@@ -503,67 +480,93 @@ fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+/// Starts a new server based on the passed arguments.
 fn start_server(matches: &ArgMatches) -> Result<()> {
+    setup_log_verbosity(matches);
+
     let name = match matches.value_of("name") {
         Some(n) => n,
         None => "outcome_server",
     };
+
     let description = match matches.value_of("description") {
         Some(d) => d,
-        None => "",
+        None => "It's a server alright.",
     };
+
     let keep_alive_secs = match matches.value_of("keep-alive") {
         Some(secs) => match secs.parse::<f32>() {
             Ok(f) => f,
-            Err(_) => -1.0,
+            Err(e) => panic!("failed parsing keep-alive float value: {}", e),
         },
         // -1.0 means keep alive forever
         None => -1.0,
     };
+
     let scenario_path = match matches.value_of("scenario-path") {
-        Some(path) => PathBuf::from(path),
+        Some(path) => path,
         None => unimplemented!(),
     };
+
     let server_address = match matches.value_of("ip-address") {
         Some(addr) => addr,
-        // None => outcome_net::server::SERVER_ADDRESS,
         None => unimplemented!(),
     };
+
+    let worker_addrs = match matches.value_of("workers") {
+        Some(workers_str) => workers_str
+            .split(",")
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>(),
+        None => Vec::new(),
+    };
+
     let mut use_auth = matches.is_present("password");
+
     let passwd_list = match matches.value_of("password") {
         //TODO support multiple passwords separated by ','
         Some(passwd_str) => vec![String::from(passwd_str)],
         None => Vec::new(),
     };
+
     if use_auth && passwd_list.len() == 0 {
         println!("Disabling authentication because there were no passwords provided.");
         use_auth = false;
     } else if !use_auth && passwd_list.len() > 0 {
         use_auth = true;
     }
+
     let no_delay = matches.is_present("no-delay");
+
     let use_compression = matches.is_present("use-compression");
 
     let sim_instance = match matches.is_present("cluster") {
         true => {
-            let coord = Coord::start(
-                scenario_path.clone(),
+            /// run a coordinator
+            let mut coord = Coord::start(
+                scenario_path,
                 matches.value_of("cluster").unwrap(),
-                matches.value_of("workers").unwrap(),
+                worker_addrs,
             )?;
             SimConnection::ClusterCoord(coord)
         }
         false => {
-            let sim = Sim::from_scenario_at_path(scenario_path.clone())
+            /// run a local simulation instance
+            let sim = Sim::from_scenario_at_path(PathBuf::from(scenario_path))
                 .expect("failed creating new sim instance");
             SimConnection::Local(sim)
         }
     };
-    // let sim = Sim::from_scenario_at(PathBuf::from(scenario_path))
-    //     .expect("failed creating new sim instance");
-    let mut server = Arc::new(Mutex::new(Server::new(server_address, sim_instance)?));
 
-    println!("listening on {}", server_address);
+    let mut server = Arc::new(Mutex::new(Server::new(sim_instance, server_address)?));
+
+    println!("listening for new clients on: {}", server_address);
+    if let SimConnection::ClusterCoord(coord) = &server.lock().unwrap().sim {
+        println!(
+            "listening for new workers on: {}",
+            &coord.lock().unwrap().address
+        );
+    }
 
     loop {
         thread::sleep(Duration::from_millis(100));
@@ -664,14 +667,27 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
     } else if !use_auth && passwd_list.len() > 0 {
         use_auth = true;
     }
+
     // unimplemented!();
     // let listener = TcpListener::bind(my_address).expect("failed to bind listener");
     // let mut worker_arc = Arc::new(Mutex::new(Worker::new(my_address)));
     println!("Now listening on {}", my_address);
 
     let mut worker = Worker::new(my_address)?;
-    //thread::sleep(Duration::from_millis(200));
+
+    if let Some(coord_addr) = matches.value_of("coord") {
+        print!("initiating connection with coordinator... ");
+        std::io::stdout().flush()?;
+
+        match worker.initiate_coord_connection(coord_addr, Duration::from_millis(2000)) {
+            Ok(_) => print!("success\n"),
+            Err(e) => print!("failed ({:?})", e),
+        }
+    }
+    std::io::stdout().flush()?;
+    print!("waiting for message from coordinator... ");
     worker.handle_coordinator();
+    print!("success\n");
     // first connection is made by the coordinator
     // thread::spawn(move || {
 
@@ -718,4 +734,28 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
     // }
 
     Ok(())
+}
+
+fn setup_log_verbosity(matches: &ArgMatches) {
+    use self::simplelog::{Config, LevelFilter, TermLogger};
+    let level_filter = match matches.value_of("verbosity") {
+        Some(s) => match s {
+            "0" | "none" => LevelFilter::Off,
+            "1" | "err" | "error" | "min" => LevelFilter::Error,
+            "2" | "warn" | "warning" | "default" => LevelFilter::Warn,
+            "3" | "info" => LevelFilter::Info,
+            "4" | "debug" => LevelFilter::Debug,
+            "5" | "trace" | "max" | "all" => LevelFilter::Trace,
+            _ => LevelFilter::Warn,
+        },
+        _ => LevelFilter::Warn,
+    };
+    let mut config_builder = simplelog::ConfigBuilder::new();
+    let logger_conf = config_builder
+        .set_time_level(LevelFilter::Error)
+        .set_target_level(LevelFilter::Debug)
+        .set_location_level(LevelFilter::Trace)
+        .set_time_format_str("%H:%M:%S%.6f")
+        .build();
+    TermLogger::init(level_filter, logger_conf, simplelog::TerminalMode::Mixed);
 }
