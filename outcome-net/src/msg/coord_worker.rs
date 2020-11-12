@@ -69,6 +69,29 @@ pub const SET_REQUEST: &str = "SetRequest";
 pub const SET_RESPONSE: &str = "SetResponse";
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IntroduceWorkerToCoordRequest {
+    pub worker_addr: String,
+    pub worker_passwd: String,
+}
+pub(crate) const INTRODUCE_WORKER_TO_COORD_REQUEST: &str = "IntroduceWorkerToCoordRequest";
+impl Payload for IntroduceWorkerToCoordRequest {
+    fn kind_str(&self) -> &str {
+        INTRODUCE_WORKER_TO_COORD_REQUEST
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct IntroduceWorkerToCoordResponse {
+    pub error: String,
+}
+pub(crate) const INTRODUCE_WORKER_TO_COORD_RESPONSE: &str = "IntroduceWorkerToCoordResponse";
+impl Payload for IntroduceWorkerToCoordResponse {
+    fn kind_str(&self) -> &str {
+        INTRODUCE_WORKER_TO_COORD_RESPONSE
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct IntroduceCoordRequest {
     pub ip_addr: String,
     pub passwd: String,
@@ -87,24 +110,5 @@ pub struct IntroduceCoordResponse {
 impl Payload for IntroduceCoordResponse {
     fn kind_str(&self) -> &str {
         "RegisterCoordResponse"
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SignalRequest {
-    pub signal: outcome_core::distr::Signal,
-}
-impl Payload for SignalRequest {
-    fn kind_str(&self) -> &str {
-        SIGNAL_REQUEST
-    }
-}
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct SignalResponse {
-    pub distr_msg: outcome_core::distr::Signal,
-}
-impl Payload for SignalResponse {
-    fn kind_str(&self) -> &str {
-        SIGNAL_RESPONSE
     }
 }

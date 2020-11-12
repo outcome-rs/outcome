@@ -46,7 +46,7 @@ impl ClientDriverInterface for ClientDriver {
         thread::sleep(Duration::from_millis(1000));
         temp_client.dial(&new_endpoint(addr))?;
         thread::sleep(Duration::from_millis(1000));
-        temp_client.send(&msg.pack()).map_err(|(_, e)| e)?;
+        temp_client.send(&msg.to_bytes()).map_err(|(_, e)| e)?;
         Ok(())
     }
 
@@ -56,7 +56,7 @@ impl ClientDriverInterface for ClientDriver {
     }
 
     fn send(&self, message: Message) -> Result<()> {
-        self.conn.send(&message.pack()).map_err(|(_, e)| e)?;
+        self.conn.send(&message.to_bytes()).map_err(|(_, e)| e)?;
         Ok(())
     }
 }
@@ -117,7 +117,10 @@ impl ServerDriverInterface for ServerDriver {
         Ok(Message::from_bytes(msg.as_slice())?)
     }
     fn send(&mut self, client_id: &u32, message: Message) -> Result<()> {
-        self.clients.get(client_id).unwrap().send(&message.pack());
+        self.clients
+            .get(client_id)
+            .unwrap()
+            .send(&message.to_bytes());
         Ok(())
     }
 
@@ -172,14 +175,14 @@ impl CoordDriverInterface for CoordDriver {
         let sock = Socket::new(Protocol::Pair0)?;
         //thread::sleep(Duration::from_millis(100));
         sock.dial(&new_endpoint(addr))?;
-        sock.send(&msg.pack()).map_err(|(_, e)| e)?;
+        sock.send(&msg.to_bytes()).map_err(|(_, e)| e)?;
         thread::sleep(Duration::from_millis(1000));
 
         Ok(())
     }
 
     fn msg_send_worker(&self, worker_id: &WorkerId, msg: Message) -> Result<()> {
-        self.server.send(&msg.pack()).map_err(|(_, e)| e)?;
+        self.server.send(&msg.to_bytes()).map_err(|(_, e)| e)?;
         Ok(())
         //unimplemented!()
         // self.server
@@ -226,7 +229,7 @@ impl WorkerDriverInterface for WorkerDriver {
         //unimplemented!();
         println!("connecting to coord at addr: {}", addr);
         self.coord.dial(&new_endpoint(addr))?;
-        self.coord.send(&msg.pack()).map_err(|(_, e)| e)?;
+        self.coord.send(&msg.to_bytes()).map_err(|(_, e)| e)?;
         // self.coord.connect(new_endpoint(addr).unwrap()).unwrap();
         // thread::sleep(Duration::from_millis(100));
         // self.coord.send(msg.pack()).unwrap();
@@ -240,7 +243,7 @@ impl WorkerDriverInterface for WorkerDriver {
     }
     fn msg_send_central(&self, msg: Message) -> Result<()> {
         self.coord
-            .send(&msg.pack())
+            .send(&msg.to_bytes())
             .map_err(|(_, e)| Error::Other(e.to_string()))
     }
 

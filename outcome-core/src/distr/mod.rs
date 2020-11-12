@@ -27,31 +27,52 @@ use crate::error::{Error, Result};
 use crate::model::{DataEntry, DataImageEntry, Scenario};
 use crate::sim::interface::SimInterface;
 use crate::sim::step;
-use crate::StringId;
-use crate::{model, EntityId, SimModel, VarType};
-use crate::{CompId, Var};
+use crate::{model, CompId, EntityUid, SimModel, StringId, Var, VarType};
 
 #[cfg(feature = "machine")]
 use crate::machine::{
     cmd::CentralExtCommand, cmd::Command, cmd::CommandResult, cmd::ExtCommand, ExecutionContext,
 };
 
-/// Definition encompassing all possible messages available for node<>node
-/// and node<>central communication.
+//TODO
+// investigate separate signal structures for communication between two nodes
+// and between node and central
+/// Definition encompassing all possible messages available for communication
+/// between two nodes and between node and central.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Signal {
-    InitializeNode((SimModel, Vec<EntityId>)),
+    /// Request node to start initialization using given model and list of entities
+    InitializeNode((SimModel, Vec<EntityUid>)),
     /// Request node to start processing step, includes event_queue vec
     StartProcessStep(Vec<StringId>),
-    /// Sent by node to central to signal it's done processing tick
+
+    /// Shutdown imminent
+    ShuttingDown,
+
+    /// Node has finished processing step
     ProcessStepFinished,
+    /// There are no more request queued
     EndOfRequests,
+    /// There are no more responses queued
     EndOfResponses,
+    /// There are no more messages queued
     EndOfMessages,
-    /// External cmd to be executed on a node
+
+    /// Request all data from the node
+    DataRequestAll,
+    /// Request selected data from the node
+    DataRequestSelect(Vec<Address>),
+    //TODO investigate responses with typed data packs
+    /// Response containing the requested data
+    DataResponse(Vec<(Address, Var)>),
+
+    /// Request pulling the provided data
+    DataPullRequest(Vec<(Address, Var)>),
+
+    /// External command to be executed on a node
     #[cfg(feature = "machine")]
     ExecuteExtCmd((ExecutionContext, ExtCommand)),
-    /// Central external cmd to be executed on central
+    /// Central-external command to be executed on central
     #[cfg(feature = "machine")]
     ExecuteCentralExtCmd((ExecutionContext, CentralExtCommand)),
 }
@@ -59,43 +80,43 @@ pub enum Signal {
 /// Trait representing central orchestrator's ability to send and receive
 /// messages over the wire.
 pub trait CentralCommunication {
-    /// Read a single incoming signal
+    /// Reads a single incoming signal.
     fn sig_read(&mut self) -> Result<(String, Signal)>;
-    /// Read incoming signal from a specific node
+    /// Reads incoming signal from a specific node.
     fn sig_read_from(&mut self, node_id: &str) -> Result<Signal>;
 
-    /// Send a signal to node
+    /// Sends a signal to node.
     fn sig_send_to_node(&mut self, node_id: &str, signal: Signal) -> Result<()>;
-    /// Send a signal to node where the specified entity lives
-    fn sig_send_to_entity(&mut self, entity_uid: EntityId) -> Result<()>;
+    /// Sends a signal to node where the specified entity lives.
+    fn sig_send_to_entity(&mut self, entity_uid: EntityUid) -> Result<()>;
 
-    /// Send a signal to all the nodes
+    /// Sends a signal to all the nodes.
     fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;
 }
 
 /// Trait representing node's ability to send and receive messages over the
 /// network.
 pub trait NodeCommunication {
-    /// Read a single signal coming from central orchestrator
+    /// Reads a single signal coming from central orchestrator.
     fn sig_read_central(&mut self) -> Result<Signal>;
-    /// Send a signal to the central orchestrator
+    /// Sends a signal to the central orchestrator.
     fn sig_send_central(&mut self, signal: Signal) -> Result<()>;
 
-    /// Read a single signal coming from another node. Result contains either
+    /// Reads a single signal coming from another node. Result contains either
     /// a tuple of node id and the received signal, or an error.
     fn sig_read(&mut self) -> Result<(String, Signal)>;
-    /// Read incoming signal from a specific node
+    /// Reads incoming signal from a specific node.
     fn sig_read_from(&mut self, node_id: &str) -> Result<Signal>;
 
-    /// Send a signal to node
+    /// Sends a signal to node.
     fn sig_send_to_node(&mut self, node_id: &str, signal: Signal) -> Result<()>;
-    /// Send a signal to node where the specified entity lives
-    fn sig_send_to_entity(&mut self, entity_uid: EntityId) -> Result<()>;
+    /// Sends a signal to node where the specified entity lives.
+    fn sig_send_to_entity(&mut self, entity_uid: EntityUid) -> Result<()>;
 
-    /// Send a signal to all the nodes
+    /// Sends a signal to all the nodes.
     fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;
 
-    /// Get ids of all the connected nodes
+    /// Gets ids of all the connected nodes.
     fn get_nodes(&mut self) -> Vec<String>;
 }
 

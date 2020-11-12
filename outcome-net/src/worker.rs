@@ -4,10 +4,9 @@ extern crate outcome_core as outcome;
 extern crate rmp_serde as rmps;
 extern crate serde;
 
+use std::io::prelude::*;
 use std::io::Write;
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-//use std::net::TcpListener::;
-use std::io::prelude::*;
 use std::{io, thread};
 
 use self::rmps::{Deserializer, Serializer};
@@ -22,36 +21,66 @@ use std::time::Duration;
 
 use outcome::Sim;
 
-use crate::msg::coord_worker::{IntroduceCoordRequest, IntroduceCoordResponse, SignalRequest};
+use crate::msg::coord_worker::{
+    IntroduceCoordRequest, IntroduceCoordResponse, IntroduceWorkerToCoordRequest,
+    IntroduceWorkerToCoordResponse,
+};
 use crate::msg::*;
-use crate::transport::WorkerDriverInterface;
-use crate::WorkerDriver;
+use crate::transport::{SocketInterface, WorkerDriverInterface};
 use crate::{error::Error, Result};
+use crate::{tcp_endpoint, WorkerDriver};
 
-use outcome_core::distr::{NodeCommunication, Signal};
-use outcome_core::Address;
+use outcome_core::distr::{NodeCommunication, Signal, SimNode};
+use outcome_core::{Address, SimModel, StringId, Var, VarType};
 
+//TODO remove this
 /// Default address for the worker
 pub const WORKER_ADDRESS: &str = "0.0.0.0:5922";
 
+/// Network-unique identifier for a single worker
 pub type WorkerId = u32;
 
-/// Represents a single cluster node.
+/// Represents a single cluster node, connected to and controlled by
+/// the cluster coordinator. `Worker`s are also connected to each other, either
+/// directly or not, depending on network topology used.
+///
+/// # Usage details
+///
+/// In a simulation cluster made up of multiple machines, there is at least
+/// one `Worker` running on each machine.
+///
+/// In terms of initialization, `Worker`s can be either actively reach out to
+/// an already existing cluster to join in, or passively wait for incoming
+/// connection from a coordinator.
+///
+/// Unless configured otherwise, new `Worker`s can dynamically join into
+/// already initialized clusters, allowing for on-the-fly changes to the
+/// cluster composition.
+///
+/// # Discussion
+///
+/// Worker abstraction could work well with "thread per core" strategy. This
+/// means there would be a single worker per every machine core, instead of
+/// single worker per machine utilizing multiple cores with thread-pooling.
+/// "Thread per core" promises performance improvements caused by reducing
+/// expensive context switching operations. It would require having the ability
+/// to switch `SimNode`s to process entities in a single-threaded fashion.
 pub struct Worker {
-    /// List of other workers in the cluster.
+    /// List of other workers in the cluster
     pub comrades: Vec<Comrade>,
     /// Network driver
-    pub driver: WorkerDriver,
-    /// Whether the worker uses a password to authorize connecting comrade workers.
+    driver: WorkerDriver,
+    /// Whether the worker uses a password to authorize connecting comrade workers
     pub use_auth: bool,
-    /// Password used for new client authorization.
+    /// Password used for incoming connection authorization
     pub passwd_list: Vec<String>,
 
-    /// Simulation node running on this worker.
+    /// Simulation node running on this worker
     pub sim_node: Option<outcome::distr::SimNode>,
 }
 
 impl Worker {
+    /// Creates a new `Worker`.
     pub fn new(my_addr: &str) -> Result<Worker> {
         Ok(Worker {
             comrades: vec![],
@@ -61,6 +90,8 @@ impl Worker {
             sim_node: None,
         })
     }
+
+    /// Registers a fellow worker.
     pub fn register_comrade(&mut self, comrade: Comrade) -> Result<()> {
         if self.use_auth {
             if !&self.passwd_list.contains(&comrade.passwd) {
@@ -74,14 +105,35 @@ impl Worker {
         return Ok(());
     }
 
+    pub fn initiate_coord_connection(&mut self, addr: &str, timeout: Duration) -> Result<()> {
+        let req_msg = Message::from_payload(
+            IntroduceWorkerToCoordRequest {
+                worker_addr: self.driver.my_addr.clone(),
+                //TODO
+                worker_passwd: "".to_string(),
+            },
+            false,
+        )?;
+        self.driver.inviter.connect(&tcp_endpoint(addr))?;
+        thread::sleep(Duration::from_millis(100));
+        self.driver.inviter.send_msg(req_msg)?;
+
+        let resp: IntroduceWorkerToCoordResponse = self
+            .driver
+            .inviter
+            .try_read_msg(Some(timeout.as_millis() as u32))?
+            .unpack_payload()?;
+
+        self.driver.inviter.disconnect("")?;
+        Ok(())
+    }
+
     // TODO
+    /// Handles initial connection from the cluster coordinator.
     pub fn handle_coordinator(&mut self) -> Result<()> {
-        // unimplemented!();
-        print!("waiting for coordinator to initiate connection... ");
-        io::stdout().flush()?;
+        // io::stdout().flush()?;
 
         let msg = self.driver.accept()?;
-        println!("success!");
         println!("got message from central: {:?}", msg);
 
         let req: IntroduceCoordRequest = msg.unpack_payload().unwrap();
@@ -92,8 +144,18 @@ impl Worker {
             },
             false,
         )?;
+        self.driver.greeter.send_msg(resp)?;
 
-        self.driver.connect_to_coord(&req.ip_addr, resp)?;
+        self.driver
+            .coord
+            .bind(&format!("{}6", self.driver.my_addr))?;
+        self.driver.coord.connect(&req.ip_addr)?;
+
+        self.driver
+            .coord
+            .send(crate::sig::Signal::from(Signal::EndOfMessages).to_bytes()?)?;
+
+        // self.driver.connect_to_coord(&req.ip_addr, resp)?;
 
         // self.driver.establish_coord_conn();
         // let req: IntroduceCoordRequest = self
@@ -125,24 +187,24 @@ impl Worker {
 
         loop {
             // sleep a little to make this thread less expensive
-            sleep(Duration::from_millis(500));
-            // println!("{:?}", self.driver.msg_read_central());
+            sleep(Duration::from_millis(1));
 
-            // println!("{:?}", self.driver.msg_read_central());
-            let msg = match self.driver.msg_read_central() {
+            let bytes = match self.driver.coord.try_read(None) {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("{:?}", e);
+                    // println!("{:?}", e);
                     continue;
                 }
             };
-            println!("{:?}", msg);
-            // handle_message(local_worker.clone(), msg, &mut in_stream, &mut out_stream);
+            let sig = crate::sig::Signal::from_bytes(&bytes)?;
+            println!("{:?}", sig);
+            self.handle_signal(sig.inner());
+            // self.handle_message(msg, &mut in_stream, &mut out_stream);
         }
     }
 }
 
-/// Handle message from a new client (it can only be a RegisterClientRequest)
+/// Handles first message from a fellow worker.
 fn handle_message_new_comrade(
     worker_arc: Arc<Mutex<Worker>>,
     buf: &mut Vec<u8>,
@@ -187,27 +249,68 @@ fn handle_message_new_comrade(
     //    send_message(message_from_payload(resp, false), &mut stream, None);
     //    Some(comrade)
 }
-fn handle_message(
-    worker_arc: Arc<Mutex<Worker>>,
-    msg: Message,
-    mut in_stream: &mut TcpStream,
-    mut out_stream: &mut TcpStream,
-) -> Result<()> {
-    println!("Got a new Message: {}", &msg.kind);
+impl Worker {
+    fn handle_signal(&mut self, sig: Signal) -> Result<()> {
+        println!("handling signal: {:?}", sig);
 
-    let payload = msg.payload;
-    match msg.kind.as_str() {
-        PING_REQUEST => handle_ping_request(payload, worker_arc)?,
-        //        REGISTER_CLIENT_REQUEST => handle_data_transfer_request(payload, server_arc, stream),
-        DATA_TRANSFER_REQUEST => handle_data_transfer_request(payload, worker_arc)?,
-        DATA_PULL_REQUEST => handle_data_pull_request(payload, worker_arc)?,
-        STATUS_REQUEST => handle_status_request(payload, worker_arc)?,
-        // SIGNAL_REQUEST => handle_distr_msg_request(payload, worker_arc)?,
-        _ => (),
+        match sig {
+            Signal::StartProcessStep(event_queue) => self
+                .driver
+                .coord
+                .send(crate::sig::Signal::from(Signal::ProcessStepFinished).to_bytes()?)?,
+            Signal::DataRequestAll => self.handle_sig_data_request_all()?,
+            Signal::InitializeNode((model, entities)) => {
+                self.handle_sig_initialize_node(model, entities)?
+            }
+            _ => unimplemented!(),
+        }
+
+        Ok(())
     }
-    Ok(())
-}
+    fn handle_sig_initialize_node(&mut self, model: SimModel, entities: Vec<u32>) -> Result<()> {
+        self.sim_node = Some(SimNode::from_model(&model, &entities)?);
 
+        Ok(())
+    }
+    fn handle_sig_data_request_all(&self) -> Result<()> {
+        let mut collection = Vec::new();
+        for (entity_uid, entity) in &self.sim_node.as_ref().unwrap().entities {
+            for ((comp_id, var_id), var) in entity.storage.get_all_str() {
+                collection.push((
+                    Address {
+                        entity: StringId::from(&entity_uid.to_string()).unwrap(),
+                        component: *comp_id,
+                        var_type: VarType::Str,
+                        var_id: *var_id,
+                    },
+                    Var::Str(var.clone()),
+                ))
+            }
+        }
+        let signal = Signal::DataResponse(collection);
+        self.driver
+            .coord
+            .send(crate::sig::Signal::from(signal).to_bytes()?)?;
+
+        Ok(())
+    }
+    /// Handles an incoming message.
+    fn handle_message(&mut self, msg: Message) -> Result<()> {
+        println!("handling message: {}", &msg.kind);
+
+        match msg.kind.as_str() {
+            // PING_REQUEST => handle_ping_request(msg, worker)?,
+            // DATA_TRANSFER_REQUEST => handle_data_transfer_request(msg, worker)?,
+            // DATA_PULL_REQUEST => handle_data_pull_request(msg, worker)?,
+            // STATUS_REQUEST => handle_status_request(msg, worker)?,
+
+            //        REGISTER_CLIENT_REQUEST => handle_data_transfer_request(payload, server_arc, stream),
+            // SIGNAL_REQUEST => handle_distr_msg_request(payload, worker_arc)?,
+            _ => (),
+        }
+        Ok(())
+    }
+}
 // TODO
 fn handle_comrade(local_worker: Arc<Mutex<Worker>>) {
     unimplemented!();
@@ -236,7 +339,7 @@ pub struct Comrade {
 }
 
 // TODO
-pub fn handle_ping_request(payload: Vec<u8>, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
+pub fn handle_ping_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
     unimplemented!();
     // let req: PingRequest = match unpack_payload(&payload, false, None) {
     //     Some(p) => p,
@@ -246,7 +349,7 @@ pub fn handle_ping_request(payload: Vec<u8>, server_arc: Arc<Mutex<Worker>>) -> 
     // send_message(message_from_payload(resp, false), stream, None);
 }
 // TODO
-pub fn handle_status_request(payload: Vec<u8>, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
+pub fn handle_status_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
     unimplemented!();
     // let req: StatusRequest = match unpack_payload(&payload, false, None) {
     //     Some(p) => p,
@@ -260,11 +363,9 @@ pub fn handle_status_request(payload: Vec<u8>, server_arc: Arc<Mutex<Worker>>) -
     //    };
     //    send_message(message_from_payload(resp, false), stream, None);
 }
-pub fn handle_data_transfer_request(
-    payload: Vec<u8>,
-    server_arc: Arc<Mutex<Worker>>,
-) -> Result<()> {
-    let dtr: DataTransferRequest = unpack_payload(&payload, false, None)?;
+
+pub fn handle_data_transfer_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
+    let dtr: DataTransferRequest = msg.unpack_payload()?;
     let mut data_pack = SimDataPack::empty();
     let mut server = server_arc.lock().unwrap();
     match dtr.transfer_type.as_str() {
@@ -317,12 +418,13 @@ pub fn handle_data_transfer_request(
     //     println!("sent DataTransferResponse ({} KB)", ms as f32 / 1000.0);
     // }
 }
-pub fn handle_data_pull_request(payload: Vec<u8>, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
+
+pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
     let mut server = server_arc.lock().unwrap();
     //TODO
     //    let mut sim_model = &server.sim_model.clone();
     let mut sim_instance = &mut server.sim_node;
-    let dpr: DataPullRequest = unpack_payload(&payload, false, None)?;
+    let dpr: DataPullRequest = msg.unpack_payload()?;
     //TODO do all other var types
     //TODO handle errors
     for (address, string_var) in dpr.data.strings {
@@ -341,35 +443,35 @@ pub fn handle_data_pull_request(payload: Vec<u8>, server_arc: Arc<Mutex<Worker>>
     // send_message(message_from_payload(resp, false), stream, None);
 }
 
-pub fn handle_distr_msg_request(payload: Vec<u8>, worker_arc: Arc<Mutex<Worker>>) -> Result<()> {
-    println!("handling distr msg request");
-    let distr_msg_req: SignalRequest = unpack_payload(&payload, false, None)?;
-    let mut worker = worker_arc.lock().map_err(|e| Error::Other(e.to_string()))?;
-    match distr_msg_req.signal {
-        // Signal::InitializeNode((model, entities)) => {
-        //     println!("{:?}", entities);
-        //     let node = SimNode::from_model(&model, &entities).unwrap();
-        //     worker.sim_node = Some(node);
-        //     let resp = SignalResponse {
-        //         distr_msg: Signal::EndOfMessages,
-        //     };
-        //     send_message(message_from_payload(resp, false), &mut stream_out, None).unwrap();
-        // }
-        Signal::StartProcessStep(event_queue) => {
-            let mut node = worker.sim_node.as_mut().unwrap();
-            // let entity_node_map = HashMap::new();
-            // TODO
-            // let mut addr_book = HashMap::new();
-            // addr_book.insert(
-            //     "0".to_string(),
-            //     TcpStreamConnection {
-            //         stream_in: stream_in.try_clone().unwrap(),
-            //         stream_out: stream_out.try_clone().unwrap(),
-            //     },
-            // );
-            // node.step(&entity_node_map, &mut addr_book);
-        }
-        _ => unimplemented!(),
-    }
-    Ok(())
-}
+// pub fn handle_distr_msg_request(payload: Vec<u8>, worker_arc: Arc<Mutex<Worker>>) -> Result<()> {
+//     println!("handling distr msg request");
+//     let distr_msg_req: SignalRequest = unpack_payload(&payload, false, None)?;
+//     let mut worker = worker_arc.lock().map_err(|e| Error::Other(e.to_string()))?;
+//     match distr_msg_req.signal {
+//         // Signal::InitializeNode((model, entities)) => {
+//         //     println!("{:?}", entities);
+//         //     let node = SimNode::from_model(&model, &entities).unwrap();
+//         //     worker.sim_node = Some(node);
+//         //     let resp = SignalResponse {
+//         //         distr_msg: Signal::EndOfMessages,
+//         //     };
+//         //     send_message(message_from_payload(resp, false), &mut stream_out, None).unwrap();
+//         // }
+//         Signal::StartProcessStep(event_queue) => {
+//             let mut node = worker.sim_node.as_mut().unwrap();
+//             // let entity_node_map = HashMap::new();
+//             // TODO
+//             // let mut addr_book = HashMap::new();
+//             // addr_book.insert(
+//             //     "0".to_string(),
+//             //     TcpStreamConnection {
+//             //         stream_in: stream_in.try_clone().unwrap(),
+//             //         stream_out: stream_out.try_clone().unwrap(),
+//             //     },
+//             // );
+//             // node.step(&entity_node_map, &mut addr_book);
+//         }
+//         _ => unimplemented!(),
+//     }
+//     Ok(())
+// }

@@ -11,7 +11,7 @@ use crate::distr::{
 use crate::error::{Error, Result};
 use crate::model::Scenario;
 use crate::sim::interface::{SimInterface, SimInterfaceStorage};
-use crate::{Address, EntityId, ShortString, SimModel, StringId, Var};
+use crate::{Address, EntityUid, ShortString, SimModel, StringId, Var};
 
 #[cfg(feature = "machine")]
 use crate::machine::{cmd::CentralExtCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
@@ -91,34 +91,34 @@ impl SimCentral {
         &self,
         node_count: usize,
         method: EntityAssignMethod,
-    ) -> Vec<Vec<EntityId>> {
+    ) -> Vec<Vec<EntityUid>> {
         match method {
-            EntityAssignMethod::Random => {
-                let mut ent_models = self.model.entities.clone();
-                let mut thread_rng = rand::thread_rng();
-                ent_models.shuffle(&mut thread_rng);
-
-                let mut out_vec = Vec::new();
-                let chunk_size = ent_models.len() / node_count;
-                for n in 0..node_count {
-                    let mut ent_vec = Vec::new();
-                    if ent_models.len() >= chunk_size {
-                        for cn in 0..chunk_size {
-                            let em = ent_models.pop().unwrap();
-                            ent_vec.push(StringId::from(&em.name).unwrap());
-                        }
-                    } else {
-                        for em in &ent_models {
-                            ent_vec.push(StringId::from(&em.name).unwrap());
-                        }
-                        ent_models.clear();
-                    }
-                    out_vec.push(ent_vec);
-                    //                    let div =
-                    // ent_models
-                }
-                return out_vec;
-            }
+            // EntityAssignMethod::Random => {
+            //     let mut ent_models = self.model.entities.clone();
+            //     let mut thread_rng = rand::thread_rng();
+            //     ent_models.shuffle(&mut thread_rng);
+            //
+            //     let mut out_vec = Vec::new();
+            //     let chunk_size = ent_models.len() / node_count;
+            //     for n in 0..node_count {
+            //         let mut ent_vec = Vec::new();
+            //         if ent_models.len() >= chunk_size {
+            //             for cn in 0..chunk_size {
+            //                 let em = ent_models.pop().unwrap();
+            //                 ent_vec.push(StringId::from(&em.name).unwrap());
+            //             }
+            //         } else {
+            //             for em in &ent_models {
+            //                 ent_vec.push(StringId::from(&em.name).unwrap());
+            //             }
+            //             ent_models.clear();
+            //         }
+            //         out_vec.push(ent_vec);
+            //         //                    let div =
+            //         // ent_models
+            //     }
+            //     return out_vec;
+            // }
             _ => unimplemented!(),
         }
     }
@@ -132,16 +132,13 @@ impl SimCentral {
     //// let ent =
     //}
 
-    pub fn step_network<E: Sized + DistrError, N: CentralCommunication + Sized>(
-        &mut self,
+    pub fn step_network<N: CentralCommunication + Sized>(
         mut network: &mut N,
-    ) -> Result<()>
-    where
-        E: DistrError,
-    {
+        event_queue: Vec<StringId>,
+    ) -> Result<()> {
         debug!("sim_central: starting processing step");
         // tell nodes to start processing step
-        network.sig_broadcast(Signal::StartProcessStep(self.event_queue.clone()))?;
+        network.sig_broadcast(Signal::StartProcessStep(event_queue))?;
         debug!("sim_central: sent `StartProcessStep` signal to all nodes");
 
         debug!("sim_central: starting reading incoming signals");
@@ -179,7 +176,7 @@ impl SimCentral {
         }
         debug!("sim_central: finished executing cext commands");
 
-        self.clock += 1;
+        // self.clock += 1;
         Ok(())
     }
 

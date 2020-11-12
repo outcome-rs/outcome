@@ -31,8 +31,8 @@ pub struct SimNode {
 }
 
 impl SimNode {
-    /// Create a new node using the sim model and a list of entities.
-    pub fn from_model(model: &SimModel, entities: &Vec<EntityId>) -> Result<SimNode, Error> {
+    /// Creates a new node using the sim model and a list of entities.
+    pub fn from_model(model: &SimModel, entities: &Vec<EntityUid>) -> Result<SimNode, Error> {
         let mut sim_node = SimNode {
             clock: 0,
             model: model.clone(),
@@ -43,14 +43,14 @@ impl SimNode {
 
         sim_node.apply_model_entities(entities);
 
-        let ent_uid = (
-            StringId::from("singleton").unwrap(),
-            StringId::from("0").unwrap(),
-        );
-        let comp_uid = (
-            StringId::from("mod_init").unwrap(),
-            StringId::from("0").unwrap(),
-        );
+        // let ent_uid = (
+        //     StringId::from("singleton").unwrap(),
+        //     StringId::from("0").unwrap(),
+        // );
+        // let comp_uid = (
+        //     StringId::from("mod_init").unwrap(),
+        //     StringId::from("0").unwrap(),
+        // );
         // let commands = sim
         //     .model
         //     .get_component(
@@ -69,9 +69,9 @@ impl SimNode {
     /// Apply registered model entities by instantiating them.
     /// None of the existing entities are removed. Only entities
     /// registered with the `spawn` flag are instantiated.
-    pub fn apply_model_entities(&mut self, selection: &Vec<EntityId>) {
+    pub fn apply_model_entities(&mut self, selection: &Vec<EntityUid>) {
         trace!("start adding entities");
-        unimplemented!();
+        // unimplemented!();
         // let mut counter = 0;
         // for ent_uid in selection {
         //     let entity = self.model.get_entity(ent_uid).unwrap();

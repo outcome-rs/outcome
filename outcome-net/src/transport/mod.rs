@@ -1,11 +1,11 @@
-/// This module is the home of network *drivers*. Multiple variants are
-/// available, each using different underlying transport mechanism.
-///
-/// A *driver* is defined as a wrapper around more specific transport that
-/// provides construct-specific interface (e.g. worker interface).
-///
-/// As this library only exports higher-level constructs, *drivers* are an
-/// internal feature used only within the confines of this library.
+//! This module is the home of network *drivers*. Multiple variants are
+//! available, each using different underlying transport mechanism.
+//!
+//! A *driver* is defined as a wrapper around more specific transport that
+//! provides construct-specific interface (e.g. worker interface).
+//!
+//! As this library only exports higher-level constructs, *drivers* are an
+//! internal feature used only within the confines of this library.
 
 #[cfg(feature = "transport_nng")]
 pub(crate) mod nng;
@@ -23,9 +23,14 @@ where
 {
     fn bind(&self, addr: &str) -> Result<()>;
     fn connect(&self, addr: &str) -> Result<()>;
-    fn read(&self) -> Result<Message>;
-    fn try_read(&self) -> Result<Message>;
-    fn send(&self, message: Message) -> Result<()>;
+    fn disconnect(&self, addr: &str) -> Result<()>;
+    fn read(&self) -> Result<Vec<u8>>;
+    fn try_read(&self, timeout: Option<u32>) -> Result<Vec<u8>>;
+    fn send(&self, bytes: Vec<u8>) -> Result<()>;
+
+    fn read_msg(&self) -> Result<Message>;
+    fn try_read_msg(&self, timeout: Option<u32>) -> Result<Message>;
+    fn send_msg(&self, msg: Message) -> Result<()>;
 }
 
 pub(crate) trait ServerDriverInterface

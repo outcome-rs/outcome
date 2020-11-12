@@ -78,10 +78,14 @@
 
 #[macro_use]
 extern crate serde;
+#[macro_use]
+extern crate log;
+
 extern crate outcome_core as outcome;
 
 pub mod msg;
 
+mod sig;
 mod transport;
 
 mod client;

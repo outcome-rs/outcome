@@ -67,7 +67,7 @@ impl ClientDriverInterface for ClientDriver {
         let temp_client = self.ctx.socket(zmq::SocketType::REQ).unwrap();
         //thread::sleep(Duration::from_millis(100));
         temp_client.connect(&tcp_endpoint(addr));
-        temp_client.send(msg.pack(), 0).unwrap();
+        temp_client.send(msg.to_bytes(), 0).unwrap();
         Ok(())
     }
 
@@ -77,13 +77,18 @@ impl ClientDriverInterface for ClientDriver {
         Ok(message)
     }
     fn send(&self, message: Message) -> Result<()> {
-        self.conn.send(message.pack(), 0)?;
+        self.conn.send(message.to_bytes(), 0)?;
         Ok(())
     }
 }
 
 pub struct PairSocket {
     inner: zmq::Socket,
+}
+impl PairSocket {
+    pub fn last_endpoint(&self) -> String {
+        self.inner.get_last_endpoint().unwrap().unwrap()
+    }
 }
 impl SocketInterface for PairSocket {
     fn bind(&self, addr: &str) -> Result<()> {
@@ -92,34 +97,57 @@ impl SocketInterface for PairSocket {
     fn connect(&self, addr: &str) -> Result<()> {
         Ok(self.inner.connect(&tcp_endpoint(addr))?)
     }
-    fn read(&self) -> Result<Message> {
-        let msg = self.inner.recv_bytes(0)?;
-        let message = Message::from_bytes(&msg)?;
-        Ok(message)
+    fn disconnect(&self, addr: &str) -> Result<()> {
+        if addr.is_empty() {
+            self.inner
+                .disconnect(&self.inner.get_last_endpoint()?.unwrap())?;
+        } else {
+            self.inner.disconnect(addr)?;
+        }
+        Ok(())
     }
-    fn try_read(&self) -> Result<Message> {
-        // println!("reading");
+    fn read(&self) -> Result<Vec<u8>> {
+        let bytes = self.inner.recv_bytes(0)?;
+        Ok(bytes)
+    }
+    fn try_read(&self, timeout: Option<u32>) -> Result<Vec<u8>> {
         let events = self.inner.get_events().unwrap();
-        // if events.contains()
-        let poll = self.inner.poll(PollEvents::POLLIN, 0)?;
-
+        let poll = self
+            .inner
+            .poll(PollEvents::POLLIN, timeout.unwrap_or(0) as i64)?;
         if poll == 0 {
             return Err(Error::WouldBlock);
         } else {
-            let msg = self.inner.recv_bytes(0)?;
-            let message = Message::from_bytes(&msg)?;
-            Ok(message)
+            let bytes = self.inner.recv_bytes(0)?;
+            Ok(bytes)
         }
     }
-    fn send(&self, message: Message) -> Result<()> {
-        self.inner.send(message.pack(), 0)?;
+    fn send(&self, bytes: Vec<u8>) -> Result<()> {
+        self.inner.send(bytes, 0)?;
         Ok(())
+    }
+
+    fn read_msg(&self) -> Result<Message> {
+        let bytes = self.read()?;
+        let msg = Message::from_bytes(&bytes)?;
+        Ok(msg)
+    }
+
+    fn try_read_msg(&self, timeout: Option<u32>) -> Result<Message> {
+        let bytes = self.try_read(timeout)?;
+        let msg = Message::from_bytes(&bytes)?;
+        Ok(msg)
+    }
+
+    fn send_msg(&self, msg: Message) -> Result<()> {
+        self.send(msg.to_bytes())
     }
 }
 
 pub struct ReqSocket {
     inner: zmq::Socket,
 }
+
 impl SocketInterface for ReqSocket {
     fn bind(&self, addr: &str) -> Result<()> {
         Ok(self.inner.bind(&tcp_endpoint(addr))?)
@@ -127,24 +155,48 @@ impl SocketInterface for ReqSocket {
     fn connect(&self, addr: &str) -> Result<()> {
         Ok(self.inner.connect(&tcp_endpoint(addr))?)
     }
-    fn read(&self) -> Result<Message> {
-        let msg = self.inner.recv_bytes(0)?;
-        let message = Message::from_bytes(&msg)?;
-        Ok(message)
+    fn disconnect(&self, addr: &str) -> Result<()> {
+        if addr.is_empty() {
+            self.inner
+                .disconnect(&self.inner.get_last_endpoint()?.unwrap())?;
+        } else {
+            self.inner.disconnect(addr)?;
+        }
+        Ok(())
     }
-    fn try_read(&self) -> Result<Message> {
-        let poll = self.inner.poll(PollEvents::POLLIN, 1)?;
+    fn read(&self) -> Result<Vec<u8>> {
+        let bytes = self.inner.recv_bytes(0)?;
+        Ok(bytes)
+    }
+    fn try_read(&self, timeout: Option<u32>) -> Result<Vec<u8>> {
+        let poll = self
+            .inner
+            .poll(PollEvents::POLLIN, timeout.unwrap_or(1) as i64)?;
         if poll == 0 {
             return Err(Error::WouldBlock);
         } else {
-            let msg = self.inner.recv_bytes(0)?;
-            let message = Message::from_bytes(&msg)?;
-            Ok(message)
+            let bytes = self.inner.recv_bytes(0)?;
+            Ok(bytes)
         }
     }
-    fn send(&self, message: Message) -> Result<()> {
-        self.inner.send(message.pack(), 0)?;
+    fn send(&self, bytes: Vec<u8>) -> Result<()> {
+        self.inner.send(bytes, 0)?;
         Ok(())
+    }
+    fn read_msg(&self) -> Result<Message> {
+        let bytes = self.read()?;
+        let msg = Message::from_bytes(&bytes)?;
+        Ok(msg)
+    }
+
+    fn try_read_msg(&self, timeout: Option<u32>) -> Result<Message> {
+        let bytes = self.try_read(timeout)?;
+        let msg = Message::from_bytes(&bytes)?;
+        Ok(msg)
+    }
+
+    fn send_msg(&self, msg: Message) -> Result<()> {
+        self.send(msg.to_bytes())
     }
 }
 pub struct RepSocket {
@@ -157,24 +209,49 @@ impl SocketInterface for RepSocket {
     fn connect(&self, addr: &str) -> Result<()> {
         Ok(self.inner.connect(&tcp_endpoint(addr))?)
     }
-    fn read(&self) -> Result<Message> {
-        let msg = self.inner.recv_bytes(0)?;
-        let message = Message::from_bytes(&msg)?;
-        Ok(message)
+    fn disconnect(&self, addr: &str) -> Result<()> {
+        if addr.is_empty() {
+            self.inner
+                .disconnect(&self.inner.get_last_endpoint()?.unwrap())?;
+        } else {
+            self.inner.disconnect(addr)?;
+        }
+        Ok(())
     }
-    fn try_read(&self) -> Result<Message> {
-        let poll = self.inner.poll(PollEvents::POLLIN, 1)?;
+    fn read(&self) -> Result<Vec<u8>> {
+        let bytes = self.inner.recv_bytes(0)?;
+        Ok(bytes)
+    }
+    fn try_read(&self, timeout: Option<u32>) -> Result<Vec<u8>> {
+        let poll = self
+            .inner
+            .poll(PollEvents::POLLIN, timeout.unwrap_or(1) as i64)?;
         if poll == 0 {
             return Err(Error::WouldBlock);
         } else {
-            let msg = self.inner.recv_bytes(0)?;
-            let message = Message::from_bytes(&msg)?;
-            Ok(message)
+            let bytes = self.inner.recv_bytes(0)?;
+            Ok(bytes)
         }
     }
-    fn send(&self, message: Message) -> Result<()> {
-        self.inner.send(message.pack(), 0)?;
+    fn send(&self, bytes: Vec<u8>) -> Result<()> {
+        self.inner.send(bytes, 0)?;
         Ok(())
+    }
+
+    fn read_msg(&self) -> Result<Message> {
+        let bytes = self.read()?;
+        let msg = Message::from_bytes(&bytes)?;
+        Ok(msg)
+    }
+
+    fn try_read_msg(&self, timeout: Option<u32>) -> Result<Message> {
+        let bytes = self.try_read(timeout)?;
+        let msg = Message::from_bytes(&bytes)?;
+        Ok(msg)
+    }
+
+    fn send_msg(&self, msg: Message) -> Result<()> {
+        self.send(msg.to_bytes())
     }
 }
 
@@ -309,21 +386,35 @@ impl ServerDriver {
 
 /// Basic networking interface for `Coord`.
 pub(crate) struct CoordDriver {
-    conn: zmq::Socket,
+    ctx: zmq::Context,
+    pub greeter: RepSocket,
+    pub inviter: ReqSocket,
 }
 
-// impl CoordDriver {
-//     pub fn connect_worker(&mut self, addr: &str) -> Result<(), NetworkError> {
-//
-//         let tcp_addr = TcpAddr::from_str(&addr).unwrap();
-//     }
-// }
+impl CoordDriver {
+    pub fn new_pair_socket(&self) -> Result<PairSocket> {
+        Ok(PairSocket {
+            inner: self.ctx.socket(zmq::SocketType::PAIR)?,
+        })
+    }
+    // pub fn connect_worker(&mut self, addr: &str) -> Result<(), NetworkError> {
+    //
+    //     let tcp_addr = TcpAddr::from_str(&addr).unwrap();
+    // }
+}
 
 impl CoordDriverInterface for CoordDriver {
     fn new(addr: &str) -> Result<CoordDriver> {
         let ctx = zmq::Context::new();
-        let conn = ctx.socket(zmq::SocketType::ROUTER).unwrap();
-        Ok(CoordDriver { conn })
+        let rep_sock = ctx.socket(zmq::SocketType::REP)?;
+        rep_sock.bind(&tcp_endpoint(addr))?;
+        let req_sock = ctx.socket(zmq::SocketType::REQ)?;
+        req_sock.bind(&tcp_endpoint(&format!("{}1", addr)))?;
+        Ok(CoordDriver {
+            ctx,
+            greeter: RepSocket { inner: rep_sock },
+            inviter: ReqSocket { inner: req_sock },
+        })
     }
 
     fn accept(&mut self) -> Result<(WorkerId, Message)> {
@@ -333,8 +424,11 @@ impl CoordDriverInterface for CoordDriver {
         //let message = Message::from_bytes(msg.as_bytes()).unwrap();
         //Ok((id.0, message))
     }
+
+    /// Connects to a listening worker.
     fn connect_to_worker(&self, addr: &str, msg: Message) -> Result<()> {
         unimplemented!();
+        Ok(())
         //let client = libzmq::ClientBuilder::new().build().unwrap();
         //client.connect(new_endpoint(addr).unwrap());
         //thread::sleep(Duration::from_millis(100));
@@ -357,33 +451,45 @@ impl CoordDriverInterface for CoordDriver {
 
 /// Networking interface for `Worker`.
 ///
-/// ## TODO: consider implementing separate "message bus" for `Signal`s
+/// ## Discussion
 ///
 /// The use of two separate "buses" could potentially eliminate the need
 /// for a *type check* for each incoming `Signal`.
 pub struct WorkerDriver {
-    greeter: zmq::Socket,
-    coord: zmq::Socket,
-    comrades: HashMap<String, (zmq::Socket, zmq::Socket)>,
+    pub my_addr: String,
+    pub greeter: RepSocket,
+    pub inviter: ReqSocket,
+    pub coord: PairSocket,
+    comrades: HashMap<u32, PairSocket>,
 }
 
 impl WorkerDriverInterface for WorkerDriver {
     /// Create a new worker driver using an address
     fn new(addr: &str) -> Result<WorkerDriver> {
         let ctx = zmq::Context::new();
-        let greeter = ctx.socket(zmq::SocketType::ROUTER).unwrap();
-        greeter.bind(&tcp_endpoint(addr)).unwrap();
-        let coord = ctx.socket(zmq::SocketType::DEALER).unwrap();
+        let greeter = RepSocket {
+            inner: ctx.socket(zmq::SocketType::REP)?,
+        };
+        greeter.bind(&tcp_endpoint(addr))?;
+
+        let inviter = ReqSocket {
+            inner: ctx.socket(zmq::SocketType::REQ)?,
+        };
+        inviter.bind(&tcp_endpoint(&format!("{}1", addr)))?;
+
+        let coord = PairSocket {
+            inner: ctx.socket(zmq::SocketType::PAIR).unwrap(),
+        };
         Ok(WorkerDriver {
+            my_addr: addr.to_string(),
             greeter,
+            inviter,
             coord,
             comrades: HashMap::new(),
         })
     }
     fn accept(&self) -> Result<Message> {
-        unimplemented!();
-        //let msg = Message::from_bytes(self.greeter.recv_msg().unwrap().as_bytes()).unwrap();
-        //Ok(msg)
+        Message::from_bytes(&self.greeter.read()?)
     }
     fn connect_to_coord(&mut self, addr: &str, msg: Message) -> Result<()> {
         unimplemented!();
@@ -394,8 +500,8 @@ impl WorkerDriverInterface for WorkerDriver {
     }
 
     fn msg_read_central(&self) -> Result<Message> {
-        unimplemented!();
-        //let msg = self.coord.recv_msg().unwrap();
+        // unimplemented!();
+        Message::from_bytes(&self.coord.read()?)
         //let message = Message::from_bytes(msg.as_bytes()).unwrap();
         //Ok(message)
     }

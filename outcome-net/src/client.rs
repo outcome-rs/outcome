@@ -88,10 +88,10 @@ impl Client {
         let temp_client = self.driver.lock().unwrap().req_socket()?;
         //thread::sleep(Duration::from_millis(100));
         temp_client.connect(&crate::transport::zmq::tcp_endpoint(&addr));
-        temp_client.send(msg)?;
+        temp_client.send_msg(msg)?;
         println!("dialed server at: {}", addr);
 
-        let resp: RegisterClientResponse = temp_client.read()?.unpack_payload()?;
+        let resp: RegisterClientResponse = temp_client.read_msg()?.unpack_payload()?;
         match resp.redirect.as_str() {
             "" => (),
             _ => self

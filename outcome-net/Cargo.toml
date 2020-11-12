@@ -11,7 +11,7 @@ readme = "README.md"
 license = "AGPL-3.0"
 
 [features]
-default = []
+default = ["lz4"]
 transport_zmq = ["zmq"]
 transport_nng = ["nng"]
 
@@ -23,8 +23,11 @@ outcome-core = { version = "0.1.0", path = "../outcome-core" }
 
 serde = "1.0.117"
 rmp-serde = "0.14.4"
-lz4 = "1.23.2"
 thiserror = "1.0.21"
+id-pool = { version = "0.2.0", default-features = false, features = ["u32", "serde"] }
+log = "0.4.11"
+
+lz4 = { version = "1.23.2", optional = true }
 
 zmq = { version = "0.9.2", optional = true }
 nng = { version = "0.5.1", optional = true }
