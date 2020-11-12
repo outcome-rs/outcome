@@ -12,7 +12,7 @@ readme = "README.md"
 license = "AGPL-3.0"
 
 [features]
-default = []
+default = ["lz4"]
 
 machine = ["fasteval", "shlex", "getopts", "smallvec",  "rayon"] # enable runtime-level logic execution
 machine_script = ["annotate-snippets"] # enable script processor
@@ -39,13 +39,13 @@ semver = "0.11.0"
 log = "0.4.11"
 fnv = "1.0.7"
 strsim = "0.10.0"
-lz4 = "1.23.2"
 id-pool = { version = "0.2.0", default-features = false, features = ["u32", "serde"] }
 dunce = "1.0.1"
 arrayvec = { version = "0.5.2", features = ["serde"] }
 rand = "0.7.3"
 thiserror = "1.0.21"
 
+lz4 = { version = "1.23.2", optional = true }
 getopts = { version = "0.2.21", optional = true }
 shlex = { version = "0.1.1", optional = true }
 rayon = { version = "1.5.0", optional = true }

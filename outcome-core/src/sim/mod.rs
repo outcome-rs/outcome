@@ -77,6 +77,7 @@ impl Sim {
     /// Optional compression using LZ4 algorithm can be performed.
     pub fn to_snapshot(&self, compress: bool) -> Result<Vec<u8>> {
         let mut data = bincode::serialize(&self).unwrap();
+        #[cfg(feature = "lz4")]
         if compress {
             data = lz4::block::compress(&data, None, true)?;
         }
@@ -86,8 +87,15 @@ impl Sim {
     /// Create simulation instance from a vector of bytes representing a snapshot.
     pub fn from_snapshot(mut buf: Vec<u8>, compressed: bool) -> Result<Self> {
         if compressed {
+            #[cfg(feature = "lz4")]
             let data = lz4::block::decompress(&buf, None)?;
+            #[cfg(feature = "lz4")]
             let mut sim: Self = match bincode::deserialize(&data) {
+                Ok(ms) => ms,
+                Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
+            };
+            #[cfg(not(feature = "lz4"))]
+            let mut sim: Self = match bincode::deserialize(&buf) {
                 Ok(ms) => ms,
                 Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
             };
