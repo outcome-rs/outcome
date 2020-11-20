@@ -10,7 +10,7 @@ criterion_main!(barebones);
 fn add_entity(c: &mut Criterion) {
     let mut sim = Sim::from_scenario_at(SCENARIO_PATH).unwrap();
     sim.model.entities.push(EntityPrefabModel {
-        name: ShortString::from("bench_ent").unwrap(),
+        name: ShortString::from_truncate("bench_ent"),
         components: vec![],
     });
 
@@ -18,8 +18,8 @@ fn add_entity(c: &mut Criterion) {
         b.iter(|| {
             for n in 0..100 {
                 sim.spawn_entity(
-                    Some(&StringId::from("bench_ent").unwrap()),
-                    StringId::from(&format!("ent_{}", n)).unwrap(),
+                    Some(&StringId::from_truncate("bench_ent")),
+                    Some(StringId::from_truncate(&format!("ent_{}", n))),
                 );
             }
         })

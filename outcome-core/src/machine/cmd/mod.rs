@@ -35,7 +35,6 @@ use crate::{model, util, CompId, ShortString};
 use crate::{EntityId, MedString, Sim, StringId, VarType};
 
 use crate::address::Address;
-use crate::component::Component;
 use crate::entity::{Entity, EntityNonSer, Storage};
 // use crate::error::Error;
 use crate::model::SimModel;
@@ -46,7 +45,7 @@ use crate::Var;
 pub mod assembly;
 // pub mod equal;
 // pub mod eval;
-pub mod flow_control;
+pub mod blocks;
 pub mod get_set;
 
 #[cfg(feature = "machine_dynlib")]
@@ -54,6 +53,7 @@ pub mod lib;
 #[cfg(feature = "machine_lua")]
 pub mod lua;
 
+pub mod prefab;
 pub mod print;
 pub mod range;
 pub mod set;
@@ -143,20 +143,22 @@ pub enum Command {
     // central ext
     Invoke(Invoke),
     Spawn(Spawn),
+    Prefab(prefab::Prefab),
 
     // model assembly commands
     Register(assembly::Register),
     Extend(assembly::Extend),
 
     // flow control
-    If(flow_control::ifelse::If),
-    Else(flow_control::ifelse::Else),
-    End(flow_control::end::End),
-    Call(flow_control::call::Call),
-    ForIn(flow_control::forin::ForIn),
+    If(blocks::ifelse::If),
+    Else(blocks::ifelse::Else),
+    End(blocks::end::End),
+    Call(blocks::call::Call),
+    ForIn(blocks::forin::ForIn),
 
-    Procedure(flow_control::procedure::Procedure),
-    State(flow_control::state::State),
+    Procedure(blocks::procedure::Procedure),
+    State(blocks::state::State),
+    Component(blocks::component::ComponentBlock),
 
     Range(range::Range),
 }
@@ -183,25 +185,32 @@ impl Command {
             "register" => Ok(Command::Register(assembly::Register::new(args, location)?)),
             "print" => Ok(Command::PrintFmt(print::PrintFmt::new(args)?)),
             "spawn" => Ok(Command::Spawn(Spawn::new(args, location)?)),
+            "prefab" => Ok(prefab::Prefab::new(args, location)?),
+
+            "invoke" => Ok(Command::Invoke(Invoke::new(args)?)),
 
             "range" => Ok(Command::Range(range::Range::new(args)?)),
 
             // flow control
-            "if" => Ok(Command::If(flow_control::ifelse::If::new(
+            "if" => Ok(Command::If(blocks::ifelse::If::new(
                 args, location, &commands,
             )?)),
-            "else" => Ok(Command::Else(flow_control::ifelse::Else::new(args)?)),
-            "proc" | "procedure" => Ok(Command::Procedure(
-                flow_control::procedure::Procedure::new(args, location, &commands)?,
-            )),
-            "state" => Ok(flow_control::state::State::new(args, location, &commands)?),
-            "call" => Ok(Command::Call(flow_control::call::Call::new(
+            "else" => Ok(Command::Else(blocks::ifelse::Else::new(args)?)),
+            "proc" | "procedure" => Ok(Command::Procedure(blocks::procedure::Procedure::new(
                 args, location, &commands,
             )?)),
-            "end" => Ok(Command::End(flow_control::end::End::new(args)?)),
-            "for" => Ok(Command::ForIn(flow_control::forin::ForIn::new(
+            "call" => Ok(Command::Call(blocks::call::Call::new(
+                args, location, &commands,
+            )?)),
+            "end" => Ok(Command::End(blocks::end::End::new(args)?)),
+            "for" => Ok(Command::ForIn(blocks::forin::ForIn::new(
                 args, location, commands,
             )?)),
+
+            "component" => Ok(blocks::component::ComponentBlock::new(
+                args, location, &commands,
+            )?),
+            "state" => Ok(blocks::state::State::new(args, location, &commands)?),
 
             // "eval" => Ok(eval::Eval::new(args)?),
             // "evalreg" => Ok(eval::EvalReg::new(args, location, commands)?),
@@ -217,7 +226,7 @@ impl Command {
         &self,
         mut ent_storage: &mut Storage,
         mut ent_insta: &mut EntityNonSer,
-        mut comp: &mut Component,
+        mut comp_state: &mut StringId,
         mut call_stack: &mut super::CallStackVec,
         mut registry: &mut super::Registry,
         comp_uid: &CompId,
@@ -229,17 +238,17 @@ impl Command {
         let mut out_res = CommandResultVec::new();
         match self {
             Command::Sim(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, comp_state, comp_uid, location))
             }
             Command::Print(cmd) => out_res.push(cmd.execute_loc(ent_storage)),
             Command::PrintFmt(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, comp_state, comp_uid, location))
             }
             Command::Set(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, ent_name, comp_state, comp_uid, location))
             }
             Command::SetIntIntAddr(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, comp_uid, location))
             }
 
             // Command::Eval(cmd) => out_res.push(cmd.execute_loc(registry)),
@@ -258,31 +267,34 @@ impl Command {
             //Command::Jump(cmd) => out_res.push(cmd.execute_loc()),
 
             //Command::Get(cmd) => out_res.push(cmd.execute_loc()),
-
-            //Command::Invoke(cmd) => out_res.push(cmd.execute_loc()),
+            Command::Invoke(cmd) => out_res.push(cmd.execute_loc()),
             Command::Spawn(cmd) => out_res.push(cmd.execute_loc()),
-            Command::If(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
-            Command::Else(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
+            Command::Prefab(cmd) => out_res.extend(cmd.execute_loc()),
             Command::Call(cmd) => {
                 out_res.push(cmd.execute_loc(call_stack, line, sim_model, comp_uid, location))
             }
+
+            Command::If(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
+            Command::Else(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
             Command::ForIn(cmd) => {
                 out_res.push(cmd.execute_loc(call_stack, registry, comp_uid, ent_storage, location))
             }
             Command::End(cmd) => {
-                out_res.push(cmd.execute_loc(call_stack, comp_uid, comp, ent_storage, location))
+                out_res.push(cmd.execute_loc(call_stack, comp_uid, ent_storage, location))
             }
             Command::Procedure(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
+
             Command::State(cmd) => {
+                out_res.extend(cmd.execute_loc(call_stack, ent_name, comp_uid, line))
+            }
+            Command::Component(cmd) => {
                 out_res.extend(cmd.execute_loc(call_stack, ent_name, comp_uid, line))
             }
 
             Command::Extend(cmd) => out_res.push(cmd.execute_loc()),
             Command::Register(cmd) => out_res.push(cmd.execute_loc()),
 
-            Command::Range(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp, comp_uid, location))
-            }
+            Command::Range(cmd) => out_res.push(cmd.execute_loc(ent_storage, comp_uid, location)),
 
             _ => out_res.push(CommandResult::Continue),
         };
@@ -316,7 +328,10 @@ pub enum CentralExtCommand {
     Extend(assembly::Extend),
     Invoke(Invoke),
     Spawn(Spawn),
-    State(flow_control::state::State),
+    Prefab(prefab::Prefab),
+
+    State(blocks::state::State),
+    Component(blocks::component::ComponentBlock),
 }
 impl CentralExtCommand {
     pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityId, comp_uid: &CompId) -> Result<()> {
@@ -331,7 +346,11 @@ impl CentralExtCommand {
             CentralExtCommand::Register(cmd) => return cmd.execute_ext(sim, ent_uid, comp_uid),
             CentralExtCommand::Invoke(cmd) => return cmd.execute_ext(sim),
             CentralExtCommand::Spawn(cmd) => return cmd.execute_ext(sim),
+            CentralExtCommand::Prefab(cmd) => return cmd.execute_ext(sim),
+
             CentralExtCommand::State(cmd) => return cmd.execute_ext(sim),
+            CentralExtCommand::Component(cmd) => return cmd.execute_ext(sim),
+
             _ => return Ok(()),
         }
     }
@@ -468,7 +487,7 @@ pub struct Goto {
 impl Goto {
     fn from_str(args_str: &str) -> Result<Self> {
         Ok(Goto {
-            target_state: StringId::from(args_str).unwrap(),
+            target_state: StringId::from_truncate(args_str),
         })
     }
     pub fn execute_loc(&self) -> CommandResult {
@@ -494,25 +513,32 @@ impl Jump {
 }
 
 /// Invoke
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Invoke {
-    pub trigger_event: StringId,
+    pub events: Vec<StringId>,
 }
 impl Invoke {
-    fn from_str(args_str: &str) -> Result<Self> {
-        Ok(Invoke {
-            trigger_event: StringId::from(args_str).unwrap(),
-        })
+    pub fn new(args: Vec<String>) -> Result<Self> {
+        let mut events = Vec::new();
+        for arg in &args {
+            if let Ok(event_id) = StringId::from(arg) {
+                events.push(event_id);
+            } else {
+                // throw error
+            }
+        }
+        Ok(Invoke { events })
     }
 }
 impl Invoke {
     pub fn execute_loc(&self) -> CommandResult {
-        return CommandResult::ExecCentralExt(CentralExtCommand::Invoke(*self));
+        return CommandResult::ExecCentralExt(CentralExtCommand::Invoke(self.clone()));
     }
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
-        if !sim.event_queue.contains(&self.trigger_event) {
-            sim.event_queue
-                .push(StringId::from(&self.trigger_event.to_owned()).unwrap());
+        for event in &self.events {
+            if !sim.event_queue.contains(event) {
+                sim.event_queue.push(event.to_owned());
+            }
         }
         Ok(())
     }
@@ -522,28 +548,32 @@ impl Invoke {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Spawn {
     pub prefab: Option<StringId>,
-    pub spawn_id: StringId,
+    pub spawn_id: Option<StringId>,
 }
 impl Spawn {
     fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
         if args.len() == 0 {
+            Ok(Self {
+                prefab: None,
+                spawn_id: None,
+            })
+        } else if args.len() == 1 {
+            Ok(Self {
+                prefab: Some(StringId::from_truncate(&args[0])),
+                spawn_id: None,
+            })
+        } else if args.len() == 2 {
+            Ok(Self {
+                prefab: Some(StringId::from_truncate(&args[0])),
+                spawn_id: Some(StringId::from_truncate(&args[1])),
+            })
+        } else {
             return Err(Error::new(
                 *location,
                 ErrorKind::InvalidCommandBody(
-                    "`spawn` needs at least a single argument".to_string(),
+                    "`spawn` can't accept more than 2 arguments".to_string(),
                 ),
             ));
-        }
-        if args.len() == 2 {
-            Ok(Self {
-                prefab: Some(StringId::from(&args[0]).unwrap()),
-                spawn_id: StringId::from(&args[1]).unwrap(),
-            })
-        } else {
-            Ok(Self {
-                prefab: None,
-                spawn_id: StringId::from(&args[0]).unwrap(),
-            })
         }
     }
     // pub fn from_str(args_str: &str) -> MachineResult<Self> {

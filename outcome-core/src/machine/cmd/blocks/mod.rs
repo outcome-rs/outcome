@@ -1,4 +1,5 @@
 pub mod call;
+pub mod component;
 pub mod end;
 pub mod forin;
 pub mod ifelse;

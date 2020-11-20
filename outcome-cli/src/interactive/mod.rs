@@ -491,21 +491,32 @@ show_list               {show_list}
 
                     "quit" => break,
 
-                    // hidden commands for the interface
-                    "!interface-set" => {
+                    // hidden commands
+                    "interface-set" => {
                         let d = parse_text("<input>", &line);
                         interface.evaluate_directives(d);
                     }
-                    "!interface-get" => {
+                    "interface-get" => {
                         if let Some(var) = interface.get_variable(args) {
                             println!("{} = {}", args, var);
                         } else {
                             println!("no variable named `{}`", args);
                         }
                     }
-                    "!interface-list" => {
+                    "interface-list" => {
                         for (name, var) in interface.lock_reader().variables() {
                             println!("{:30} = {}", name, var);
+                        }
+                    }
+                    "spawn" => {
+                        let num = args.parse::<usize>().unwrap_or(100);
+                        match driver.deref_mut() {
+                            SimDriver::Local(sim) => {
+                                for _ in 0..num {
+                                    sim.spawn_entity(None, None);
+                                }
+                            }
+                            _ => (),
                         }
                     }
 
@@ -517,15 +528,9 @@ show_list               {show_list}
                 std::mem::drop(driver);
             }
             // handle quitting using signals and eof
-            ReadResult::Signal(Signal::Break) => {
-                interface.cancel_read_line();
-                break;
-            }
-            ReadResult::Signal(Signal::Interrupt) => {
-                interface.cancel_read_line();
-                break;
-            }
-            ReadResult::Eof => {
+            ReadResult::Signal(Signal::Break)
+            | ReadResult::Signal(Signal::Interrupt)
+            | ReadResult::Eof => {
                 interface.cancel_read_line();
                 break;
             }

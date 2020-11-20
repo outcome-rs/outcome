@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::address::Address;
-use crate::component::Component;
 use crate::entity::{Entity, Storage};
 use crate::model::SimModel;
 use crate::{model, Var};

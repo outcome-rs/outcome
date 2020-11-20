@@ -11,12 +11,16 @@ use crate::distr::{
 use crate::error::{Error, Result};
 use crate::model::Scenario;
 use crate::sim::interface::{SimInterface, SimInterfaceStorage};
-use crate::{Address, EntityUid, ShortString, SimModel, StringId, Var};
+use crate::{Address, EntityId, EntityUid, ShortString, SimModel, StringId, Var};
 
 #[cfg(feature = "machine")]
 use crate::machine::{cmd::CentralExtCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
+
+use crate::entity::Entity;
+use fnv::FnvHashMap;
+use id_pool::IdPool;
 
 /// Distributed simulation main authority. Does the necessary
 /// coordination work for distributed sim instances.
@@ -33,44 +37,38 @@ pub struct SimCentral {
     pub model: SimModel,
     pub clock: usize,
     pub event_queue: Vec<StringId>,
+
+    pub entities_idx: FnvHashMap<EntityId, EntityUid>,
+    entity_idpool: IdPool,
 }
 
 impl SimCentral {
     pub fn get_clock(&self) -> usize {
         self.clock
     }
-    pub fn from_scenario_at(path: PathBuf) -> Result<SimCentral> {
-        let scenario = Scenario::from_dir_at(path)?;
-        let sim_model = SimModel::from_scenario(scenario)?;
-        // SimCentral::from_model(sim_model)
-        let mut sim_central = SimCentral::from_model(sim_model)?;
-
-        let mut comp_model = sim_central
-            .model
-            .get_component_mut(&StringId::from("mod_init").unwrap())
-            .unwrap();
-
-        #[cfg(feature = "machine")]
-        {
-            let commands = comp_model.logic.commands.clone();
-            comp_model
-                .logic
-                .states
-                .insert(ShortString::from("init").unwrap(), (0, commands.len()));
-        }
-
-        Ok(sim_central)
-    }
     pub fn from_model(model: SimModel) -> Result<SimCentral> {
-        let mut event_queue = vec![
-            StringId::from("init").unwrap(),
-            StringId::from("tick").unwrap(),
-        ];
-        Ok(SimCentral {
+        let mut event_queue = vec![StringId::from_truncate("init")];
+        let mut sim_central = SimCentral {
             model: model.clone(),
             clock: 0,
             event_queue,
-        })
+            entities_idx: Default::default(),
+            entity_idpool: IdPool::new(),
+        };
+        // module script init
+        // #[cfg(feature = "machine_script")]
+        // {
+        //     sim_central.spawn_entity(
+        //         Some(&StringId::from("_mod_init").unwrap()),
+        //         StringId::from("_mod_init").unwrap(),
+        //         net,
+        //     )?;
+        //     sim_central
+        //         .event_queue
+        //         .push(StringId::from("_scr_init").unwrap());
+        // }
+
+        Ok(sim_central)
     }
     pub fn apply_model(&mut self) -> Result<()> {
         unimplemented!()
@@ -87,6 +85,34 @@ impl SimCentral {
     }
 }
 impl SimCentral {
+    /// Spawns a new entity based on the given prefab.
+    ///
+    /// If prefab is `None` then an empty entity is spawned.
+    pub fn spawn_entity<N: CentralCommunication>(
+        &mut self,
+        prefab: Option<&StringId>,
+        name: StringId,
+        net: N,
+    ) -> Result<()> {
+        let mut ent = match prefab {
+            Some(p) => Entity::from_prefab(p, &self.model)?,
+            None => Entity::empty(),
+        };
+
+        if !self.entities_idx.contains_key(&name) {
+            let new_uid = self.entity_idpool.request_id().unwrap();
+            self.entities_idx.insert(name, new_uid);
+            //TODO
+            // net.sig_send_to_node(0, );
+            // self.entities.insert(new_uid, ent);
+            Ok(())
+        } else {
+            Err(Error::Other(format!(
+                "Failed to add entity: entity named \"{}\" already exists",
+                name,
+            )))
+        }
+    }
     pub fn assign_entities(
         &self,
         node_count: usize,
@@ -132,8 +158,9 @@ impl SimCentral {
     //// let ent =
     //}
 
-    pub fn step_network<N: CentralCommunication + Sized>(
-        mut network: &mut N,
+    pub fn step_network<N: CentralCommunication>(
+        &mut self,
+        network: N,
         event_queue: Vec<StringId>,
     ) -> Result<()> {
         debug!("sim_central: starting processing step");

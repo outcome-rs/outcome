@@ -1,4 +1,3 @@
-use crate::component::Component;
 use crate::entity::Storage;
 use crate::{Address, CompId, StringId};
 
@@ -29,7 +28,6 @@ impl Range {
     pub fn execute_loc(
         &self,
         storage: &mut Storage,
-        component: &Component,
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {

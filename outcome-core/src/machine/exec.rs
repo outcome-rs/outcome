@@ -3,9 +3,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::component::Component;
 use crate::entity::{Entity, EntityNonSer, Storage};
-use crate::{component, Address, CompId, EntityId};
+use crate::{Address, CompId, EntityId, StringId};
 use crate::{Sim, SimModel};
 
 use super::cmd::{CentralExtCommand, Command, CommandResult, ExtCommand};
@@ -62,7 +61,7 @@ pub(crate) fn execute_loc(
     cmds: &Vec<Command>,
     mut ent_storage: &mut Storage,
     mut ent_insta: &mut EntityNonSer,
-    mut comp: &mut Component,
+    mut comp_state: &mut StringId,
     ent_uid: &EntityId,
     comp_uid: &CompId,
     sim_model: &SimModel,
@@ -94,12 +93,12 @@ pub(crate) fn execute_loc(
             .logic
             .cmd_location_map
             .get(&cmd_n)
-            .unwrap();
+            .ok_or(Error::new(LocationInfo::empty(), ErrorKind::Panic))?;
         // let mut comp = entity.components.get_mut(&comp_uid).unwrap();
         let results = loc_cmd.execute(
             &mut ent_storage,
             &mut ent_insta,
-            &mut comp,
+            &mut comp_state,
             &mut call_stack,
             &mut registry,
             comp_uid,
@@ -203,7 +202,7 @@ pub fn execute(
                 continue;
             }
         };
-        let mut comp = match entity.components.get_mut(&comp_uid) {
+        let mut comp_state = match entity.comp_state.get_mut(comp_uid) {
             Some(c) => c,
             None => {
                 error!(
@@ -218,7 +217,7 @@ pub fn execute(
         let results = loc_cmd.execute(
             &mut entity.storage,
             &mut entity.insta,
-            &mut comp,
+            &mut comp_state,
             &mut call_stack,
             &mut registry,
             comp_uid,

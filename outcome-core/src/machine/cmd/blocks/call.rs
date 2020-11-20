@@ -1,4 +1,3 @@
-use crate::component::Component;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
 use crate::{CompId, ShortString, StringId};
@@ -21,7 +20,7 @@ impl Call {
         commands: &Vec<CommandPrototype>,
     ) -> Result<Call, Error> {
         Ok(Call {
-            proc_name: ShortString::from(&args[0]).unwrap(),
+            proc_name: ShortString::from_truncate(&args[0]),
         })
     }
     pub fn execute_loc(

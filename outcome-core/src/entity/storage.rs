@@ -1,8 +1,11 @@
+use crate::address::LocalAddress;
 use crate::entity::StorageIndex;
 use crate::model::ComponentModel;
 use crate::{Address, CompId, StringId, Var, VarType};
 use fnv::FnvHashMap;
 use std::collections::HashMap;
+
+// use crate::error::Result;
 
 type SmallStorageIndex = (StorageIndex, VarType);
 
@@ -59,13 +62,23 @@ impl Storage {
     pub fn set_from_addr(&mut self, target: &Address, source: &Address) {
         unimplemented!();
     }
+    pub fn set_from_local_addr(&mut self, target: &LocalAddress, source: &LocalAddress) {
+        let var = self
+            .get_var(&source.storage_index().unwrap(), Some(source.var_type))
+            .unwrap()
+            .clone();
+        let mut target = self
+            .get_var_mut(&target.storage_index().unwrap(), Some(target.var_type))
+            .unwrap();
+        *target = var;
+    }
     pub fn set_from_var(&mut self, target: &Address, comp_uid: Option<&CompId>, var: &Var) {
         unimplemented!();
     }
     pub fn insert(&mut self, comp_name: &str, var_id: &str, var_type: &VarType, var: &Var) {
         let var_suid = (
-            StringId::from(comp_name).unwrap(),
-            StringId::from(var_id).unwrap(),
+            StringId::from_truncate(comp_name),
+            StringId::from_truncate(var_id),
         );
         self.map.insert((var_suid, *var_type), var.clone());
     }

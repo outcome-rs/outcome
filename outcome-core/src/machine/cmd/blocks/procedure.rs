@@ -1,7 +1,6 @@
 use std::convert::From;
 use std::iter::FromIterator;
 
-use crate::component::Component;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
 use crate::{Address, ShortString};
@@ -14,7 +13,7 @@ use super::super::{CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::error::ErrorKind;
 use crate::machine::Result;
 
-pub const PROCEDURE_COMMAND_NAMES: [&'static str; 2] = ["proc", "procedure"];
+pub const COMMAND_NAMES: [&'static str; 2] = ["proc", "procedure"];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Procedure {
@@ -34,21 +33,21 @@ impl Procedure {
         // TODO all these names should probably be declared in a
         // better place start names
         let mut start_names = Vec::new();
-        start_names.extend(&PROCEDURE_COMMAND_NAMES);
+        start_names.extend(&COMMAND_NAMES);
         // middle names
         let mut middle_names = Vec::new();
         // end names
         let mut end_names = Vec::new();
-        end_names.extend(&super::end::END_COMMAND_NAMES);
+        end_names.extend(&super::end::COMMAND_NAMES);
         // other block starting names
         let mut start_blocks = Vec::new();
         start_blocks.extend(&super::ifelse::IF_COMMAND_NAMES);
         start_blocks.extend(&super::ifelse::ELSE_COMMAND_NAMES);
-        start_blocks.extend(&super::forin::FOR_COMMAND_NAMES);
-        start_blocks.extend(&super::state::STATE_COMMAND_NAMES);
+        start_blocks.extend(&super::forin::COMMAND_NAMES);
+        start_blocks.extend(&super::state::COMMAND_NAMES);
         // other block ending names
         let mut end_blocks = Vec::new();
-        end_blocks.extend(&super::end::END_COMMAND_NAMES);
+        end_blocks.extend(&super::end::COMMAND_NAMES);
 
         let positions_options = match super::super::super::command_search(
             location,
@@ -69,7 +68,7 @@ impl Procedure {
 
         match positions_options {
             Some(positions) => Ok(Procedure {
-                name: ShortString::from(&args[0]).unwrap(),
+                name: ShortString::from_truncate(&args[0]),
                 start_line: line,
                 end_line: positions.0,
                 output_variable: None,

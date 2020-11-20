@@ -1,16 +1,15 @@
 use arrayvec::ArrayVec;
 
-use crate::component::Component;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
 use crate::var::Var;
-use crate::CompId;
+use crate::{CompId, VarType};
 
 use super::super::super::{error::Error, CallInfo, CallStackVec, LocationInfo, ProcedureCallInfo};
 use super::super::CommandResult;
 use super::forin::ForIn;
 
-pub const END_COMMAND_NAMES: [&'static str; 1] = ["end"];
+pub const COMMAND_NAMES: [&'static str; 1] = ["end"];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct End {}
@@ -23,7 +22,6 @@ impl End {
         &self,
         call_stack: &mut CallStackVec,
         comp_uid: &CompId,
-        component: &mut Component,
         ent_storage: &mut Storage,
         location: &LocationInfo,
     ) -> CommandResult {
@@ -39,14 +37,25 @@ impl End {
             CallInfo::ForIn(ref mut fici) => {
                 // forin that's still not finished iterating should not be popped off
                 if fici.iteration < fici.target_len {
-                    // update the iterator variable
-                    ForIn::update_variable(
-                        &fici.variable,
-                        // &fici.variable_type,
-                        &fici.target,
-                        fici.iteration,
-                        ent_storage,
-                    );
+                    if let Some(target) = &fici.target {
+                        if let Some(source_variable) = &fici.variable {
+                            // update the iterator variable
+                            ForIn::update_variable(
+                                source_variable,
+                                // &fici.variable_type,
+                                target,
+                                fici.iteration,
+                                ent_storage,
+                            );
+                        } else {
+                            if let Some(int_var) =
+                                ent_storage.get_int_mut(&target.storage_index().unwrap())
+                            {
+                                *int_var = fici.iteration as i64;
+                            }
+                        }
+                    }
+
                     fici.iteration = fici.iteration + 1;
                     return CommandResult::JumpToLine(fici.start + 1);
                 } else {

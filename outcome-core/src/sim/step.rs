@@ -1,4 +1,4 @@
-//! Step processing functions for the Sim struct.
+//! Step processing functions for the `Sim` struct.
 
 use std::sync::{Arc, Mutex};
 
@@ -15,12 +15,16 @@ use super::Sim;
 
 /// Single step processing functions.
 impl Sim {
-    /// Process single step, utilizing multi-threading.
+    /// Performs single simulation step, utilizing multi-threading.
+    ///
+    /// # Process description
     ///
     /// This function uses a parallel iterator to iterate over all entities.
     /// Each entity-owning thread then makes a list of components to process
     /// using entity's component queue to find matches based on the triggered
-    /// events. For each processed component, current state value is found.
+    /// events.
+    ///
+    /// For each processed component, current state value is found.
     /// Logic processing utility function is used to process component
     /// commands. Once parallel iteration over entities is done, last thing
     /// to do is executing external and central-external commands that have
@@ -29,7 +33,7 @@ impl Sim {
         // clone event queue into a local variable
         let mut event_queue = self.event_queue.clone();
 
-        let arrstr_step = StringId::from("step").unwrap();
+        let arrstr_step = StringId::from_unchecked("step");
         if !event_queue.contains(&arrstr_step) {
             event_queue.push(arrstr_step);
         }
@@ -39,7 +43,7 @@ impl Sim {
         {
             let model = &self.model;
 
-            // declare sync vecs for external and central-external
+            // declare atomic vecs for ext and central-ext commands
             let ext_cmds: Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>> =
                 Arc::new(Mutex::new(Vec::new()));
             let central_ext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>> =
@@ -47,29 +51,15 @@ impl Sim {
 
             // loc phase
             self.entities.par_iter_mut().for_each(
-                // self.entities_idx.par_iter_mut().for_each(
-                //     |(sid, uid): (&EntityId, &mut EntityUid)| {
-                // |(ent_uid, mut entity): (&EntityId, &mut Entity)| {
                 |(ent_uid, mut entity): (&EntityUid, &mut Entity)| {
-                    // TODO
                     step_entity_local(
                         model,
                         &event_queue,
-                        // &(entity.model_type, entity.model_id),
+                        ent_uid,
                         entity,
                         &ext_cmds,
                         &central_ext_cmds,
                     );
-                    // let mut entity = self.entities.get_mut(uid).unwrap();
-
-                    // step_entity_local(
-                    //     model,
-                    //     &event_queue,
-                    //     sid,
-                    //     entity,
-                    //     &ext_cmds,
-                    //     &central_ext_cmds,
-                    // );
                 },
             );
 
@@ -83,33 +73,25 @@ impl Sim {
     }
 }
 
-fn step(model: &SimModel, event_queue: &Vec<StringId>) -> Result<(), Error> {
-    Ok(())
-}
-
 #[cfg(feature = "machine")]
 pub(crate) fn step_entity_local(
     model: &SimModel,
     event_queue: &Vec<StringId>,
-    // ent_uid: &EntityId,
+    ent_uid: &EntityUid,
     mut entity: &mut Entity,
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
     central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>>,
 ) -> Result<(), Error> {
     for event in event_queue {
-        // debug!("inside entity: {:?}, processing event: {}", ent_uid, event);
-        // let mut to_remove_from_ent_queue = Vec::new();
-        // debug!("entity.components.queue for {} len: {}", event, entity.components.queue[event].len());
-
-        if let Some(event_queue) = entity.components.queue.get(event) {
+        if let Some(event_queue) = entity.comp_queue.get(event) {
             for comp_uid in event_queue {
-                if let Some(comp) = entity.components.map.get_mut(comp_uid) {
+                if let Some(comp_state) = entity.comp_state.get_mut(comp_uid) {
                     // let comp_curr_state = &comp.current_state;
-                    if &comp.current_state == "idle" {
+                    if comp_state.as_ref() == "idle" {
                         continue;
                     }
                     if let Some(comp_model) = model.get_component(comp_uid) {
-                        let (start, end) = match comp_model.logic.states.get(&comp.current_state) {
+                        let (start, end) = match comp_model.logic.states.get(comp_state) {
                             Some((s, e)) => (Some(*s), Some(*e)),
                             None => continue,
                         };
@@ -117,7 +99,7 @@ pub(crate) fn step_entity_local(
                             &comp_model.logic.commands,
                             &mut entity.storage,
                             &mut entity.insta,
-                            comp,
+                            comp_state,
                             //TODO
                             &EntityId::new(),
                             &comp_uid,

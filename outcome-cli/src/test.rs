@@ -39,9 +39,9 @@ pub fn test_sim_struct(sim: &Sim) {
     let model_component_count = sim.model.components.len();
     let total_entity_count = sim.get_entities().len();
     let mut total_component_count = 0;
-    for ent in sim.get_entities() {
-        total_component_count += ent.components.map.len();
-    }
+    // for ent in sim.get_entities() {
+    //     total_component_count += ent.components.map.len();
+    // }
     let mut total_str_variables_count = 0;
     let mut total_int_variables_count = 0;
     let mut total_float_variables_count = 0;

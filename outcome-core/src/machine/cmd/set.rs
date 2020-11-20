@@ -1,9 +1,8 @@
 use super::{Command, CommandResult};
-use crate::address::Address;
-use crate::component::Component;
+use crate::address::{Address, LocalAddress};
 use crate::entity::{Entity, Storage};
 use crate::var::{Var, VarType};
-use crate::{CompId, MedString, StringId};
+use crate::{CompId, EntityId, MedString, StringId};
 
 use super::super::LocationInfo;
 use crate::machine::{Error, ErrorKind, Result};
@@ -17,7 +16,6 @@ impl SetIntIntAddr {
     pub fn execute_loc(
         &self,
         storage: &mut Storage,
-        component: &mut Component,
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {
@@ -29,18 +27,18 @@ impl SetIntIntAddr {
 /// Generic `set` command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Set {
-    target: Address,
+    target: LocalAddress,
     source: SetSource,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SetSource {
-    Address(Address),
+    Address(LocalAddress),
     Value(Var),
     None,
 }
 impl Set {
     pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Command> {
-        let target = match Address::from_str(&args[0]) {
+        let target = match LocalAddress::from_str(&args[0]) {
             Ok(addr) => addr,
             Err(e) => {
                 return Err(Error::new(
@@ -62,7 +60,7 @@ impl Set {
                 source_str = &args[1];
             }
             if source_str.starts_with("$") {
-                let address = match Address::from_str(&source_str[1..]) {
+                let address = match LocalAddress::from_str(&source_str[1..]) {
                     Ok(addr) => addr,
                     Err(e) => {
                         return Err(Error::new(
@@ -97,8 +95,8 @@ impl Set {
             if let SetSource::Address(saddr) = source {
                 if saddr.var_type == VarType::Int {
                     let cmd = SetIntIntAddr {
-                        target: target.get_storage_index(),
-                        source: target.get_storage_index(),
+                        target: target.storage_index().unwrap(),
+                        source: target.storage_index().unwrap(),
                     };
                     return Ok(Command::SetIntIntAddr(cmd));
                 }
@@ -111,22 +109,32 @@ impl Set {
     pub fn execute_loc(
         &self,
         entity_db: &mut Storage,
-        component: &mut Component,
+        ent_name: &EntityId,
+        comp_state: &mut StringId,
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {
         let var_type = &self.target.var_type;
+        let target_addr = Address {
+            entity: *ent_name,
+            component: self.target.comp.unwrap_or(*comp_uid),
+            var_type: self.target.var_type,
+            var_id: self.target.var_id,
+        };
         match &self.source {
-            SetSource::Address(addr) => entity_db.set_from_addr(&self.target, &addr),
+            SetSource::Address(addr) => {
+                // entity_db.set_from_addr(&self.target, &addr)
+                entity_db.set_from_local_addr(&self.target, addr);
+            }
             SetSource::Value(val) => {
                 if entity_db
-                    .get_var_from_addr(&self.target, Some(comp_uid))
+                    .get_var_from_addr(&target_addr, Some(comp_uid))
                     .is_some()
                 {
-                    entity_db.set_from_var(&self.target, Some(comp_uid), val);
+                    entity_db.set_from_var(&target_addr, Some(comp_uid), val);
                 } else {
                     // find out which comp_uid to use
-                    let comp_uid = self.target.component;
+                    let comp_uid = self.target.comp.unwrap_or(*comp_uid);
                     let var_id = self.target.var_id;
                     entity_db.insert(&comp_uid, &var_id, var_type, val);
                     // return CommandResult::Error(

@@ -38,19 +38,12 @@ pub struct Worker {
     pub pair_sock: PairSocket,
 }
 
-/// Cluster coordinator.
-///
-/// # Abstraction over `SimCentral`
-///
-/// Coordinator wraps
-pub struct Coord {
+pub struct CoordNetwork {
     /// IP address of the coordinator
     pub address: String,
     /// Network driver
     driver: CoordDriver,
 
-    /// Central authority abstraction
-    pub central: SimCentral,
     /// List of co-op workers
     pub workers: Vec<Worker>,
     /// Id pool for workers
@@ -58,37 +51,20 @@ pub struct Coord {
     /// Entity-worker routing table
     pub routing_table: HashMap<EntityUid, WorkerId>,
 }
-
-impl Coord {
-    /// Creates a new coordinator.
-    pub fn new(central: SimCentral, addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
-        let mut workers = Vec::new();
-        let mut id_pool = IdPool::new();
-
-        let driver = CoordDriver::new(addr)?;
-
-        let mut coord = Coord {
+impl CoordNetwork {
+    pub fn new(addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
+        let mut net = CoordNetwork {
             address: addr.to_string(),
-            driver,
-            central,
-            routing_table: HashMap::new(),
-            workers,
-            id_pool,
+            driver: CoordDriver::new(addr)?,
+            workers: vec![],
+            id_pool: IdPool::new(),
+            routing_table: Default::default(),
         };
-
         for worker_addr in &worker_addrs {
-            coord.add_worker(worker_addr)?;
+            net.add_worker(worker_addr)?;
         }
-
-        Ok(coord)
+        Ok(net)
     }
-
-    /// Creates a new coordinator using path to scenario.
-    pub fn new_from_scenario_at(path: &str, addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
-        let sim_central = distr::central::SimCentral::from_scenario_at(PathBuf::from(path))?;
-        Self::new(sim_central, addr, worker_addrs)
-    }
-
     fn add_worker(&mut self, worker_addr: &str) -> Result<u32> {
         let pair_sock = self.driver.new_pair_socket()?;
         let id = self.id_pool.request_id().unwrap();
@@ -103,7 +79,30 @@ impl Coord {
         Ok(id)
     }
 
-    fn initialize_worker(&mut self, id: u32) -> Result<()> {
+    /// Initializes coordinator by connecting to all the listed workers.
+    ///
+    /// # Connection process
+    ///
+    /// Coordinator sends an *introduction* request to the worker. The worker
+    /// responds by sending back a *redirect* address with a dedicated port
+    /// where coordinator can connect to. Coordinator connects to the worker
+    /// at provided address.
+    ///
+    /// # Public address workers
+    ///
+    /// Coordinator can only initiate connection with workers that are publicly
+    /// visible on the network. Workers behind a firewall that don't have any
+    /// ports exposed will have to initiate connection to the coordinator
+    /// themselves.
+    /// Initializes coordinator by connecting to all the workers.
+    pub fn initialize(&mut self, model: SimModel) -> Result<()> {
+        for worker_id in self.workers.iter().map(|w| w.id).collect::<Vec<u32>>() {
+            self.initialize_worker(worker_id, model.clone())?;
+        }
+        Ok(())
+    }
+
+    fn initialize_worker(&mut self, id: u32, model: SimModel) -> Result<()> {
         let worker = self
             .workers
             .iter()
@@ -124,41 +123,42 @@ impl Coord {
         let resp: IntroduceCoordResponse = self.driver.inviter.read_msg()?.unpack_payload()?;
         // println!("got response: {:?}", resp);
         self.driver.inviter.disconnect("")?;
-        let init_sig = Signal::InitializeNode((self.central.model.clone(), Vec::new()));
+        let init_sig = Signal::InitializeNode((model, Vec::new()));
         worker
             .pair_sock
             .send(crate::sig::Signal::from(init_sig).to_bytes()?)?;
         Ok(())
     }
 
-    fn add_initialize_worker(&mut self, worker_addr: &str) -> Result<()> {
+    fn add_initialize_worker(&mut self, worker_addr: &str, model: SimModel) -> Result<()> {
         let id = self.add_worker(worker_addr)?;
-        self.initialize_worker(id)?;
+        self.initialize_worker(id, model)?;
         Ok(())
     }
+}
 
-    /// Initializes coordinator by connecting to all the listed workers.
-    ///
-    /// # Connection process
-    ///
-    /// Coordinator sends an *introduction* request to the worker. The worker
-    /// responds by sending back a *redirect* address with a dedicated port
-    /// where coordinator can connect to. Coordinator connects to the worker
-    /// at provided address.
-    ///
-    /// # Public address workers
-    ///
-    /// Coordinator can only initiate connection with workers that are publicly
-    /// visible on the network. Workers behind a firewall that don't have any
-    /// ports exposed will have to initiate connection to the coordinator
-    /// themselves.
-    /// Initializes coordinator by connecting to all the workers.
-    pub fn initialize(&mut self) -> Result<()> {
-        for worker_id in self.workers.iter().map(|w| w.id).collect::<Vec<u32>>() {
-            self.initialize_worker(worker_id)?;
-        }
+/// Cluster coordinator.
+///
+/// # Abstraction over `SimCentral`
+///
+/// Coordinator wraps
+pub struct Coord {
+    /// Central authority abstraction
+    pub central: SimCentral,
+    // pub network: CoordNetwork,
+}
 
-        Ok(())
+impl Coord {
+    /// Creates a new coordinator.
+    pub fn new(central: SimCentral) -> Result<Self> {
+        let mut coord = Coord { central };
+        Ok(coord)
+    }
+
+    /// Creates a new coordinator using a sim model.
+    pub fn new_from_model(model: SimModel) -> Result<Self> {
+        let sim_central = distr::central::SimCentral::from_model(model)?;
+        Self::new(sim_central)
     }
 
     /// Starts a new cluster coordinator and initializes workers.
@@ -166,17 +166,39 @@ impl Coord {
         scenario_path: &str,
         addr: &str,
         worker_addrs: Vec<String>,
-    ) -> Result<Arc<Mutex<Coord>>> {
-        let mut coord = Coord::new_from_scenario_at(scenario_path, addr, worker_addrs)?;
-        coord.initialize();
+    ) -> Result<(Arc<Mutex<Coord>>, Arc<Mutex<CoordNetwork>>)> {
+        let mut net = CoordNetwork::new(addr, worker_addrs)?;
+        let scenario = outcome::model::Scenario::from_dir_at(PathBuf::from(scenario_path))?;
+        let model = SimModel::from_scenario(scenario)?;
+        net.initialize(model.clone());
+        let mut coord = Coord::new_from_model(model)?;
+
+        // module script init
+        //TODO put this somewhere else?
+        #[cfg(feature = "machine_script")]
+        {
+            coord.central.spawn_entity(
+                Some(&StringId::from("_mod_init").unwrap()),
+                StringId::from("_mod_init").unwrap(),
+                &net,
+            )?;
+            coord
+                .central
+                .event_queue
+                .push(StringId::from("_scr_init").unwrap());
+        }
+
+        let net_arc = Arc::new(Mutex::new(net));
         let coord_arc = Arc::new(Mutex::new(coord));
         debug!("created new cluster coordinator");
 
         let coord_arc_clone = coord_arc.clone();
+        let net_arc_clone = net_arc.clone();
+        let model = coord_arc.lock().unwrap().central.model.clone();
         thread::spawn(move || loop {
             sleep(Duration::from_millis(100));
-            let mut coord_guard = coord_arc_clone.lock().unwrap();
-            if let Ok(msg) = &coord_guard.driver.greeter.try_read_msg(None) {
+            let mut net_guard = net_arc_clone.lock().unwrap();
+            if let Ok(msg) = &net_guard.driver.greeter.try_read_msg(None) {
                 match msg.kind.as_str() {
                     INTRODUCE_WORKER_TO_COORD_REQUEST => {
                         debug!("handling new worker connection request");
@@ -184,22 +206,24 @@ impl Coord {
                         let resp = IntroduceWorkerToCoordResponse {
                             error: "".to_string(),
                         };
-                        &coord_guard
+                        &net_guard
                             .driver
                             .greeter
                             .send_msg(Message::from_payload(resp, false).unwrap());
 
-                        coord_guard.add_initialize_worker(&req.worker_addr).unwrap();
+                        net_guard
+                            .add_initialize_worker(&req.worker_addr, model.clone())
+                            .unwrap();
                     }
                     _ => trace!("msg.kind: {}", msg.kind),
                 }
             }
         });
-        let coord_arc_clone = coord_arc.clone();
+        let net_arc_clone = net_arc.clone();
         thread::spawn(move || loop {
             sleep(Duration::from_millis(1));
-            let mut coord_guard = coord_arc_clone.lock().unwrap();
-            for worker in &coord_guard.workers {
+            let mut guard = net_arc_clone.lock().unwrap();
+            for worker in &guard.workers {
                 match worker.pair_sock.try_read(None) {
                     Ok(sig) => debug!("{:?}", sig::Signal::from_bytes(&sig).unwrap()),
                     _ => (),
@@ -207,7 +231,7 @@ impl Coord {
             }
         });
 
-        Ok(coord_arc)
+        Ok((coord_arc, net_arc))
     }
 
     // /// Starts a new cluster coordinator.
@@ -320,8 +344,8 @@ impl Coord {
     // }
 }
 
-impl outcome::distr::CentralCommunication for &mut Coord {
-    fn sig_read(&mut self) -> outcome::Result<(String, Signal)> {
+impl outcome::distr::CentralCommunication for &mut CoordNetwork {
+    fn sig_read(&self) -> outcome::Result<(String, Signal)> {
         //TODO
         for worker in &self.workers {
             let bytes = worker.pair_sock.read().unwrap();
@@ -333,19 +357,19 @@ impl outcome::distr::CentralCommunication for &mut Coord {
         ))
     }
 
-    fn sig_read_from(&mut self, node_id: &str) -> outcome::Result<Signal> {
+    fn sig_read_from(&self, node_id: u32) -> outcome::Result<Signal> {
         unimplemented!()
     }
 
-    fn sig_send_to_node(&mut self, node_id: &str, signal: Signal) -> outcome::Result<()> {
+    fn sig_send_to_node(&self, node_id: u32, signal: Signal) -> outcome::Result<()> {
         unimplemented!()
     }
 
-    fn sig_send_to_entity(&mut self, entity_uid: u32) -> outcome::Result<()> {
+    fn sig_send_to_entity(&self, entity_uid: u32) -> outcome::Result<()> {
         unimplemented!()
     }
 
-    fn sig_broadcast(&mut self, signal: Signal) -> outcome::Result<()> {
+    fn sig_broadcast(&self, signal: Signal) -> outcome::Result<()> {
         let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
         for worker in &self.workers {
             worker.pair_sock.send(sig_bytes.clone()).unwrap();

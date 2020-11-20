@@ -1,6 +1,5 @@
 use smallvec::SmallVec;
 
-use crate::component::Component;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
 use crate::MedString;
@@ -62,14 +61,14 @@ impl If {
         // start_names.append(&mut middle_names.clone());
         // end names
         let mut end_names = Vec::new();
-        end_names.extend(&super::end::END_COMMAND_NAMES);
+        end_names.extend(&super::end::COMMAND_NAMES);
         // other block starting names
         let mut start_blocks = Vec::new();
-        start_blocks.extend(&super::procedure::PROCEDURE_COMMAND_NAMES);
-        start_blocks.extend(&super::forin::FOR_COMMAND_NAMES);
+        start_blocks.extend(&super::procedure::COMMAND_NAMES);
+        start_blocks.extend(&super::forin::COMMAND_NAMES);
         // other block ending names
         let mut end_blocks = Vec::new();
-        end_blocks.extend(&super::end::END_COMMAND_NAMES);
+        end_blocks.extend(&super::end::COMMAND_NAMES);
 
         let positions_opt = match super::super::super::command_search(
             location,

@@ -543,12 +543,12 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     let sim_instance = match matches.is_present("cluster") {
         true => {
             /// run a coordinator
-            let mut coord = Coord::start(
+            let (mut coord, coord_net) = Coord::start(
                 scenario_path,
                 matches.value_of("cluster").unwrap(),
                 worker_addrs,
             )?;
-            SimConnection::ClusterCoord(coord)
+            SimConnection::ClusterCoord(coord, coord_net)
         }
         false => {
             /// run a local simulation instance
@@ -561,10 +561,10 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     let mut server = Arc::new(Mutex::new(Server::new(sim_instance, server_address)?));
 
     println!("listening for new clients on: {}", server_address);
-    if let SimConnection::ClusterCoord(coord) = &server.lock().unwrap().sim {
+    if let SimConnection::ClusterCoord(coord, net) = &server.lock().unwrap().sim {
         println!(
             "listening for new workers on: {}",
-            &coord.lock().unwrap().address
+            &net.lock().unwrap().address
         );
     }
 

@@ -14,7 +14,7 @@ use crate::machine::{error::Error, ErrorKind, LocationInfo, Result};
 ///
 /// Takes in an additional `data_table` that can be used by preprocessor
 /// directives.
-pub fn run(
+pub(crate) fn run(
     instructions: &mut Vec<Instruction>,
     sim_model: &mut SimModel,
     data_table: &HashMap<String, String>,
@@ -57,15 +57,13 @@ fn eliminate_directives(instructions: &mut Vec<Instruction>) -> Result<()> {
     Ok(())
 }
 
-/// Runs all include directives, inserting new instruction
-/// sets parsed from specified files into the main
-/// instruction set.
+/// Runs all include directives, inserting new instruction sets parsed from
+/// specified files into the main instruction set.
 ///
 /// # File paths
-/// Paths to included files are resolved based on the
-/// location info bound to the processed instruction. In
-/// short file paths specified in include directives are
-/// written as relative to the file where the directive is
+/// Paths to included files are resolved based on the location info bound to
+/// the processed instruction. In short file paths specified in include
+/// directives are written as relative to the file where the directive is
 /// present.
 fn run_includes(instructions: &mut Vec<Instruction>) -> Result<()> {
     // run until there are no include directives left

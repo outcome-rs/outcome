@@ -176,7 +176,7 @@ pub mod parser;
 pub mod preprocessor;
 pub mod util;
 
-pub use self::parser::parse_script_at;
+pub(crate) use self::parser::parse_script_at;
 
 //TODO
 use super::{CommandPrototype, LocationInfo};

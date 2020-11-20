@@ -85,7 +85,7 @@ impl Extend {
                 ),
             ));
         }
-        let comp_signature = StringId::from(&args[0]).unwrap();
+        let comp_signature = StringId::from_truncate(&args[0]);
         let mut source_files = Vec::new();
         for i in 1..args.len() {
             // check for potential recursion and abort if present
@@ -159,7 +159,7 @@ impl Register {
                     .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
             }),
             "component_type" => RegisterKind::ComponentType(RegComponentType {
-                signature: StringId::from(&args[1]).unwrap(),
+                signature: StringId::from_truncate(&args[1]),
             }),
             "entity" => {
                 let brief = format!("usage: {} entity <signature> [options]", cmd_name);
@@ -192,7 +192,7 @@ impl Register {
                     ));
                 }
                 RegisterKind::Entity(RegEntity {
-                    signature: StringId::from(&matches.free[0]).unwrap(),
+                    signature: StringId::from_truncate(&matches.free[0]),
                     do_spawn: matches.opt_present("spawn"),
                 })
             }
@@ -235,12 +235,12 @@ impl Register {
                 let trigger_events: Vec<ShortString> = match matches.opt_str("trigger") {
                     Some(str) => str
                         .split(',')
-                        .map(|s| ShortString::from(s).unwrap())
+                        .map(|s| ShortString::from_truncate(s))
                         .collect::<Vec<ShortString>>(),
                     None => Vec::new(),
                 };
                 RegisterKind::Component(RegComponent {
-                    signature: StringId::from(&matches.free[0]).unwrap(),
+                    signature: StringId::from_truncate(&matches.free[0]),
                     trigger_events,
                     do_attach: matches.opt_present("attach"),
                 })
@@ -279,7 +279,7 @@ impl Register {
                 // let signature = Address::from_str(&self.args[0]).unwrap().resolve(sim);
                 // println!("{:?}", signature);
                 let mut ent_model = EntityPrefabModel {
-                    name: ShortString::from(&reg.signature.to_string()).unwrap(),
+                    name: ShortString::from_truncate(&reg.signature.to_string()),
                     components: Vec::new(),
                 };
                 sim.model.entities.push(ent_model);
@@ -298,9 +298,9 @@ impl Register {
             RegisterKind::Component(reg) => {
                 debug!("registering component");
                 let comp_model = ComponentModel {
-                    name: ShortString::from(&reg.signature.to_string()).unwrap(),
+                    name: ShortString::from_truncate(&reg.signature.to_string()),
                     vars: Vec::new(),
-                    start_state: ShortString::from("idle").unwrap(),
+                    start_state: ShortString::from_unchecked("idle"),
                     triggers: reg.trigger_events.clone(),
                     // triggers: vec![ShortString::from_str_truncate("step")],
                     logic: crate::model::LogicModel::empty(),

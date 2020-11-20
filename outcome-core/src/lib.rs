@@ -72,7 +72,6 @@ extern crate serde;
 extern crate log;
 
 pub mod address;
-pub mod component;
 pub mod distr;
 pub mod entity;
 pub mod error;
@@ -81,6 +80,7 @@ pub mod query;
 pub mod sim;
 pub mod var;
 
+mod arraystring;
 mod util;
 
 // features
@@ -187,17 +187,17 @@ pub type Int = i64;
 /// Default length is 23 characters, but it can be restricted to just
 /// 10 characters using the `short_stringid` feature.
 #[cfg(not(feature = "short_stringid"))]
-pub type StringId = arrayvec::ArrayString<[u8; 23]>;
+pub type StringId = arraystring::ArrayString<[u8; 23]>;
 /// Fixed-size string used internally for indexing objects.
 #[cfg(feature = "short_stringid")]
 pub type StringId = ArrayString<[u8; 10]>;
 
 /// Short fixed-size string type.
-pub type ShortString = arrayvec::ArrayString<[u8; 23]>;
+pub type ShortString = arraystring::ArrayString<[u8; 23]>;
 /// Medium-length fixed-size string type.
-type MedString = arrayvec::ArrayString<[u8; 40]>;
+type MedString = arraystring::ArrayString<[u8; 40]>;
 /// Long fixed-size string type.
-type LongString = arrayvec::ArrayString<[u8; 100]>;
+type LongString = arraystring::ArrayString<[u8; 100]>;
 
 /// Entity identifier type.
 pub type EntityId = StringId;

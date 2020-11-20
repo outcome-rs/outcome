@@ -2,10 +2,9 @@ use std::collections::BTreeMap;
 
 use shlex;
 
-use crate::{CompId, MedString, VarType};
+use crate::{CompId, MedString, StringId, VarType};
 
 use crate::address::{Address, PartialAddress};
-use crate::component::Component;
 use crate::entity::Storage;
 use crate::model::ComponentModel;
 
@@ -51,7 +50,7 @@ impl PrintFmt {
     pub fn execute_loc(
         &self,
         entity_db: &mut Storage,
-        component: &Component,
+        comp_state: &StringId,
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {

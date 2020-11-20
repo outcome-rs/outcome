@@ -74,66 +74,84 @@ impl SimModel {
             data_files: Vec::new(),
             data_imgs: Vec::new(),
         };
-
-        let singleton_model = EntityPrefabModel {
-            name: ShortString::from("singleton").unwrap(),
-            components: vec![ShortString::from("mod_init").unwrap()],
-        };
-        model.entities.push(singleton_model);
-
-        let mut mod_init_comp_model = ComponentModel {
-            name: ShortString::from("mod_init").unwrap(),
-            // optionally add some vars
-            vars: vec![
-                VarModel {
-                    id: "main".to_string(),
-                    type_: VarType::Int,
-                    default: Var::Int(666),
-                    internal: false,
-                },
-                VarModel {
-                    id: "main".to_string(),
-                    type_: VarType::Float,
-                    default: Var::Float(6.666),
-                    internal: false,
-                },
-                VarModel {
-                    id: "main".to_string(),
-                    type_: VarType::IntList,
-                    default: Var::IntList(vec![0; 10]),
-                    internal: false,
-                },
-            ],
-            start_state: ShortString::from("init").unwrap(),
-            triggers: vec![ShortString::from("init").unwrap()],
-            // triggers: vec![],
-            #[cfg(feature = "machine")]
-            logic: LogicModel {
-                commands: Vec::new(),
-                states: FnvHashMap::default(),
-                procedures: FnvHashMap::default(),
-                cmd_location_map: FnvHashMap::default(),
-                pre_commands: FnvHashMap::default(),
-            },
-            source_files: Vec::new(),
-            script_files: Vec::new(),
-            lib_files: Vec::new(),
-            // model_uid: 0,
-        };
-        model.components.push(mod_init_comp_model);
-
-        model.events.push(EventModel {
-            id: ShortString::from("init").unwrap(),
-        });
+        //
+        // let mut mod_init_comp_model = ComponentModel {
+        //     name: ShortString::from("mod_init").unwrap(),
+        //     // optionally add some vars
+        //     vars: vec![
+        //         VarModel {
+        //             id: "main".to_string(),
+        //             type_: VarType::Int,
+        //             default: Var::Int(666),
+        //             internal: false,
+        //         },
+        //         VarModel {
+        //             id: "main".to_string(),
+        //             type_: VarType::Float,
+        //             default: Var::Float(6.666),
+        //             internal: false,
+        //         },
+        //         VarModel {
+        //             id: "main".to_string(),
+        //             type_: VarType::IntList,
+        //             default: Var::IntList(vec![0; 10]),
+        //             internal: false,
+        //         },
+        //     ],
+        //     start_state: ShortString::from("init").unwrap(),
+        //     triggers: vec![ShortString::from("_scr_init").unwrap()],
+        //     // triggers: vec![],
+        //     #[cfg(feature = "machine")]
+        //     logic: LogicModel {
+        //         commands: Vec::new(),
+        //         states: FnvHashMap::default(),
+        //         procedures: FnvHashMap::default(),
+        //         cmd_location_map: FnvHashMap::default(),
+        //         pre_commands: FnvHashMap::default(),
+        //     },
+        //     source_files: Vec::new(),
+        //     script_files: Vec::new(),
+        //     lib_files: Vec::new(),
+        //     // model_uid: 0,
+        // };
+        // model.components.push(mod_init_comp_model);
 
         // add hardcoded content
+        #[cfg(feature = "machine")]
         model.events.push(crate::model::EventModel {
-            id: ShortString::from(crate::DEFAULT_TRIGGER_EVENT).unwrap(),
+            id: ShortString::from_unchecked(crate::DEFAULT_TRIGGER_EVENT),
         });
 
         #[cfg(feature = "machine_script")]
         {
-            #[cfg(feature = "machine")]
+            let mut mod_init_prefab = EntityPrefabModel {
+                name: ShortString::from_unchecked("_mod_init"),
+                components: vec![],
+            };
+
+            model.events.push(EventModel {
+                id: ShortString::from_unchecked("_scr_init"),
+            });
+
+            let scr_init_mod_template = ComponentModel {
+                name: ShortString::from_unchecked("_init_mod_x"),
+                // optionally add some vars
+                vars: vec![],
+                start_state: ShortString::from_unchecked("main"),
+                triggers: vec![ShortString::from_unchecked("_scr_init")],
+                logic: LogicModel {
+                    commands: Vec::new(),
+                    states: FnvHashMap::default(),
+                    procedures: FnvHashMap::default(),
+                    cmd_location_map: FnvHashMap::default(),
+                    pre_commands: FnvHashMap::default(),
+                },
+                source_files: Vec::new(),
+                script_files: Vec::new(),
+                lib_files: Vec::new(),
+                // model_uid: 0,
+            };
+            // #[cfg(feature = "machine")]
             use crate::machine::{cmd::Command, CommandPrototype, LocationInfo};
 
             // use script processor to handle scripts
@@ -171,13 +189,9 @@ impl SimModel {
                     cmd_locations.push(instruction.location.clone());
                 }
 
-                let ent_uid = (
-                    StringId::from("singleton").unwrap(),
-                    StringId::from("0").unwrap(),
-                );
-                let (ent_model_type, _) = ent_uid;
-                let comp_name = StringId::from("mod_init").unwrap();
-                let mut comp_model = model.get_component_mut(&comp_name).unwrap();
+                let mut comp_model = scr_init_mod_template.clone();
+                comp_model.name =
+                    ShortString::from_truncate(&format!("init_{}", module.manifest.name));
 
                 for (n, cmd_prototype) in cmd_prototypes.iter().enumerate() {
                     cmd_locations[n].line = Some(n);
@@ -199,31 +213,14 @@ impl SimModel {
                         .insert(n, cmd_locations[n].clone());
                 }
 
-                // crate::machine::exec::execute(
-                //     &commands,
-                //     &ent_model_type,
-                //     &comp_name,
-                //     &mut sim,
-                //     None,
-                //     None,
-                // );
+                comp_model
+                    .logic
+                    .states
+                    .insert(ShortString::from_unchecked("main"), (0, commands.len()));
+                mod_init_prefab.components.push(comp_model.name);
+                model.components.push(comp_model);
             }
-            let ent_uid = (
-                StringId::from("singleton").unwrap(),
-                StringId::from("0").unwrap(),
-            );
-            let comp_uid = (
-                StringId::from("mod_init").unwrap(),
-                StringId::from("0").unwrap(),
-            );
-            let mut comp_model = model
-                .get_component_mut(&StringId::from("mod_init").unwrap())
-                .unwrap();
-            let commands = comp_model.logic.commands.clone();
-            comp_model
-                .logic
-                .states
-                .insert(ShortString::from("init").unwrap(), (0, commands.len()));
+            model.entities.push(mod_init_prefab);
         }
 
         Ok(model)
@@ -235,7 +232,7 @@ impl SimModel {
     pub fn get_entity(&self, name: &StringId) -> Option<&EntityPrefabModel> {
         self.entities
             .iter()
-            .find(|entity| &entity.name.as_ref() == &name.as_str())
+            .find(|entity| &entity.name.as_ref() == &name.as_ref())
     }
     /// Get mutable reference to entity prefab using `type_` and `id` args.
     pub fn get_entity_mut(&mut self, name: &StringId) -> Option<&mut EntityPrefabModel> {

@@ -1,20 +1,20 @@
 use smallvec::SmallVec;
 
-use crate::address::Address;
-use crate::component::Component;
+use crate::address::{Address, LocalAddress};
 use crate::entity::{Entity, Storage, StorageIndex};
 use crate::model::{ComponentModel, SimModel};
 use crate::var::Var;
 use crate::{CompId, MedString, StringId, VarType};
 
 use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
+use crate::machine::cmd::blocks::{end, ifelse};
 use crate::machine::error::{Error, ErrorKind};
 use crate::machine::{
-    CallInfo, CallStackVec, ForInCallInfo, IfElseCallInfo, IfElseMetaData, LocalAddress,
+    command_search, CallInfo, CallStackVec, ForInCallInfo, IfElseCallInfo, IfElseMetaData,
     ProcedureCallInfo, Registry, Result,
 };
 
-pub const FOR_COMMAND_NAMES: [&'static str; 1] = ["for"];
+pub const COMMAND_NAMES: [&'static str; 1] = ["for"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForIn {
@@ -32,7 +32,8 @@ impl ForIn {
         let line = location.line.unwrap();
 
         let variable = match &args.get(0) {
-            Some(arg) => LocalAddress::from_str(arg, location)?,
+            Some(arg) => LocalAddress::from_str(arg)
+                .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
             // Some(arg) => StringId::from(arg).unwrap(),
             None => {
                 return Err(Error::new(
@@ -42,7 +43,7 @@ impl ForIn {
             }
         };
         let target = match args.get(2) {
-            Some(arg) => LocalAddress::from_str(arg, location)
+            Some(arg) => LocalAddress::from_str(arg)
                 .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
             None => {
                 return Err(Error::new(
@@ -55,21 +56,21 @@ impl ForIn {
         // start names
         // TODO all these names should probably be declared in a better place
         let mut start_names = Vec::new();
-        start_names.extend(&FOR_COMMAND_NAMES);
+        start_names.extend(&COMMAND_NAMES);
         // end names
         let mut end_names = Vec::new();
-        end_names.extend(&super::end::END_COMMAND_NAMES);
+        end_names.extend(&super::end::COMMAND_NAMES);
         // other block starting names
         let mut start_blocks = Vec::new();
         start_blocks.extend(&super::ifelse::IF_COMMAND_NAMES);
         start_blocks.extend(&super::ifelse::ELSE_COMMAND_NAMES);
-        start_blocks.extend(&FOR_COMMAND_NAMES);
-        start_blocks.extend(&super::procedure::PROCEDURE_COMMAND_NAMES);
+        start_blocks.extend(&COMMAND_NAMES);
+        start_blocks.extend(&super::procedure::COMMAND_NAMES);
         // other block ending names
         let mut end_blocks = Vec::new();
-        end_blocks.extend(&super::end::END_COMMAND_NAMES);
+        end_blocks.extend(&super::end::COMMAND_NAMES);
 
-        let positions_options = match super::super::super::command_search(
+        let positions_options = match command_search(
             location,
             &commands,
             (line + 1, None),
@@ -131,6 +132,8 @@ impl ForIn {
         };
 
         let len = match iter_target {
+            Var::Int(num) => *num as usize,
+            Var::Float(num) => *num as usize,
             Var::StrList(list) => list.len(),
             Var::IntList(list) => list.len(),
             Var::FloatList(list) => list.len(),
@@ -142,20 +145,25 @@ impl ForIn {
         // let (comp_model, comp_id) = comp_uid;
         // let variable = (*comp_uid, self.variable.var_id);
         let variable = LocalAddress {
-            comp: Some(*comp_id),
+            comp: Some(self.variable.comp.unwrap_or(*comp_id)),
             var_type: self.variable.var_type,
             var_id: self.variable.var_id,
         };
-        let target = (*comp_id, self.target.var_id);
+        let target = LocalAddress {
+            comp: Some(self.target.comp.unwrap_or(*comp_id)),
+            var_type: self.target.var_type,
+            var_id: self.target.var_id,
+        };
+        // let target = (*comp_id, self.target.var_id);
         // let variable_type = self.variable.var_type;
         // ForIn::update_variable(&variable, &Some(variable_type), &target, 0, ent_storage);
         ForIn::update_variable(&variable, &target, 0, ent_storage);
 
         // warn!("forin start");
         let call_info = CallInfo::ForIn(ForInCallInfo {
-            target,
+            target: Some(target),
             target_len: len,
-            variable,
+            variable: Some(variable),
             // variable_type: Some(variable_type),
             iteration: 1,
             start: self.start,
@@ -168,22 +176,39 @@ impl ForIn {
     pub fn update_variable(
         variable: &LocalAddress,
         // variable_type: &Option<VarType>,
-        target: &StorageIndex,
+        target: &LocalAddress,
         iteration: usize,
         ent_storage: &mut Storage,
     ) {
         match variable.var_type {
             VarType::Int => {
-                let newvar = ent_storage.get_int_list(target).unwrap()[iteration];
-                match ent_storage.get_int_mut(&variable.storage_index().unwrap()) {
-                    Some(var) => *var = newvar,
-                    None => {
-                        ent_storage.insert_int(
-                            &variable.storage_index().unwrap(),
-                            ent_storage.get_int_list(target).unwrap()[iteration],
-                        );
+                match target.var_type {
+                    VarType::Int => {
+                        if let Some(int_var) =
+                            ent_storage.get_int_mut(&target.storage_index().unwrap())
+                        {
+                            *int_var = iteration as i64;
+                        }
                     }
+                    VarType::IntList => {
+                        let newvar = ent_storage
+                            .get_int_list(&target.storage_index().unwrap())
+                            .unwrap()[iteration];
+                        match ent_storage.get_int_mut(&variable.storage_index().unwrap()) {
+                            Some(var) => *var = newvar,
+                            None => {
+                                ent_storage.insert_int(
+                                    &variable.storage_index().unwrap(),
+                                    ent_storage
+                                        .get_int_list(&target.storage_index().unwrap())
+                                        .unwrap()[iteration],
+                                );
+                            }
+                        }
+                    }
+                    _ => unimplemented!(),
                 }
+
                 // *ent_storage.int.get_mut(&variable).unwrap() =
                 //     ent_storage.int_list.get(target).unwrap()[iteration];
             }

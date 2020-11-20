@@ -278,7 +278,7 @@ impl Worker {
             for ((comp_id, var_id), var) in entity.storage.get_all_str() {
                 collection.push((
                     Address {
-                        entity: StringId::from(&entity_uid.to_string()).unwrap(),
+                        entity: StringId::from_truncate(&entity_uid.to_string()),
                         component: *comp_id,
                         var_type: VarType::Str,
                         var_id: *var_id,

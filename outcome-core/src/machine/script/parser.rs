@@ -1,16 +1,13 @@
 //! Parser logic.
 //!
-//! Parser provides a public interface for parsing scripts into sets of
-//! instructions.
+//! Provides an interface for parsing scripts into sets of instructions.
 
 use super::{DirectivePrototype, Instruction, InstructionKind};
 
 use crate::ShortString;
 use crate::{util, LongString};
 
-//TODO
-use crate::machine;
-use crate::machine::error::ErrorKind;
+use crate::machine::error::{Error, ErrorKind, Result};
 use crate::machine::{CommandPrototype, LocationInfo};
 
 static DIRECTIVE_SYMBOL: char = '!';
@@ -21,14 +18,18 @@ static END_LINE_SYMBOL: char = ';';
 
 /// Parses script at the given path. Path has to be the full path to the file.
 /// Returns a list of instructions or an error.
-pub fn parse_script_at(path: &str) -> machine::Result<Vec<Instruction>> {
-    // TODO remove unwrap
-    let text = util::read_text_file(path).unwrap();
+pub(crate) fn parse_script_at(path: &str) -> Result<Vec<Instruction>> {
+    let text = util::read_text_file(path).map_err(|e| {
+        Error::new(
+            LocationInfo::empty().with_source(path),
+            ErrorKind::ErrorReadingFile(e.to_string()),
+        )
+    })?;
     parse_lines(&text, path)
 }
 
-/// Parse multiple lines from a script at given path.
-pub fn parse_lines(lines: &str, script_path: &str) -> machine::Result<Vec<Instruction>> {
+/// Parses multiple lines from a script at given path.
+pub(crate) fn parse_lines(lines: &str, script_path: &str) -> Result<Vec<Instruction>> {
     let mut instructions = vec![];
 
     // multiline switch
@@ -41,7 +42,7 @@ pub fn parse_lines(lines: &str, script_path: &str) -> machine::Result<Vec<Instru
         let mut line = line.trim().to_string();
         // create a location info struct for current line
         let mut location_info = LocationInfo {
-            source: Some(LongString::from(script_path).unwrap()),
+            source: Some(LongString::from_truncate(script_path)),
             source_line: Some(line_number),
             line: None,
             tag: None,
@@ -111,7 +112,7 @@ pub fn parse_lines(lines: &str, script_path: &str) -> machine::Result<Vec<Instru
     Ok(instructions)
 }
 
-pub fn parse_line(line_text: &str, location_info: LocationInfo) -> machine::Result<Instruction> {
+fn parse_line(line_text: &str, location_info: LocationInfo) -> Result<Instruction> {
     let trimmed_text = line_text.trim();
 
     if trimmed_text.is_empty() || trimmed_text.starts_with(&COMMENT_SYMBOL) {
@@ -128,13 +129,9 @@ pub fn parse_line(line_text: &str, location_info: LocationInfo) -> machine::Resu
     }
 }
 
-fn parse_directive(
-    text: &str,
-    start_index: usize,
-    location: LocationInfo,
-) -> machine::Result<Instruction> {
+fn parse_directive(text: &str, start_index: usize, location: LocationInfo) -> Result<Instruction> {
     if text.is_empty() {
-        Err(machine::Error::new(location, ErrorKind::NoDirectivePresent))
+        Err(Error::new(location, ErrorKind::NoDirectivePresent))
     } else {
         let mut directive = String::new();
         let end_index = text.len();
@@ -152,7 +149,7 @@ fn parse_directive(
         }
 
         if directive.is_empty() {
-            Err(machine::Error::new(location, ErrorKind::NoDirectivePresent))
+            Err(Error::new(location, ErrorKind::NoDirectivePresent))
         } else {
             match parse_arguments_posix(&text, directive_end_index, &location) {
                 Ok(arguments) => Ok(Instruction {
@@ -172,7 +169,7 @@ fn parse_command(
     line_text: &str,
     start_index: usize,
     mut location_info: LocationInfo,
-) -> machine::Result<Instruction> {
+) -> Result<Instruction> {
     let end_index = line_text.len();
 
     if line_text.is_empty() {
@@ -194,7 +191,7 @@ fn parse_command(
                 index = next_index;
 
                 if let Some(val) = value {
-                    location_info.tag = Some(ShortString::from(&val).unwrap());
+                    location_info.tag = Some(ShortString::from_truncate(&val));
                 }
                 //if value.is_some() {
                 //location_info.tag = Some(ArrStr10::from_str_truncate(value));
@@ -233,20 +230,19 @@ fn parse_command(
     }
 }
 
-pub fn parse_arguments_posix(
+fn parse_arguments_posix(
     text: &str,
     start_index: usize,
     location: &LocationInfo,
-) -> machine::Result<Vec<String>> {
-    shlex::split(&text[start_index..])
-        .ok_or(machine::Error::new(*location, ErrorKind::MissingEndQuotes))
+) -> Result<Vec<String>> {
+    shlex::split(&text[start_index..]).ok_or(Error::new(*location, ErrorKind::MissingEndQuotes))
 }
 
-pub fn parse_arguments(
+fn parse_arguments(
     line_text: &str,
     start_index: usize,
     location_info: &LocationInfo,
-) -> machine::Result<Option<Vec<String>>> {
+) -> Result<Option<Vec<String>>> {
     let mut arguments = vec![];
 
     let mut index = start_index;
@@ -277,7 +273,7 @@ fn parse_next_argument(
     location_info: &LocationInfo,
     line_text: &str,
     start_index: usize,
-) -> machine::Result<(usize, Option<String>)> {
+) -> Result<(usize, Option<String>)> {
     parse_next_value(&location_info, &line_text, start_index, true, true, false)
 }
 
@@ -288,7 +284,7 @@ fn parse_next_value(
     allow_quotes: bool,
     allow_control: bool,
     stop_on_equals: bool,
-) -> machine::Result<(usize, Option<String>)> {
+) -> Result<(usize, Option<String>)> {
     let end_index = line_text.len();
 
     if start_index >= end_index {
@@ -313,10 +309,7 @@ fn parse_next_value(
                             in_control = false;
                             found_variable_prefix = false;
                         } else {
-                            return Err(machine::Error::new(
-                                *location,
-                                ErrorKind::ControlWithoutValidValue,
-                            ));
+                            return Err(Error::new(*location, ErrorKind::ControlWithoutValidValue));
                         }
                     } else if character == '\\' || character == '"' {
                         argument.push(character);
@@ -333,20 +326,14 @@ fn parse_next_value(
                     } else if character == '$' {
                         found_variable_prefix = true;
                     } else {
-                        return Err(machine::Error::new(
-                            *location,
-                            ErrorKind::ControlWithoutValidValue,
-                        ));
+                        return Err(Error::new(*location, ErrorKind::ControlWithoutValidValue));
                     }
                 } else if character == '\\' {
                     if allow_control {
                         in_control = true;
                         found_variable_prefix = false;
                     } else {
-                        return Err(machine::Error::new(
-                            *location,
-                            ErrorKind::InvalidControlLocation,
-                        ));
+                        return Err(Error::new(*location, ErrorKind::InvalidControlLocation));
                     }
                 } else if using_quotes && character == '"' {
                     found_end = true;
@@ -376,19 +363,13 @@ fn parse_next_value(
                     if allow_quotes {
                         using_quotes = true;
                     } else {
-                        return Err(machine::Error::new(
-                            *location,
-                            ErrorKind::InvalidQuotesLocation,
-                        ));
+                        return Err(Error::new(*location, ErrorKind::InvalidQuotesLocation));
                     }
                 } else if character == '\\' {
                     if allow_control {
                         in_control = true;
                     } else {
-                        return Err(machine::Error::new(
-                            *location,
-                            ErrorKind::InvalidControlLocation,
-                        ));
+                        return Err(Error::new(*location, ErrorKind::InvalidControlLocation));
                     }
                 } else {
                     argument.push(character);
@@ -398,12 +379,9 @@ fn parse_next_value(
 
         if in_argument && !found_end && (in_control || using_quotes) {
             if in_control {
-                Err(machine::Error::new(
-                    *location,
-                    ErrorKind::ControlWithoutValidValue,
-                ))
+                Err(Error::new(*location, ErrorKind::ControlWithoutValidValue))
             } else {
-                Err(machine::Error::new(*location, ErrorKind::MissingEndQuotes))
+                Err(Error::new(*location, ErrorKind::MissingEndQuotes))
             }
         } else if argument.is_empty() {
             if using_quotes {
@@ -421,7 +399,7 @@ fn find_tag(
     location: &LocationInfo,
     line_text: &str,
     start_index: usize,
-) -> machine::Result<(usize, Option<String>)> {
+) -> Result<(usize, Option<String>)> {
     let end_index = line_text.len();
 
     if start_index >= end_index {
@@ -442,10 +420,7 @@ fn find_tag(
                         match value {
                             Some(label_value) => {
                                 if label_value.is_empty() {
-                                    return Err(machine::Error::new(
-                                        *location,
-                                        ErrorKind::EmptyTag,
-                                    ));
+                                    return Err(Error::new(*location, ErrorKind::EmptyTag));
                                 }
 
                                 let mut text = String::new();
@@ -476,7 +451,7 @@ fn find_output_and_command(
     line_text: &str,
     start_index: usize,
     instruction: &mut CommandPrototype,
-) -> machine::Result<usize> {
+) -> Result<usize> {
     match parse_next_value(&location_info, &line_text, start_index, false, false, true) {
         Ok(output) => {
             let (next_index, value) = output;

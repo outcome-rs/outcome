@@ -81,17 +81,17 @@ pub enum Signal {
 /// messages over the wire.
 pub trait CentralCommunication {
     /// Reads a single incoming signal.
-    fn sig_read(&mut self) -> Result<(String, Signal)>;
+    fn sig_read(&self) -> Result<(String, Signal)>;
     /// Reads incoming signal from a specific node.
-    fn sig_read_from(&mut self, node_id: &str) -> Result<Signal>;
+    fn sig_read_from(&self, node_id: u32) -> Result<Signal>;
 
     /// Sends a signal to node.
-    fn sig_send_to_node(&mut self, node_id: &str, signal: Signal) -> Result<()>;
+    fn sig_send_to_node(&self, node_id: u32, signal: Signal) -> Result<()>;
     /// Sends a signal to node where the specified entity lives.
-    fn sig_send_to_entity(&mut self, entity_uid: EntityUid) -> Result<()>;
+    fn sig_send_to_entity(&self, entity_uid: EntityUid) -> Result<()>;
 
     /// Sends a signal to all the nodes.
-    fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;
+    fn sig_broadcast(&self, signal: Signal) -> Result<()>;
 }
 
 /// Trait representing node's ability to send and receive messages over the
@@ -106,10 +106,10 @@ pub trait NodeCommunication {
     /// a tuple of node id and the received signal, or an error.
     fn sig_read(&mut self) -> Result<(String, Signal)>;
     /// Reads incoming signal from a specific node.
-    fn sig_read_from(&mut self, node_id: &str) -> Result<Signal>;
+    fn sig_read_from(&mut self, node_id: u32) -> Result<Signal>;
 
     /// Sends a signal to node.
-    fn sig_send_to_node(&mut self, node_id: &str, signal: Signal) -> Result<()>;
+    fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
     /// Sends a signal to node where the specified entity lives.
     fn sig_send_to_entity(&mut self, entity_uid: EntityUid) -> Result<()>;
 

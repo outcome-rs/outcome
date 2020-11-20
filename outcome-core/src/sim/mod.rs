@@ -17,7 +17,6 @@ use libloading::Library;
 use rlua::Lua;
 
 use crate::address::Address;
-use crate::component::Component;
 use crate::entity::{Entity, Storage};
 use crate::error::Error;
 use crate::model::{DataEntry, DataImageEntry, Scenario};
@@ -189,8 +188,19 @@ impl Sim {
         // let mut arc_libs = Arc::new(Mutex::new(libs));
         // TODO setup lua state
 
+        // module script init
+        #[cfg(feature = "machine_script")]
+        {
+            sim.spawn_entity(
+                Some(&StringId::from_unchecked("_mod_init")),
+                Some(StringId::from_unchecked("_mod_init")),
+            )?;
+            sim.event_queue.push(StringId::from_unchecked("_scr_init"));
+        }
+
         // add entities
         // sim.apply_model_entities();
+        // sim.apply_model();
 
         // setup entities' lua_state
         // sim.setup_lua_state_ent();
@@ -217,23 +227,32 @@ impl Sim {
     /// Spawns a new entity based on the given prefab.
     ///
     /// If prefab is `None` then an empty entity is spawned.
-    pub fn spawn_entity(&mut self, prefab: Option<&StringId>, name: StringId) -> Result<()> {
+    pub fn spawn_entity(
+        &mut self,
+        prefab: Option<&StringId>,
+        name: Option<StringId>,
+    ) -> Result<()> {
         let mut ent = match prefab {
             Some(p) => Entity::from_prefab(p, &self.model)?,
             None => Entity::empty(),
         };
 
-        if !self.entities_idx.contains_key(&name) {
-            let new_uid = self.entity_idpool.request_id().unwrap();
-            self.entities_idx.insert(name, new_uid);
-            self.entities.insert(new_uid, ent);
-            Ok(())
+        let new_uid = self.entity_idpool.request_id().unwrap();
+
+        if let Some(n) = &name {
+            if !self.entities_idx.contains_key(n) {
+                self.entities_idx.insert(*n, new_uid);
+                self.entities.insert(new_uid, ent);
+            } else {
+                return Err(Error::Other(format!(
+                    "Failed to add entity: entity named \"{}\" already exists",
+                    n,
+                )));
+            }
         } else {
-            Err(Error::Other(format!(
-                "Failed to add entity: entity named \"{}\" already exists",
-                name,
-            )))
+            self.entities.insert(new_uid, ent);
         }
+        Ok(())
     }
 }
 
@@ -263,7 +282,7 @@ impl Sim {
                 // println!("script files: {:?}",
                 // comp.script_files);
             }
-            map.insert(StringId::from(&ent_type.id).unwrap(), scripts_vec);
+            map.insert(StringId::from_truncate(&ent_type.id), scripts_vec);
         }
 
         for ((mut ent_type, mut ent_id), mut entity) in &mut self.entities {
@@ -323,15 +342,19 @@ impl Sim {
     /// Get all vars, coerce each to string.
     pub fn get_all_as_strings(&self) -> HashMap<String, String> {
         let mut out_map = HashMap::new();
-        for (ent_str, ent_uid) in &self.entities_idx {
-            if let Some(ent) = self.entities.get(ent_uid) {
-                out_map.extend(
-                    ent.storage
-                        .get_all_coerce_to_string()
-                        .into_iter()
-                        .map(|(k, v)| (format!(":{}:{}", ent_str, k), v)),
-                );
+        // for (ent_str, ent_uid) in &self.entities_idx {
+        for (ent_uid, ent) in &self.entities {
+            // if let Some(ent) = self.entities.get(ent_uid) {
+            let mut ent_str = ent_uid.to_string();
+            if let Some((ent_id, _)) = &self.entities_idx.iter().find(|(id, uid)| uid == &ent_uid) {
+                ent_str = ent_id.to_string();
             }
+            out_map.extend(
+                ent.storage
+                    .get_all_coerce_to_string()
+                    .into_iter()
+                    .map(|(k, v)| (format!(":{}:{}", ent_str, k), v)),
+            );
         }
         out_map
     }
@@ -1055,19 +1078,19 @@ impl Sim {
     pub fn get_entity_str_mut(&mut self, name: &StringId) -> Option<&mut Entity> {
         self.entities.get_mut(self.entities_idx.get(name).unwrap())
     }
-    pub fn get_component(&self, entity: &StringId, comp: &StringId) -> Option<&Component> {
-        self.get_entity_str(entity).unwrap().components.get(comp)
-    }
-    pub fn get_component_mut(
-        &mut self,
-        entity: &StringId,
-        component: &StringId,
-    ) -> Option<&mut Component> {
-        self.get_entity_str_mut(entity)
-            .unwrap()
-            .components
-            .get_mut(component)
-    }
+    // pub fn get_component(&self, entity: &StringId, comp: &StringId) -> Option<&Component> {
+    //     self.get_entity_str(entity).unwrap().components.get(comp)
+    // }
+    // pub fn get_component_mut(
+    //     &mut self,
+    //     entity: &StringId,
+    //     component: &StringId,
+    // ) -> Option<&mut Component> {
+    //     self.get_entity_str_mut(entity)
+    //         .unwrap()
+    //         .components
+    //         .get_mut(component)
+    // }
     pub fn get_entities(&self) -> Vec<&Entity> {
         self.entities.values().collect()
     }

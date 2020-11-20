@@ -19,7 +19,9 @@ use crate::msg::*;
 use crate::transport::{ServerDriverInterface, SocketInterface};
 use crate::{Coord, PairSocket, ServerDriver, Worker};
 
+use crate::coord::CoordNetwork;
 use crate::{error::Error, Result};
+use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 use std::thread::{current, sleep};
 use zmq::PollEvents;
@@ -175,7 +177,9 @@ impl Server {
             name: "".to_string(),
             furthest_tick: match &self.sim {
                 SimConnection::Local(sim) => sim.get_clock(),
-                SimConnection::ClusterCoord(coord) => coord.lock().unwrap().central.get_clock(),
+                SimConnection::ClusterCoord(coord, net) => {
+                    coord.lock().unwrap().central.get_clock()
+                }
                 _ => unimplemented!(),
             },
         };
@@ -242,7 +246,7 @@ pub struct MsgChannel {
 
 pub enum SimConnection {
     Local(Sim),
-    ClusterCoord(Arc<Mutex<Coord>>),
+    ClusterCoord(Arc<Mutex<Coord>>, Arc<Mutex<CoordNetwork>>),
     ClusterWorker(Worker),
 }
 
@@ -328,7 +332,9 @@ pub fn handle_status_request(
     let req: StatusRequest = msg.unpack_payload()?;
     let model_scenario = match &server.sim {
         SimConnection::Local(sim) => sim.model.scenario.clone(),
-        SimConnection::ClusterCoord(sim) => sim.lock().unwrap().central.model.scenario.clone(),
+        SimConnection::ClusterCoord(coord, coord_net) => {
+            coord.lock().unwrap().central.model.scenario.clone()
+        }
         _ => unimplemented!(),
     };
     let resp = StatusResponse {
@@ -345,7 +351,9 @@ pub fn handle_status_request(
         uptime: server.uptime,
         current_tick: match &server.sim {
             SimConnection::Local(sim) => sim.get_clock(),
-            SimConnection::ClusterCoord(coord) => coord.lock().unwrap().central.get_clock(),
+            SimConnection::ClusterCoord(coord, coord_net) => {
+                coord.lock().unwrap().central.get_clock()
+            }
             _ => unimplemented!(),
         },
         scenario_name: model_scenario.manifest.name.clone(),
@@ -418,18 +426,19 @@ pub fn handle_data_transfer_request(
     };
     let mut data_pack = SimDataPack::empty();
     match &server.sim {
-        SimConnection::ClusterCoord(coord) => {
+        SimConnection::ClusterCoord(coord, net) => {
             let coord = coord.lock().unwrap();
+            let net = net.lock().unwrap();
             let mut collection = Vec::new();
             match dtr.transfer_type.as_str() {
                 "Full" => {
-                    for worker in &coord.workers {
+                    for worker in &net.workers {
                         worker.pair_sock.send(
                             crate::sig::Signal::from(outcome::distr::Signal::DataRequestAll)
                                 .to_bytes()?,
                         )?
                     }
-                    for worker in &coord.workers {
+                    for worker in &net.workers {
                         let bytes = worker.pair_sock.read()?;
                         let sig = crate::sig::Signal::from_bytes(&bytes)?.inner();
                         match sig {
@@ -620,7 +629,7 @@ pub fn handle_data_transfer_request(
                     selected.extend_from_slice(&dtr.selection);
                     let sim_instance = match &server.sim {
                         SimConnection::Local(s) => s,
-                        SimConnection::ClusterCoord(c) => unimplemented!(),
+                        SimConnection::ClusterCoord(c, net) => unimplemented!(),
                         _ => unimplemented!(),
                     };
                     // todo handle asterrisk addresses
@@ -746,7 +755,7 @@ pub fn handle_data_pull_request(
         // let sim_model = server.sim_model.clone();
         let mut sim_instance = match &mut server.sim {
             SimConnection::Local(s) => s,
-            SimConnection::ClusterCoord(c) => unimplemented!(),
+            SimConnection::ClusterCoord(c, net) => unimplemented!(),
             _ => unimplemented!(),
         };
         //TODO
@@ -821,7 +830,7 @@ pub fn handle_turn_advance_request(
         let mut no_blocking_clients = true;
         let current_tick = match &server.sim {
             SimConnection::Local(s) => s.get_clock(),
-            SimConnection::ClusterCoord(c) => c.lock().unwrap().central.clock,
+            SimConnection::ClusterCoord(c, net) => c.lock().unwrap().central.clock,
             _ => unimplemented!(),
         };
         trace!("current_tick before: {}", current_tick);
@@ -877,13 +886,18 @@ pub fn handle_turn_advance_request(
                     }
                     trace!("current_tick after: {}", sim_instance.get_clock());
                 }
-                SimConnection::ClusterCoord(coord) => {
+                SimConnection::ClusterCoord(coord, net) => {
                     let mut coord_lock = coord.lock().unwrap();
+                    let mut net_lock = net.lock().unwrap();
                     let event_queue = coord_lock.central.event_queue.clone();
-                    outcome::distr::SimCentral::step_network(
-                        &mut coord_lock.deref_mut(),
-                        event_queue,
-                    )?;
+                    // let network = &coord_lock.network;
+                    // let central = &mut coord_lock.central;
+                    coord_lock
+                        .central
+                        .step_network(net_lock.deref_mut(), event_queue);
+                    // coord_lock
+                    //     .central
+                    //     .step_network(&mut coord_lock.network, event_queue)?;
                     coord_lock.central.clock += 1;
 
                     // let mut addr_book = HashMap::new();

@@ -1,9 +1,8 @@
-use crate::component::Component;
 use crate::entity::Storage;
 use crate::machine::cmd::{CentralExtCommand, Command, CommandResult};
 use crate::machine::{error::Error, LocationInfo};
 use crate::sim::interface::SimInterface;
-use crate::{Address, CompId, Sim};
+use crate::{Address, CompId, Sim, StringId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimControl {
@@ -22,7 +21,7 @@ impl SimControl {
     pub fn execute_loc(
         &self,
         storage: &mut Storage,
-        component: &Component,
+        comp_state: &StringId,
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {

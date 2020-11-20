@@ -25,9 +25,9 @@ use rayon::prelude::*;
 pub struct SimNode {
     pub clock: usize,
     pub model: SimModel,
+    pub event_queue: Vec<StringId>,
     pub entities: FnvHashMap<EntityUid, Entity>,
     pub entities_idx: FnvHashMap<EntityId, EntityUid>,
-    pub event_queue: Vec<StringId>,
 }
 
 impl SimNode {
@@ -38,7 +38,7 @@ impl SimNode {
             model: model.clone(),
             entities: FnvHashMap::default(),
             entities_idx: FnvHashMap::default(),
-            event_queue: vec![StringId::from("init").unwrap()],
+            event_queue: vec![StringId::from_unchecked("init")],
         };
 
         sim_node.apply_model_entities(entities);
@@ -66,12 +66,13 @@ impl SimNode {
 
         Ok(sim_node)
     }
+
     /// Apply registered model entities by instantiating them.
     /// None of the existing entities are removed. Only entities
     /// registered with the `spawn` flag are instantiated.
     pub fn apply_model_entities(&mut self, selection: &Vec<EntityUid>) {
         trace!("start adding entities");
-        // unimplemented!();
+        unimplemented!();
         // let mut counter = 0;
         // for ent_uid in selection {
         //     let entity = self.model.get_entity(ent_uid).unwrap();
@@ -101,7 +102,6 @@ impl SimNode {
         unimplemented!();
     }
 
-    #[cfg(feature = "machine")]
     /// Process single step.
     ///
     /// ### Arguments
@@ -110,10 +110,11 @@ impl SimNode {
     /// value containing the id of the target node.
     ///
     /// `addr_book` is a map of nodes and their connections
+    #[cfg(feature = "machine")]
     pub fn step<E: Sized + DistrError, C: NodeCommunication + Sized + Sync + Send>(
         &mut self,
         entity_node_map: &HashMap<EntityId, String>,
-        mut addr_book: &mut HashMap<String, C>,
+        mut addr_book: &mut HashMap<u32, C>,
     ) {
         use crate::machine::cmd::{CentralExtCommand, ExtCommand};
         use crate::machine::{cmd, ExecutionContext};
@@ -137,7 +138,7 @@ impl SimNode {
                 step::step_entity_local(
                     model,
                     event_queue,
-                    // ent_uid,
+                    ent_uid,
                     entity,
                     &ext_cmds,
                     &central_ext_cmds,
@@ -170,7 +171,7 @@ impl SimNode {
         //        });
         addr_book
             .par_iter_mut()
-            .for_each(|(node, c): (&String, &mut C)| {
+            .for_each(|(node, c): (&u32, &mut C)| {
                 //            thread::spawn(|| {
                 loop {
                     println!("enter loop, wait for read_ext_cmd...");
@@ -192,14 +193,14 @@ impl SimNode {
         for cext in cexts.iter() {
             // println!("sending cext cmd: {:?}", cext);
             addr_book
-                .get_mut("0")
+                .get_mut(&0)
                 .unwrap()
-                .sig_send_to_node("0", Signal::ExecuteCentralExtCmd(cext.clone()));
+                .sig_send_to_node(0, Signal::ExecuteCentralExtCmd(cext.clone()));
         }
         addr_book
-            .get_mut("0")
+            .get_mut(&0)
             .unwrap()
-            .sig_send_to_node("0", Signal::EndOfMessages);
+            .sig_send_to_node(0, Signal::EndOfMessages);
         println!("sim_node finished send central ext cmd requests");
         // println!("{:?}", self.entities);
     }

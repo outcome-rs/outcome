@@ -166,3 +166,18 @@ pub fn get_similar(original_cmd: &str, cmd_list: &[&str]) -> Option<String> {
         None
     }
 }
+/// Truncates string to specified size (ignoring last bytes if they form a partial `char`).
+#[inline]
+pub(crate) fn truncate_str(slice: &str, size: u8) -> &str {
+    if slice.is_char_boundary(size.into()) {
+        unsafe { slice.get_unchecked(..size.into()) }
+    } else if (size as usize) < slice.len() {
+        let mut index = size.saturating_sub(1) as usize;
+        while !slice.is_char_boundary(index) {
+            index = index.saturating_sub(1);
+        }
+        unsafe { slice.get_unchecked(..index) }
+    } else {
+        slice
+    }
+}

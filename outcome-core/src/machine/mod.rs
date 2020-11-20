@@ -1,4 +1,4 @@
-//! Runtime's logic execution capability.
+//! Logic execution capability for the runtime.
 
 pub mod cmd;
 pub mod error;
@@ -10,48 +10,9 @@ pub use error::{Error, ErrorKind, Result};
 use arrayvec::ArrayVec;
 use smallvec::SmallVec;
 
+use crate::address::LocalAddress;
 use crate::entity::StorageIndex;
 use crate::{CompId, EntityId, LongString, ShortString, StringId, VarType};
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct LocalAddress {
-    comp: Option<StringId>,
-    var_type: VarType,
-    var_id: StringId,
-}
-impl LocalAddress {
-    pub fn from_str(input: &str, location: &LocationInfo) -> Result<Self> {
-        let split = input
-            .split(crate::address::SEPARATOR_SYMBOL)
-            .collect::<Vec<&str>>();
-        if split.len() == 3 {
-            unimplemented!()
-        } else if split.len() == 2 {
-            Ok(LocalAddress {
-                comp: None,
-                var_type: VarType::from_str(split[0]).unwrap(),
-                var_id: StringId::from(split[1]).unwrap(),
-            })
-        } else {
-            Err(Error::new(
-                *location,
-                ErrorKind::InvalidAddress(input.to_string()),
-            ))
-        }
-    }
-    pub fn storage_index(&self) -> Option<StorageIndex> {
-        match self.comp {
-            Some(c) => Some((c, self.var_id)),
-            None => None,
-        }
-    }
-    pub fn storage_index_using(&self, comp_id: CompId) -> StorageIndex {
-        (comp_id, self.var_id)
-    }
-    pub fn to_string(&self) -> String {
-        unimplemented!()
-    }
-}
 
 /// Holds instruction location information.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
@@ -71,7 +32,7 @@ impl LocationInfo {
             "Source: {}, Line: {}",
             self.source
                 .as_ref()
-                .unwrap_or(&LongString::from("unknown").unwrap()),
+                .unwrap_or(&LongString::from_unchecked("unknown")),
             self.source_line.as_ref().unwrap_or(&0)
         )
     }
@@ -82,6 +43,11 @@ impl LocationInfo {
             line: None,
             tag: None,
         }
+    }
+
+    pub fn with_source(mut self, source: &str) -> Self {
+        self.source = Some(LongString::from_truncate(source));
+        self
     }
 }
 
@@ -146,6 +112,8 @@ pub enum CallInfo {
     Procedure(ProcedureCallInfo),
     ForIn(ForInCallInfo),
     IfElse(IfElseCallInfo),
+
+    Component(ComponentCallInfo),
 }
 
 /// Information about a single procedure call.
@@ -161,10 +129,10 @@ pub struct ProcedureCallInfo {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ForInCallInfo {
     /// Target that will be iterated over
-    pub target: StorageIndex,
+    pub target: Option<LocalAddress>,
     pub target_len: usize,
     /// Variable to update while iterating
-    pub variable: LocalAddress,
+    pub variable: Option<LocalAddress>,
     // pub variable_type: Option<VarType>,
     /// Current iteration
     pub iteration: usize,
@@ -186,6 +154,15 @@ pub struct IfElseMetaData {
     pub start: usize,
     pub end: usize,
     pub else_lines: [usize; 10],
+}
+
+/// Contains information about a single component block call.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ComponentCallInfo {
+    pub current: usize,
+    pub passed: bool,
+    pub else_line_index: usize,
+    // pub meta: IfElseMetaData,
 }
 
 /// Performs a command search on the provided command prototype list.
