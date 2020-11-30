@@ -5,8 +5,8 @@ use fnv::FnvHashMap;
 
 use crate::distr::{DistrError, NodeCommunication, Signal};
 use crate::entity::Entity;
-use crate::error::Error;
 use crate::sim::step;
+use crate::{CompId, Result};
 use crate::{EntityId, EntityUid, SimModel, StringId};
 
 #[cfg(feature = "machine")]
@@ -32,16 +32,16 @@ pub struct SimNode {
 
 impl SimNode {
     /// Creates a new node using the sim model and a list of entities.
-    pub fn from_model(model: &SimModel, entities: &Vec<EntityUid>) -> Result<SimNode, Error> {
+    pub fn from_model(model: &SimModel) -> Result<SimNode> {
         let mut sim_node = SimNode {
             clock: 0,
             model: model.clone(),
             entities: FnvHashMap::default(),
             entities_idx: FnvHashMap::default(),
-            event_queue: vec![StringId::from_unchecked("init")],
+            event_queue: vec![StringId::from_unchecked("_scr_init")],
         };
 
-        sim_node.apply_model_entities(entities);
+        // sim_node.apply_model_entities(entities);
 
         // let ent_uid = (
         //     StringId::from("singleton").unwrap(),
@@ -65,6 +65,26 @@ impl SimNode {
         // exec::execute(&commands, &ent_uid, &comp_uid, &mut sim, None, None);
 
         Ok(sim_node)
+    }
+
+    pub fn add_entity(
+        &mut self,
+        uid: EntityUid,
+        prefab_id: Option<EntityId>,
+        target_id: Option<EntityId>,
+    ) -> Result<()> {
+        let entity = match &prefab_id {
+            Some(p) => Entity::from_prefab(p, &self.model)?,
+            None => Entity::empty(),
+        };
+
+        self.entities.insert(uid, entity);
+
+        if let Some(t) = target_id {
+            self.entities_idx.insert(t, uid);
+        }
+
+        Ok(())
     }
 
     /// Apply registered model entities by instantiating them.
@@ -111,11 +131,11 @@ impl SimNode {
     ///
     /// `addr_book` is a map of nodes and their connections
     #[cfg(feature = "machine")]
-    pub fn step<E: Sized + DistrError, C: NodeCommunication + Sized + Sync + Send>(
+    pub fn step<N: NodeCommunication>(
         &mut self,
-        entity_node_map: &HashMap<EntityId, String>,
-        mut addr_book: &mut HashMap<u32, C>,
-    ) {
+        mut network: &mut N,
+        event_queue: Vec<StringId>,
+    ) -> Result<()> {
         use crate::machine::cmd::{CentralExtCommand, ExtCommand};
         use crate::machine::{cmd, ExecutionContext};
         println!("sim_node start processing step");
@@ -134,7 +154,7 @@ impl SimNode {
         // loc phase
         self.entities.par_iter_mut().for_each(
             |(ent_uid, mut entity): (&EntityUid, &mut Entity)| {
-                println!("processing entity: {:?}", ent_uid);
+                println!("processing entity: {:?}", entity);
                 step::step_entity_local(
                     model,
                     event_queue,
@@ -147,20 +167,20 @@ impl SimNode {
         );
         println!("sim_node finished local phase");
 
-        // send ext cmd requests
-        for (exec_context, ext_cmd) in ext_cmds.lock().unwrap().iter() {
-            println!("sending ext_cmd: {:?}", ext_cmd);
-            // let ent_uid_string = format!("{}/{}", ent_type, ent_id);
-            let target_ent = match ext_cmd {
-                ExtCommand::SetVar(esv) => esv.target.entity,
-                _ => continue,
-            };
-            let target_node_id = entity_node_map.get(&target_ent).unwrap();
-            unimplemented!();
-            //addr_book.get(target_node_id).unwrap().send_request(ext_cmd);
-        }
-
-        println!("sim_node finished send ext cmd requests");
+        // // send ext cmd requests
+        // for (exec_context, ext_cmd) in ext_cmds.lock().unwrap().iter() {
+        //     println!("sending ext_cmd: {:?}", ext_cmd);
+        //     // let ent_uid_string = format!("{}/{}", ent_type, ent_id);
+        //     let target_ent = match ext_cmd {
+        //         ExtCommand::SetVar(esv) => esv.target.entity,
+        //         _ => continue,
+        //     };
+        //     // let target_node_id = entity_node_map.get(&target_ent).unwrap();
+        //     // unimplemented!();
+        //     //addr_book.get(target_node_id).unwrap().send_request(ext_cmd);
+        // }
+        //
+        // println!("sim_node finished send ext cmd requests");
 
         // `post` phase
         // process queued external msgs from `loc`
@@ -169,40 +189,49 @@ impl SimNode {
         //        addr_book.iter().for_each(|(node,c)| {
         //
         //        });
-        addr_book
-            .par_iter_mut()
-            .for_each(|(node, c): (&u32, &mut C)| {
-                //            thread::spawn(|| {
-                loop {
-                    println!("enter loop, wait for read_ext_cmd...");
-                    // TODO there should be protocol for ending of stream of these messages
-                    //
-                    // match c.read_message()
-                    // match c.read_ext_cmd() {
-                    //     Ok((context, cmd)) => {
-                    //         println!("exec ext command received from {:?}", context)
-                    //     }
-                    //     _ => return,
-                    // }
-                    return;
-                }
-            });
-        println!("sim_node finished read ext cmd responses");
+
+        // addr_book
+        //     .par_iter_mut()
+        //     .for_each(|(node, c): (&u32, &mut C)| {
+        //         //            thread::spawn(|| {
+        //         loop {
+        //             println!("enter loop, wait for read_ext_cmd...");
+        //             // TODO there should be protocol for ending of stream of these messages
+        //             //
+        //             // match c.read_message()
+        //             // match c.read_ext_cmd() {
+        //             //     Ok((context, cmd)) => {
+        //             //         println!("exec ext command received from {:?}", context)
+        //             //     }
+        //             //     _ => return,
+        //             // }
+        //             return;
+        //         }
+        //     });
+        // println!("sim_node finished read ext cmd responses");
 
         let mut cexts = central_ext_cmds.lock().unwrap();
         for cext in cexts.iter() {
             // println!("sending cext cmd: {:?}", cext);
-            addr_book
-                .get_mut(&0)
-                .unwrap()
-                .sig_send_to_node(0, Signal::ExecuteCentralExtCmd(cext.clone()));
+            network.sig_send_central(Signal::ExecuteCentralExtCmd(cext.clone()));
         }
-        addr_book
-            .get_mut(&0)
-            .unwrap()
-            .sig_send_to_node(0, Signal::EndOfMessages);
+        network.sig_send_central(Signal::EndOfMessages);
+        loop {
+            match network.sig_read_central()? {
+                Signal::SpawnEntities(e) => {
+                    for (a, b, c) in e {
+                        self.add_entity(a, b, c)?;
+                    }
+                }
+                Signal::EndOfMessages => break,
+                _ => (),
+            }
+        }
+        network.sig_send_central(Signal::ProcessStepFinished);
         println!("sim_node finished send central ext cmd requests");
+
         // println!("{:?}", self.entities);
+        Ok(())
     }
 
     //fn exec_ext_get(&self, get: cmd::get_set::Get) {}

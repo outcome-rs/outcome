@@ -27,7 +27,7 @@ use crate::error::{Error, Result};
 use crate::model::{DataEntry, DataImageEntry, Scenario};
 use crate::sim::interface::SimInterface;
 use crate::sim::step;
-use crate::{model, CompId, EntityUid, SimModel, StringId, Var, VarType};
+use crate::{model, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType};
 
 #[cfg(feature = "machine")]
 use crate::machine::{
@@ -42,7 +42,9 @@ use crate::machine::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Signal {
     /// Request node to start initialization using given model and list of entities
-    InitializeNode((SimModel, Vec<EntityUid>)),
+    InitializeNode(SimModel),
+    // uid, prefab string_id, target string_id
+    SpawnEntities(Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>),
     /// Request node to start processing step, includes event_queue vec
     StartProcessStep(Vec<StringId>),
 

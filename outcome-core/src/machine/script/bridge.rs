@@ -46,7 +46,7 @@ impl cmd::assembly::Extend {
         for file in &self.source_files {
             //debug!("{:?}", file);
             //TODO create the path from project_root + relative_location_path + arg_file_path
-            let project_root = sim.model.scenario.path.clone();
+            // let project_root = &sim.model.scenario.path;
             let file_path = PathBuf::from_str(self.location.source.as_ref().unwrap())
                 .unwrap()
                 .parent()
@@ -54,7 +54,10 @@ impl cmd::assembly::Extend {
                 .join(file);
             //let file_path = project_root.join(relative_path);
             //debug!("{:?}", file_path);
-            let mut instructions = match super::parse_script_at(&file_path.to_str().unwrap()) {
+            let mut instructions = match super::parse_script_at(
+                &file_path.to_str().unwrap(),
+                &sim.model.scenario.path.to_string_lossy(),
+            ) {
                 Ok(i) => i,
                 Err(_) => {
                     return Err(machine::Error::new(

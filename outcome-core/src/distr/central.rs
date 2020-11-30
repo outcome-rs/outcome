@@ -40,20 +40,33 @@ pub struct SimCentral {
 
     pub entities_idx: FnvHashMap<EntityId, EntityUid>,
     entity_idpool: IdPool,
+
+    ent_spawn_queue: Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>,
+    pub model_changes_queue: SimModel,
 }
 
 impl SimCentral {
     pub fn get_clock(&self) -> usize {
         self.clock
     }
+    pub fn flush_queue<N: CentralCommunication>(&mut self, net: &mut N) -> Result<()> {
+        if !self.ent_spawn_queue.is_empty() {
+            net.sig_send_to_node(0, Signal::SpawnEntities(self.ent_spawn_queue.clone()))?;
+        }
+        self.ent_spawn_queue.clear();
+
+        Ok(())
+    }
     pub fn from_model(model: SimModel) -> Result<SimCentral> {
-        let mut event_queue = vec![StringId::from_truncate("init")];
+        let mut event_queue = vec![StringId::from_truncate("step")];
         let mut sim_central = SimCentral {
             model: model.clone(),
             clock: 0,
             event_queue,
             entities_idx: Default::default(),
             entity_idpool: IdPool::new(),
+            ent_spawn_queue: vec![],
+            model_changes_queue: SimModel::default(),
         };
         // module script init
         // #[cfg(feature = "machine_script")]
@@ -88,30 +101,29 @@ impl SimCentral {
     /// Spawns a new entity based on the given prefab.
     ///
     /// If prefab is `None` then an empty entity is spawned.
-    pub fn spawn_entity<N: CentralCommunication>(
-        &mut self,
-        prefab: Option<&StringId>,
-        name: StringId,
-        net: N,
-    ) -> Result<()> {
-        let mut ent = match prefab {
-            Some(p) => Entity::from_prefab(p, &self.model)?,
-            None => Entity::empty(),
-        };
+    pub fn spawn_entity(&mut self, prefab: Option<StringId>, name: Option<StringId>) -> Result<()> {
+        // let mut ent = match prefab {
+        //     Some(p) => Entity::from_prefab(p, &self.model)?,
+        //     None => Entity::empty(),
+        // };
+        trace!("spawning entity from central");
 
-        if !self.entities_idx.contains_key(&name) {
-            let new_uid = self.entity_idpool.request_id().unwrap();
-            self.entities_idx.insert(name, new_uid);
-            //TODO
-            // net.sig_send_to_node(0, );
-            // self.entities.insert(new_uid, ent);
-            Ok(())
-        } else {
-            Err(Error::Other(format!(
-                "Failed to add entity: entity named \"{}\" already exists",
-                name,
-            )))
+        let new_uid = self.entity_idpool.request_id().unwrap();
+
+        if let Some(n) = name {
+            if self.entities_idx.contains_key(&n) {
+                return Err(Error::Other(format!(
+                    "Failed to add entity: entity named \"{}\" already exists",
+                    n,
+                )));
+            }
+            self.entities_idx.insert(n, new_uid);
         }
+
+        self.ent_spawn_queue.push((new_uid, prefab, name));
+        // net.sig_send_to_node(0, Signal::SpawnEntities(vec![(new_uid, prefab, name)]));
+
+        Ok(())
     }
     pub fn assign_entities(
         &self,
@@ -160,15 +172,15 @@ impl SimCentral {
 
     pub fn step_network<N: CentralCommunication>(
         &mut self,
-        network: N,
+        network: &mut N,
         event_queue: Vec<StringId>,
     ) -> Result<()> {
-        debug!("sim_central: starting processing step");
+        debug!("starting processing step");
         // tell nodes to start processing step
         network.sig_broadcast(Signal::StartProcessStep(event_queue))?;
-        debug!("sim_central: sent `StartProcessStep` signal to all nodes");
+        debug!("sent `StartProcessStep` signal to all nodes");
 
-        debug!("sim_central: starting reading incoming signals");
+        debug!("starting reading incoming signals");
         #[cfg(feature = "machine")]
         let mut cext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>> =
             Arc::new(Mutex::new(Vec::new()));
@@ -192,16 +204,26 @@ impl SimCentral {
                 },
             };
         }
-        debug!("sim_central: finished reading incoming signals");
+        debug!("finished reading incoming signals");
 
-        debug!("sim_central: starting processing cext commands");
+        debug!("starting processing cext commands");
         #[cfg(feature = "machine")]
         for (context, cext_cmd) in cext_cmds.lock().unwrap().iter() {
             // println!("{:?}", cext_cmd);
             //TODO
-            // cext_cmd.execute(self, &context.ent_uid, &context.comp_uid);
+            cext_cmd.execute_distr(self, network, &context.ent, &context.comp);
         }
-        debug!("sim_central: finished executing cext commands");
+        self.flush_queue(network)?;
+        network.sig_broadcast(Signal::EndOfMessages)?;
+        loop {
+            if let Ok((_, s)) = network.sig_read() {
+                match s {
+                    Signal::ProcessStepFinished => break,
+                    _ => (),
+                }
+            }
+        }
+        debug!("finished executing cext commands");
 
         // self.clock += 1;
         Ok(())

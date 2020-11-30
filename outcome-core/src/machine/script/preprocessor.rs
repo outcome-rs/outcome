@@ -22,7 +22,7 @@ pub(crate) fn run(
     // start by removing empty instructions
     eliminate_empty(instructions)?;
     // run include directives
-    run_includes(instructions)?;
+    run_includes(instructions, sim_model)?;
     // run conditionals, eliminating subset of instructions
     run_conditionals(instructions)?;
     // run the remaining directives
@@ -65,7 +65,7 @@ fn eliminate_directives(instructions: &mut Vec<Instruction>) -> Result<()> {
 /// the processed instruction. In short file paths specified in include
 /// directives are written as relative to the file where the directive is
 /// present.
-fn run_includes(instructions: &mut Vec<Instruction>) -> Result<()> {
+fn run_includes(instructions: &mut Vec<Instruction>, sim_model: &SimModel) -> Result<()> {
     // run until there are no include directives left
     while instructions.iter().any(|i| match &i.kind {
         InstructionKind::Directive(dp) => match &dp.name {
@@ -120,6 +120,7 @@ fn run_includes(instructions: &mut Vec<Instruction>) -> Result<()> {
                             // parse the file at path
                             let new_instructions = super::parser::parse_script_at(
                                 script_parent_path.join(incl_file).to_str().unwrap(),
+                                &sim_model.scenario.path.to_string_lossy(),
                             )?;
                             instructions.splice(ni..ni, new_instructions);
                         }

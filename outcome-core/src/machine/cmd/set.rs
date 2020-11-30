@@ -136,7 +136,7 @@ impl Set {
                     // find out which comp_uid to use
                     let comp_uid = self.target.comp.unwrap_or(*comp_uid);
                     let var_id = self.target.var_id;
-                    entity_db.insert(&comp_uid, &var_id, var_type, val);
+                    entity_db.insert(&comp_uid, &var_id, var_type, Some(val.clone()));
                     // return CommandResult::Error(
                     //     Error::FailedGettingFromStorage(self.target, location.clone())
                 }

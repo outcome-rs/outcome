@@ -1,5 +1,4 @@
 use crate::address::LocalAddress;
-use crate::entity::StorageIndex;
 use crate::model::ComponentModel;
 use crate::{Address, CompId, StringId, Var, VarType};
 use fnv::FnvHashMap;
@@ -7,12 +6,13 @@ use std::collections::HashMap;
 
 // use crate::error::Result;
 
-type SmallStorageIndex = (StorageIndex, VarType);
+// type SmallStorageIndex = (StorageIndex, VarType);
+pub type StorageIndex = (StringId, StringId);
 
 /// Main data store of the entity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Storage {
-    map: FnvHashMap<SmallStorageIndex, Var>,
+    map: FnvHashMap<StorageIndex, Var>,
 }
 impl Storage {
     pub fn new() -> Self {
@@ -24,29 +24,20 @@ impl Storage {
 /// Generic type getters.
 impl Storage {
     pub fn get_var(&self, idx: &StorageIndex, var_type: Option<VarType>) -> Option<&Var> {
-        self.map.get(&(*idx, var_type?))
+        self.map.get(&idx)
     }
     pub fn get_var_mut(
         &mut self,
         idx: &StorageIndex,
         var_type: Option<VarType>,
     ) -> Option<&mut Var> {
-        self.map.get_mut(&(*idx, var_type?))
+        self.map.get_mut(&idx)
     }
+
     pub fn get_var_from_addr(&self, addr: &Address, comp_uid: Option<&CompId>) -> Option<Var> {
         match comp_uid {
-            Some(_comp_uid) => {
-                return self
-                    .map
-                    .get(&((*_comp_uid, addr.var_id), addr.var_type))
-                    .cloned()
-            }
-            None => {
-                return self
-                    .map
-                    .get(&((addr.component, addr.var_id), addr.var_type))
-                    .cloned()
-            }
+            Some(_comp_uid) => return self.map.get(&(*_comp_uid, addr.var_id)).cloned(),
+            None => return self.map.get(&(addr.component, addr.var_id)).cloned(),
         };
         None
     }
@@ -73,63 +64,78 @@ impl Storage {
         *target = var;
     }
     pub fn set_from_var(&mut self, target: &Address, comp_uid: Option<&CompId>, var: &Var) {
-        unimplemented!();
+        let target = self
+            .get_var_mut(&(target.component, target.var_id), Some(target.var_type))
+            .unwrap();
+        *target = var.clone();
     }
-    pub fn insert(&mut self, comp_name: &str, var_id: &str, var_type: &VarType, var: &Var) {
+
+    pub fn insert(&mut self, comp_name: &str, var_id: &str, var_type: &VarType, var: Option<Var>) {
         let var_suid = (
             StringId::from_truncate(comp_name),
             StringId::from_truncate(var_id),
         );
-        self.map.insert((var_suid, *var_type), var.clone());
+        if let Some(v) = var {
+            self.insert_var(comp_name, var_id, v);
+        } else {
+            self.map.insert(var_suid, Var::new(var_type));
+        }
+    }
+    pub fn insert_var(&mut self, comp_name: &str, var_id: &str, var: Var) {
+        let var_suid = (
+            StringId::from_truncate(comp_name),
+            StringId::from_truncate(var_id),
+        );
+        self.map.insert(var_suid, var);
     }
 }
 
 /// Type-strict getters.
 impl Storage {
     pub fn get_str(&self, idx: &StorageIndex) -> Option<&String> {
-        match self.map.get(&(*idx, VarType::Str))? {
+        match self.map.get(idx)? {
             Var::Str(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_str_mut(&mut self, idx: &StorageIndex) -> Option<&mut String> {
-        match self.map.get_mut(&(*idx, VarType::Str))? {
+        match self.map.get_mut(idx)? {
             Var::Str(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_int(&self, idx: &StorageIndex) -> Option<&crate::Int> {
-        match self.map.get(&(*idx, VarType::Int))? {
+        match self.map.get(idx)? {
             Var::Int(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_int_mut(&mut self, idx: &StorageIndex) -> Option<&mut crate::Int> {
-        match self.map.get_mut(&(*idx, VarType::Int))? {
+        match self.map.get_mut(idx)? {
             Var::Int(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_float(&self, idx: &StorageIndex) -> Option<&crate::Float> {
-        match self.map.get(&(*idx, VarType::Float))? {
+        match self.map.get(idx)? {
             Var::Float(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_float_mut(&mut self, idx: &StorageIndex) -> Option<&mut crate::Float> {
-        match self.map.get_mut(&(*idx, VarType::Float))? {
+        match self.map.get_mut(idx)? {
             Var::Float(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_bool(&self, idx: &StorageIndex) -> Option<&bool> {
-        match self.map.get(&(*idx, VarType::Bool))? {
+        match self.map.get(idx)? {
             Var::Bool(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_bool_mut(&mut self, idx: &StorageIndex) -> Option<&mut bool> {
-        match self.map.get_mut(&(*idx, VarType::Bool))? {
+        match self.map.get_mut(idx)? {
             Var::Bool(s) => Some(s),
             _ => None,
         }
@@ -138,82 +144,83 @@ impl Storage {
 /// Type-strict getters for lists.
 impl Storage {
     pub fn get_str_list(&self, idx: &StorageIndex) -> Option<&Vec<String>> {
-        match self.map.get(&(*idx, VarType::StrList))? {
+        match self.map.get(idx)? {
             Var::StrList(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_str_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<String>> {
-        match self.map.get_mut(&(*idx, VarType::StrList))? {
+        match self.map.get_mut(idx)? {
             Var::StrList(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_int_list(&self, idx: &StorageIndex) -> Option<&Vec<crate::Int>> {
-        match self.map.get(&(*idx, VarType::IntList))? {
+        match self.map.get(idx)? {
             Var::IntList(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_int_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<crate::Int>> {
-        match self.map.get_mut(&(*idx, VarType::IntList))? {
+        match self.map.get_mut(idx)? {
             Var::IntList(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_float_list(&self, idx: &StorageIndex) -> Option<&Vec<crate::Float>> {
-        match self.map.get(&(*idx, VarType::FloatList))? {
+        match self.map.get(idx)? {
             Var::FloatList(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_float_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<crate::Float>> {
-        match self.map.get_mut(&(*idx, VarType::FloatList))? {
+        match self.map.get_mut(idx)? {
             Var::FloatList(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_bool_list(&self, idx: &StorageIndex) -> Option<&Vec<bool>> {
-        match self.map.get(&(*idx, VarType::BoolList))? {
+        match self.map.get(idx)? {
             Var::BoolList(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_bool_list_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<bool>> {
-        match self.map.get_mut(&(*idx, VarType::BoolList))? {
+        match self.map.get_mut(idx)? {
             Var::BoolList(s) => Some(s),
             _ => None,
         }
     }
 }
 /// Type-strict getters for grids.
+#[cfg(feature = "grids")]
 impl Storage {
     pub fn get_str_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<String>>> {
-        match self.map.get(&(*idx, VarType::StrGrid))? {
+        match self.map.get(idx)? {
             Var::StrGrid(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_str_grid_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<Vec<String>>> {
-        match self.map.get_mut(&(*idx, VarType::StrGrid))? {
+        match self.map.get_mut(idx)? {
             Var::StrGrid(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_int_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<crate::Int>>> {
-        match self.map.get(&(*idx, VarType::IntGrid))? {
+        match self.map.get(idx)? {
             Var::IntGrid(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_int_grid_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<Vec<crate::Int>>> {
-        match self.map.get_mut(&(*idx, VarType::IntGrid))? {
+        match self.map.get_mut(idx)? {
             Var::IntGrid(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_float_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<crate::Float>>> {
-        match self.map.get(&(*idx, VarType::FloatGrid))? {
+        match self.map.get(idx)? {
             Var::FloatGrid(s) => Some(s),
             _ => None,
         }
@@ -222,19 +229,19 @@ impl Storage {
         &mut self,
         idx: &StorageIndex,
     ) -> Option<&mut Vec<Vec<crate::Float>>> {
-        match self.map.get_mut(&(*idx, VarType::FloatGrid))? {
+        match self.map.get_mut(idx)? {
             Var::FloatGrid(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_bool_grid(&self, idx: &StorageIndex) -> Option<&Vec<Vec<bool>>> {
-        match self.map.get(&(*idx, VarType::BoolGrid))? {
+        match self.map.get(idx)? {
             Var::BoolGrid(s) => Some(s),
             _ => None,
         }
     }
     pub fn get_bool_grid_mut(&mut self, idx: &StorageIndex) -> Option<&mut Vec<Vec<bool>>> {
-        match self.map.get_mut(&(*idx, VarType::BoolGrid))? {
+        match self.map.get_mut(idx)? {
             Var::BoolGrid(s) => Some(s),
             _ => None,
         }
@@ -252,32 +259,35 @@ impl Storage {
 }
 /// Type collection getters.
 impl Storage {
+    pub fn get_all_var(&self) -> &FnvHashMap<StorageIndex, Var> {
+        &self.map
+    }
     pub fn get_all_str(&self) -> Vec<(&StorageIndex, &String)> {
         self.map
             .iter()
             .filter(|(k, v)| v.is_str())
-            .map(|((k, _), v)| (k, v.as_str().unwrap()))
+            .map(|(k, v)| (k, v.as_str().unwrap()))
             .collect()
     }
     pub fn get_all_int(&self) -> Vec<(&StorageIndex, &crate::Int)> {
         self.map
             .iter()
             .filter(|(_, v)| v.is_int())
-            .map(|((k, _), v)| (k, v.as_int().unwrap()))
+            .map(|(k, v)| (k, v.as_int().unwrap()))
             .collect()
     }
     pub fn get_all_float(&self) -> Vec<(&StorageIndex, &crate::Float)> {
         self.map
             .iter()
             .filter(|(_, v)| v.is_float())
-            .map(|((k, _), v)| (k, v.as_float().unwrap()))
+            .map(|(k, v)| (k, v.as_float().unwrap()))
             .collect()
     }
     pub fn get_all_bool(&self) -> Vec<(&StorageIndex, &bool)> {
         self.map
             .iter()
             .filter(|(_, v)| v.is_bool())
-            .map(|((k, _), v)| (k, v.as_bool().unwrap()))
+            .map(|(k, v)| (k, v.as_bool().unwrap()))
             .collect()
     }
     // pub fn get_all_str_list(&self) -> Vec<(&SmallStorageIndex, &Vec<String>)> {
@@ -428,10 +438,10 @@ impl Storage {
 /// Type-strict inserts
 impl Storage {
     pub fn insert_int(&mut self, idx: &StorageIndex, val: crate::Int) {
-        self.map.insert((*idx, VarType::Int), Var::Int(val));
+        self.map.insert(*idx, Var::Int(val));
     }
     pub fn insert_int_list(&mut self, idx: &StorageIndex, val: Vec<crate::Int>) {
-        self.map.insert((*idx, VarType::Int), Var::IntList(val));
+        self.map.insert(*idx, Var::IntList(val));
     }
 }
 /// Type-strict setters and inserts
@@ -450,9 +460,9 @@ impl Storage {
         let mut out_map = HashMap::new();
         for (index, var) in &self.map {
             // println!("{:?}, {:?}", index, var);
-            let ((comp_name, var_name), var_type) = index;
+            let (comp_name, var_name) = index;
             out_map.insert(
-                format!("{}:{}:{}", comp_name, var_type.to_str(), var_name),
+                format!("{}:{}:{}", comp_name, var.get_type().to_str(), var_name),
                 var.to_string(),
             );
         }

@@ -11,13 +11,15 @@ use super::super::super::{
 };
 use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::error::ErrorKind;
+use crate::machine::ComponentCallInfo;
 
 pub const COMMAND_NAMES: [&'static str; 1] = ["state"];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct State {
+    pub comp: CompId,
     pub signature: Option<Address>,
-    pub name: ShortString,
+    pub name: StringId,
     pub start_line: usize,
     pub end_line: usize,
     pub output_variable: Option<Address>,
@@ -70,8 +72,9 @@ impl State {
 
         match positions_options {
             Some(positions) => Ok(Command::State(State {
+                comp: CompId::from_truncate("position"),
                 signature: None,
-                name: ShortString::from_truncate(&args[0]),
+                name: StringId::from_truncate(&args[0]),
                 start_line: line + 1,
                 end_line: positions.0,
                 output_variable: None,
@@ -85,27 +88,34 @@ impl State {
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
-        ent_uid: &EntityId,
-        comp_uid: &CompId,
+        ent_name: &EntityId,
+        comp_name: &CompId,
         line: usize,
     ) -> Vec<CommandResult> {
-        unimplemented!()
-        // let mut new_self = self.clone();
-        // let mut addr = Address::from_uids(ent_uid, comp_uid);
+        // unimplemented!()
+        let mut new_self = self.clone();
+        // let mut addr = Address::from_uids(ent_name, comp_uid);
         // new_self.signature = Some(addr);
-        //
-        // //println!("{:?}", new_self);
-        // let mut out_vec = Vec::new();
-        // // out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::State(
-        // //     new_self,
-        // // )));
-        // out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
-        // out_vec
+        if let Some(comp_info) = call_stack.iter().find_map(|ci: &CallInfo| match ci {
+            CallInfo::Component(c) => Some(c),
+            _ => None,
+        }) {
+            new_self.comp = comp_info.name;
+        }
+
+        //println!("{:?}", new_self);
+        let mut out_vec = Vec::new();
+        out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::State(
+            new_self,
+        )));
+        out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
+        out_vec
     }
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<(), Error> {
         //println!("execute ext on state cmd");
         //println!("{:?}", sim.model.components);
-        let comp_name = self.signature.unwrap().component;
+        // let comp_name = self.signature.unwrap().component;
+        let comp_name = self.comp;
         for component in &mut sim.model.components {
             if component.name != comp_name {
                 continue;
@@ -114,7 +124,7 @@ impl State {
                 .logic
                 .states
                 .insert(self.name, (self.start_line, self.end_line));
-            debug!("inserted state at comp: {:?}", comp_name);
+            debug!("inserted state {:?} at comp {:?}", self.name, comp_name);
         }
         Ok(())
     }

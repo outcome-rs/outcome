@@ -15,11 +15,13 @@ name = "outcome"
 path = "src/main.rs"
 
 [features]
-default = ["outcome-core/machine_sandbox", "outcome-core/load_img", "psutils", "img_print", "transport_zmq"]
-complete = ["outcome-core/machine_complete", "outcome-core/load_img", "psutils", "img_print"]
+default = ["outcome-core/machine_sandbox", "outcome-core/load_img", "psutils", "img_print", "transport_zmq", "grids"]
+complete = ["outcome-core/machine_complete", "outcome-core/load_img", "psutils", "img_print", "grids"]
 
 transport_nng = ["outcome-net/transport_nng"]
 transport_zmq = ["outcome-net/transport_zmq"]
+
+grids = ["outcome-core/grids", "outcome-net/grids"]
 
 psutils = ["psutil"]
 img_print = ["image"]

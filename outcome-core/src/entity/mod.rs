@@ -18,7 +18,7 @@ use libloading::Library;
 #[cfg(feature = "machine_lua")]
 use rlua::Lua;
 
-pub type StorageIndex = (StringId, StringId);
+pub use storage::StorageIndex;
 
 // impl CompCollection {
 //     pub fn get(&self, key: &CompId) -> Option<&Component> {
@@ -152,7 +152,7 @@ impl Entity {
                     &comp_model.name,
                     &var_model.id,
                     &var_model.type_,
-                    &var_model.default,
+                    var_model.default.clone(),
                 );
             }
 

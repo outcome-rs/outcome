@@ -2,7 +2,7 @@ use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, LogicModel, SimModel, VarModel};
 use crate::sim::interface::SimInterface;
-use crate::{CompId, EntityId, ShortString, Sim, StringId, VarType};
+use crate::{CompId, EntityId, LongString, ShortString, Sim, StringId, VarType};
 use std::iter::FromIterator;
 
 use super::super::super::{
@@ -11,12 +11,16 @@ use super::super::super::{
 };
 use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::error::ErrorKind;
+use crate::machine::script::parse_script_at;
+use crate::machine::ComponentCallInfo;
 
-pub const COMMAND_NAMES: [&'static str; 1] = ["state"];
+pub const COMMAND_NAMES: [&'static str; 1] = ["component"];
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComponentBlock {
-    pub name: ShortString,
+    pub name: StringId,
+    pub source_comp: StringId,
+    pub source_file: LongString,
     pub start_line: usize,
     pub end_line: usize,
     pub output_variable: Option<Address>,
@@ -29,6 +33,8 @@ impl ComponentBlock {
         commands: &Vec<CommandPrototype>,
     ) -> Result<Command, Error> {
         let line = location.line.unwrap();
+
+        println!("making new comp block");
 
         // TODO all these names should probably be declared in a
         // better place start names
@@ -69,7 +75,9 @@ impl ComponentBlock {
 
         match positions_options {
             Some(positions) => Ok(Command::Component(ComponentBlock {
-                name: ShortString::from_truncate(&args[0]),
+                name: StringId::from_truncate(&args[0]),
+                source_comp: location.comp_name.unwrap(),
+                source_file: location.source.unwrap(),
                 start_line: line + 1,
                 end_line: positions.0,
                 output_variable: None,
@@ -83,14 +91,19 @@ impl ComponentBlock {
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
-        ent_uid: &EntityId,
-        comp_uid: &CompId,
+        ent_name: &EntityId,
+        comp_name: &CompId,
         line: usize,
     ) -> Vec<CommandResult> {
         // unimplemented!()
         let mut new_self = self.clone();
 
-        //println!("{:?}", new_self);
+        println!("componentblock: {:?}", new_self);
+
+        call_stack.push(CallInfo::Component(ComponentCallInfo {
+            name: new_self.name,
+        }));
+
         let mut out_vec = Vec::new();
         out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Component(
             new_self,
@@ -100,10 +113,12 @@ impl ComponentBlock {
         out_vec
     }
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<(), Error> {
-        //println!("execute ext on state cmd");
-        //println!("{:?}", sim.model.components);
+        debug!("registering component");
+        // sim.model.components[0].
+        let comp_model = sim.model.get_component(&self.source_comp).unwrap();
+
         let component = ComponentModel {
-            name: self.name,
+            name: self.name.into(),
             vars: vec![],
             // vars: vec![VarModel {
             //     id: "test_string".to_string(),
@@ -111,14 +126,15 @@ impl ComponentBlock {
             //     default: crate::Var::Str("66asads2s".to_string()),
             //     internal: false,
             // }],
-            start_state: Default::default(),
-            triggers: vec![],
+            start_state: StringId::from_unchecked("start"),
+            // triggers: vec![],
+            triggers: vec![StringId::from_unchecked("step")],
             logic: LogicModel {
-                commands: vec![],
+                commands: comp_model.logic.commands.clone(),
                 pre_commands: Default::default(),
                 states: Default::default(),
                 procedures: Default::default(),
-                cmd_location_map: Default::default(),
+                cmd_location_map: comp_model.logic.cmd_location_map.clone(),
             },
             source_files: vec![],
             script_files: vec![],

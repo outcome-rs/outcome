@@ -123,7 +123,7 @@ impl CoordNetwork {
         let resp: IntroduceCoordResponse = self.driver.inviter.read_msg()?.unpack_payload()?;
         // println!("got response: {:?}", resp);
         self.driver.inviter.disconnect("")?;
-        let init_sig = Signal::InitializeNode((model, Vec::new()));
+        let init_sig = Signal::InitializeNode(model);
         worker
             .pair_sock
             .send(crate::sig::Signal::from(init_sig).to_bytes()?)?;
@@ -175,18 +175,17 @@ impl Coord {
 
         // module script init
         //TODO put this somewhere else?
-        #[cfg(feature = "machine_script")]
-        {
+        if outcome::FEATURE_MACHINE_SCRIPT {
             coord.central.spawn_entity(
-                Some(&StringId::from("_mod_init").unwrap()),
-                StringId::from("_mod_init").unwrap(),
-                &net,
+                Some(outcome::StringId::from("_mod_init").unwrap()),
+                Some(outcome::StringId::from("_mod_init").unwrap()),
             )?;
             coord
                 .central
                 .event_queue
-                .push(StringId::from("_scr_init").unwrap());
+                .push(outcome::StringId::from("_scr_init").unwrap());
         }
+        coord.central.flush_queue(&mut net)?;
 
         let net_arc = Arc::new(Mutex::new(net));
         let coord_arc = Arc::new(Mutex::new(coord));
@@ -221,7 +220,7 @@ impl Coord {
         });
         let net_arc_clone = net_arc.clone();
         thread::spawn(move || loop {
-            sleep(Duration::from_millis(1));
+            sleep(Duration::from_micros(10));
             let mut guard = net_arc_clone.lock().unwrap();
             for worker in &guard.workers {
                 match worker.pair_sock.try_read(None) {
@@ -344,7 +343,7 @@ impl Coord {
     // }
 }
 
-impl outcome::distr::CentralCommunication for &mut CoordNetwork {
+impl outcome::distr::CentralCommunication for CoordNetwork {
     fn sig_read(&self) -> outcome::Result<(String, Signal)> {
         //TODO
         for worker in &self.workers {
@@ -362,7 +361,14 @@ impl outcome::distr::CentralCommunication for &mut CoordNetwork {
     }
 
     fn sig_send_to_node(&self, node_id: u32, signal: Signal) -> outcome::Result<()> {
-        unimplemented!()
+        let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
+        self.workers
+            .get(node_id as usize)
+            .unwrap()
+            .pair_sock
+            .send(sig_bytes)
+            .unwrap();
+        Ok(())
     }
 
     fn sig_send_to_entity(&self, entity_uid: u32) -> outcome::Result<()> {

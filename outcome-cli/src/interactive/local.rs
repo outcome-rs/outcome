@@ -63,7 +63,7 @@ pub fn print_show_grid(sim: &Sim, config: &Config, addr_str: &str) {
     unimplemented!();
 }
 
-#[cfg(feature = "img_print")]
+#[cfg(all(feature = "outcome_core/grids", feature = "img_print"))]
 pub fn print_show_grid(sim: &Sim, config: &Config, addr_str: &str) {
     use image::GenericImage;
     let grid = sim

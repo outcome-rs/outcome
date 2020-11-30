@@ -57,7 +57,7 @@ pub struct Sim {
     /// Number of steps that have been processed so far
     pub(crate) clock: usize,
     /// Global queue of events waiting for execution
-    pub(crate) event_queue: Vec<StringId>,
+    pub event_queue: Vec<StringId>,
 
     /// All entities that exist within the simulation world are stored here
     pub entities: FnvHashMap<EntityUid, Entity>,
@@ -206,7 +206,7 @@ impl Sim {
         // sim.setup_lua_state_ent();
         // apply data as found in user files
         sim.apply_data_reg();
-        #[cfg(feature = "load_img")]
+        #[cfg(all(feature = "grids", feature = "load_img"))]
         sim.apply_data_img();
 
         // apply settings from scenario manifest
@@ -360,10 +360,19 @@ impl Sim {
     }
     /// Get a `Var` from the sim using an absolute address.
     pub fn get_var(&self, addr: &Address) -> Option<Var> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
+        if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
+            if let Some(ent) = self.entities.get(ent_uid) {
+                return ent.storage.get_var_from_addr(addr, None);
+            }
+        } else {
+            return self.get_var_ent_uid(addr);
+        }
+        None
+    }
+    /// Get a `Var` from the sim using an absolute address.
+    pub fn get_var_ent_uid(&self, addr: &Address) -> Option<Var> {
+        let ent_uid: u32 = addr.entity.parse().unwrap();
+        if let Some(entity) = self.entities.get(&ent_uid) {
             return entity.storage.get_var_from_addr(addr, None);
         }
         None
@@ -415,10 +424,7 @@ impl Sim {
     /// Get a reference to `Float` variable from the sim
     /// using an absolute address.
     pub fn get_float(&self, addr: &Address) -> Option<&crate::Float> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
+        if let Some(entity) = self.entities.get(self.entities_idx.get(&addr.entity)?) {
             return entity.storage.get_float(&(addr.get_storage_index()));
         }
         None
@@ -548,98 +554,6 @@ impl Sim {
         }
         None
     }
-    /// Get a reference to `StrGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_str_grid(&self, addr: &Address) -> Option<&Vec<Vec<String>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `StrGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_str_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<String>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a reference to `IntGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_int_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Int>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `IntGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_int_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Int>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a reference to `FloatGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_float_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Float>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_float_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `FloatGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_float_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Float>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity
-                .storage
-                .get_float_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a reference to `BoolGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_bool_grid(&self, addr: &Address) -> Option<&Vec<Vec<bool>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_bool_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `BoolGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_bool_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<bool>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity
-                .storage
-                .get_bool_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
 
     /// Set a var at address using a string value as input.
     pub fn set_from_string(&mut self, addr: &Address, val: &String) -> Result<()> {
@@ -739,6 +653,10 @@ impl Sim {
         }
         Ok(())
     }
+}
+
+#[cfg(feature = "grids")]
+impl Sim {
     /// Set a var of any type using a string grid as input.
     pub fn set_from_string_grid(&mut self, addr: &Address, vec2d: &Vec<Vec<String>>) -> Result<()> {
         match addr.var_type {
@@ -806,37 +724,97 @@ impl Sim {
         }
         Ok(())
     }
-}
-
-/// Data applying functions.
-impl Sim {
-    /// Apply regular data as found in data declarations in user files.
-    fn apply_data_reg(&mut self) {
-        for de in &self.model.data.clone() {
-            match de {
-                DataEntry::Simple((addr, val)) => {
-                    let addr = match Address::from_str(&addr) {
-                        Ok(a) => a,
-                        Err(_) => continue,
-                    };
-                    self.set_from_string(&addr, &val);
-                }
-                DataEntry::List((addr, vec)) => {
-                    let addr = match Address::from_str(&addr) {
-                        Ok(a) => a,
-                        Err(_) => continue,
-                    };
-                    self.set_from_string_list(&addr, &vec);
-                }
-                DataEntry::Grid((addr, vec2d)) => {
-                    let addr = match Address::from_str(&addr) {
-                        Ok(a) => a,
-                        Err(_) => continue,
-                    };
-                    self.set_from_string_grid(&addr, vec2d);
-                }
-            }
+    /// Get a reference to `StrGrid` variable from the sim
+    /// using an absolute address.
+    pub fn get_str_grid(&self, addr: &Address) -> Option<&Vec<Vec<String>>> {
+        if let Some(entity) = self
+            .entities
+            .get(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity.storage.get_str_grid(&(addr.get_storage_index()));
         }
+        None
+    }
+    /// Get a mut reference to `StrGrid` variable from the
+    /// sim using an absolute address.
+    pub fn get_str_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<String>>> {
+        if let Some(entity) = self
+            .entities
+            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity.storage.get_str_grid_mut(&(addr.get_storage_index()));
+        }
+        None
+    }
+    /// Get a reference to `IntGrid` variable from the sim
+    /// using an absolute address.
+    pub fn get_int_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Int>>> {
+        if let Some(entity) = self
+            .entities
+            .get(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity.storage.get_int_grid(&(addr.get_storage_index()));
+        }
+        None
+    }
+    /// Get a mut reference to `IntGrid` variable from the
+    /// sim using an absolute address.
+    pub fn get_int_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Int>>> {
+        if let Some(entity) = self
+            .entities
+            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity.storage.get_int_grid_mut(&(addr.get_storage_index()));
+        }
+        None
+    }
+    /// Get a reference to `FloatGrid` variable from the sim
+    /// using an absolute address.
+    pub fn get_float_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Float>>> {
+        if let Some(entity) = self
+            .entities
+            .get(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity.storage.get_float_grid(&(addr.get_storage_index()));
+        }
+        None
+    }
+    /// Get a mut reference to `FloatGrid` variable from the
+    /// sim using an absolute address.
+    pub fn get_float_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Float>>> {
+        if let Some(entity) = self
+            .entities
+            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity
+                .storage
+                .get_float_grid_mut(&(addr.get_storage_index()));
+        }
+        None
+    }
+    /// Get a reference to `BoolGrid` variable from the sim
+    /// using an absolute address.
+    pub fn get_bool_grid(&self, addr: &Address) -> Option<&Vec<Vec<bool>>> {
+        if let Some(entity) = self
+            .entities
+            .get(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity.storage.get_bool_grid(&(addr.get_storage_index()));
+        }
+        None
+    }
+    /// Get a mut reference to `BoolGrid` variable from the
+    /// sim using an absolute address.
+    pub fn get_bool_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<bool>>> {
+        if let Some(entity) = self
+            .entities
+            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
+        {
+            return entity
+                .storage
+                .get_bool_grid_mut(&(addr.get_storage_index()));
+        }
+        None
     }
 
     // TODO support more image types
@@ -943,6 +921,39 @@ impl Sim {
             }
         }
     }
+}
+
+/// Data applying functions.
+impl Sim {
+    /// Apply regular data as found in data declarations in user files.
+    fn apply_data_reg(&mut self) {
+        for de in &self.model.data.clone() {
+            match de {
+                DataEntry::Simple((addr, val)) => {
+                    let addr = match Address::from_str(&addr) {
+                        Ok(a) => a,
+                        Err(_) => continue,
+                    };
+                    self.set_from_string(&addr, &val);
+                }
+                DataEntry::List((addr, vec)) => {
+                    let addr = match Address::from_str(&addr) {
+                        Ok(a) => a,
+                        Err(_) => continue,
+                    };
+                    self.set_from_string_list(&addr, &vec);
+                }
+                #[cfg(feature = "grids")]
+                DataEntry::Grid((addr, vec2d)) => {
+                    let addr = match Address::from_str(&addr) {
+                        Ok(a) => a,
+                        Err(_) => continue,
+                    };
+                    self.set_from_string_grid(&addr, vec2d);
+                }
+            }
+        }
+    }
 
     /// Apply settings as found in scenario manifest.
     fn apply_settings(&mut self) {
@@ -968,6 +979,7 @@ impl Sim {
                             .collect(),
                     );
                 }
+                #[cfg(feature = "grids")]
                 VarType::StrGrid | VarType::IntGrid | VarType::FloatGrid | VarType::BoolGrid => {
                     self.set_from_string_grid(
                         &addr,

@@ -44,9 +44,13 @@ pub enum VarType {
     IntList,
     FloatList,
     BoolList,
+    #[cfg(feature = "grids")]
     StrGrid,
+    #[cfg(feature = "grids")]
     IntGrid,
+    #[cfg(feature = "grids")]
     FloatGrid,
+    #[cfg(feature = "grids")]
     BoolGrid,
 }
 
@@ -84,9 +88,13 @@ impl VarType {
             INT_LIST_VAR_TYPE_NAME | INT_LIST_VAR_TYPE_NAME_ALT => VarType::IntList,
             FLOAT_LIST_VAR_TYPE_NAME | FLOAT_LIST_VAR_TYPE_NAME_ALT => VarType::FloatList,
             BOOL_LIST_VAR_TYPE_NAME | BOOL_LIST_VAR_TYPE_NAME_ALT => VarType::BoolList,
+            #[cfg(feature = "grids")]
             STR_GRID_VAR_TYPE_NAME | STR_GRID_VAR_TYPE_NAME_ALT => VarType::StrGrid,
+            #[cfg(feature = "grids")]
             INT_GRID_VAR_TYPE_NAME | INT_GRID_VAR_TYPE_NAME_ALT => VarType::IntGrid,
+            #[cfg(feature = "grids")]
             FLOAT_GRID_VAR_TYPE_NAME | FLOAT_GRID_VAR_TYPE_NAME_ALT => VarType::FloatGrid,
+            #[cfg(feature = "grids")]
             BOOL_GRID_VAR_TYPE_NAME | BOOL_GRID_VAR_TYPE_NAME_ALT => VarType::BoolGrid,
             _ => return None,
         };
@@ -104,9 +112,13 @@ impl VarType {
             INT_LIST_VAR_TYPE_NAME | INT_LIST_VAR_TYPE_NAME_ALT => VarType::IntList,
             FLOAT_LIST_VAR_TYPE_NAME | FLOAT_LIST_VAR_TYPE_NAME_ALT => VarType::FloatList,
             BOOL_LIST_VAR_TYPE_NAME | BOOL_LIST_VAR_TYPE_NAME_ALT => VarType::BoolList,
+            #[cfg(feature = "grids")]
             STR_GRID_VAR_TYPE_NAME | STR_GRID_VAR_TYPE_NAME_ALT => VarType::StrGrid,
+            #[cfg(feature = "grids")]
             INT_GRID_VAR_TYPE_NAME | INT_GRID_VAR_TYPE_NAME_ALT => VarType::IntGrid,
+            #[cfg(feature = "grids")]
             FLOAT_GRID_VAR_TYPE_NAME | FLOAT_GRID_VAR_TYPE_NAME_ALT => VarType::FloatGrid,
+            #[cfg(feature = "grids")]
             BOOL_GRID_VAR_TYPE_NAME | BOOL_GRID_VAR_TYPE_NAME_ALT => VarType::BoolGrid,
             _ => panic!("failed creating var_type from: {}", s),
         };
@@ -124,9 +136,13 @@ impl VarType {
             VarType::IntList => INT_LIST_VAR_TYPE_NAME,
             VarType::FloatList => FLOAT_LIST_VAR_TYPE_NAME,
             VarType::BoolList => BOOL_LIST_VAR_TYPE_NAME,
+            #[cfg(feature = "grids")]
             VarType::StrGrid => STR_GRID_VAR_TYPE_NAME,
+            #[cfg(feature = "grids")]
             VarType::IntGrid => INT_GRID_VAR_TYPE_NAME,
+            #[cfg(feature = "grids")]
             VarType::FloatGrid => FLOAT_GRID_VAR_TYPE_NAME,
+            #[cfg(feature = "grids")]
             VarType::BoolGrid => BOOL_GRID_VAR_TYPE_NAME,
         }
     }
@@ -155,10 +171,35 @@ pub enum Var {
     IntList(Vec<crate::Int>),
     FloatList(Vec<crate::Float>),
     BoolList(Vec<bool>),
+    #[cfg(feature = "grids")]
     StrGrid(Vec<Vec<String>>),
+    #[cfg(feature = "grids")]
     IntGrid(Vec<Vec<crate::Int>>),
+    #[cfg(feature = "grids")]
     FloatGrid(Vec<Vec<crate::Float>>),
+    #[cfg(feature = "grids")]
     BoolGrid(Vec<Vec<bool>>),
+}
+
+impl Var {
+    pub fn new(var_type: &VarType) -> Self {
+        match var_type {
+            VarType::Str => Var::Str(DEFAULT_STR_VALUE.to_string()),
+            VarType::Int => Var::Int(DEFAULT_INT_VALUE),
+            VarType::Float => Var::Float(DEFAULT_FLOAT_VALUE),
+            VarType::Bool => Var::Bool(DEFAULT_BOOL_VALUE),
+            _ => unimplemented!(),
+        }
+    }
+    pub fn get_type(&self) -> VarType {
+        match self {
+            Var::Str(_) => VarType::Str,
+            Var::Int(_) => VarType::Int,
+            Var::Float(_) => VarType::Float,
+            Var::Bool(_) => VarType::Bool,
+            _ => unimplemented!(),
+        }
+    }
 }
 
 /// Type-strict `is_type` checkers.
@@ -215,34 +256,6 @@ impl Var {
     pub fn is_bool_list(&self) -> bool {
         match self {
             Var::BoolList(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_str_grid(&self) -> bool {
-        match self {
-            Var::StrGrid(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_int_grid(&self) -> bool {
-        match self {
-            Var::IntGrid(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_float_grid(&self) -> bool {
-        match self {
-            Var::FloatGrid(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_bool_grid(&self) -> bool {
-        match self {
-            Var::BoolGrid(_) => true,
             _ => false,
         }
     }
@@ -361,7 +374,10 @@ impl Var {
             _ => None,
         }
     }
+}
 
+#[cfg(feature = "grids")]
+impl Var {
     pub fn as_str_grid(&self) -> Option<&Vec<Vec<String>>> {
         match self {
             Var::StrGrid(v) => Some(v),
@@ -417,6 +433,34 @@ impl Var {
             _ => None,
         }
     }
+
+    pub fn is_str_grid(&self) -> bool {
+        match self {
+            Var::StrGrid(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_int_grid(&self) -> bool {
+        match self {
+            Var::IntGrid(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_float_grid(&self) -> bool {
+        match self {
+            Var::FloatGrid(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_bool_grid(&self) -> bool {
+        match self {
+            Var::BoolGrid(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Var {
@@ -467,9 +511,13 @@ impl Var {
             Var::IntList(v) => format!("{:?}", v),
             Var::FloatList(v) => format!("{:?}", v),
             Var::BoolList(v) => format!("{:?}", v),
+            #[cfg(feature = "grids")]
             Var::StrGrid(v) => format!("{:?}", v),
+            #[cfg(feature = "grids")]
             Var::IntGrid(v) => format!("{:?}", v),
+            #[cfg(feature = "grids")]
             Var::FloatGrid(v) => format!("{:?}", v),
+            #[cfg(feature = "grids")]
             Var::BoolGrid(v) => format!("{:?}", v),
         }
     }
@@ -490,9 +538,13 @@ impl Var {
             Var::IntList(v) => v.len() as crate::Int,
             Var::FloatList(v) => v.len() as crate::Int,
             Var::BoolList(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::StrGrid(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::IntGrid(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::FloatGrid(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::BoolGrid(v) => v.len() as crate::Int,
         }
     }
@@ -513,9 +565,13 @@ impl Var {
             Var::IntList(v) => v.len() as crate::Float,
             Var::FloatList(v) => v.len() as crate::Float,
             Var::BoolList(v) => v.len() as crate::Float,
+            #[cfg(feature = "grids")]
             Var::StrGrid(v) => v.len() as crate::Float,
+            #[cfg(feature = "grids")]
             Var::IntGrid(v) => v.len() as crate::Float,
+            #[cfg(feature = "grids")]
             Var::FloatGrid(v) => v.len() as crate::Float,
+            #[cfg(feature = "grids")]
             Var::BoolGrid(v) => v.len() as crate::Float,
         }
     }
@@ -530,9 +586,13 @@ impl Var {
             Var::IntList(v) => v.len() as crate::Int,
             Var::FloatList(v) => v.len() as crate::Int,
             Var::BoolList(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::StrGrid(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::IntGrid(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::FloatGrid(v) => v.len() as crate::Int,
+            #[cfg(feature = "grids")]
             Var::BoolGrid(v) => v.len() as crate::Int,
         };
         match num {

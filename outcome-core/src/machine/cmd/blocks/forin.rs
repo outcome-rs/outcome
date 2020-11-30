@@ -138,6 +138,7 @@ impl ForIn {
             Var::IntList(list) => list.len(),
             Var::FloatList(list) => list.len(),
             Var::BoolList(list) => list.len(),
+            #[cfg(feature = "grids")]
             Var::StrGrid(list) => list.len(),
             _ => 0,
         };

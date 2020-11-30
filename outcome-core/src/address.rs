@@ -66,10 +66,22 @@ impl Address {
             )));
         }
 
-        unimplemented!()
+        Ok(Address {
+            entity: StringId::from(split[0])?,
+            component: StringId::from(split[1])?,
+            var_type: VarType::from_str(split[2])
+                .ok_or(Error::Other("Failed parsing vartype".to_string()))?,
+            var_id: StringId::from(split[3])?,
+        })
     }
     pub fn to_string(&self) -> String {
-        unimplemented!()
+        format!(
+            ":{}:{}:{}:{}",
+            self.entity,
+            self.component,
+            self.var_type.to_str(),
+            self.var_id
+        )
     }
     pub fn get_storage_index(&self) -> StorageIndex {
         unimplemented!()

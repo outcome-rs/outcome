@@ -49,7 +49,7 @@ use self::toml::Value;
 
 /// Simulation model is a basis for creating simulation instance. It contains
 /// all the relevant elements found in the user-files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SimModel {
     pub scenario: Scenario,
     pub events: Vec<EventModel>,
@@ -125,7 +125,7 @@ impl SimModel {
         #[cfg(feature = "machine_script")]
         {
             let mut mod_init_prefab = EntityPrefabModel {
-                name: ShortString::from_unchecked("_mod_init"),
+                name: StringId::from_unchecked("_mod_init"),
                 components: vec![],
             };
 
@@ -134,11 +134,11 @@ impl SimModel {
             });
 
             let scr_init_mod_template = ComponentModel {
-                name: ShortString::from_unchecked("_init_mod_x"),
+                name: StringId::from_unchecked("_init_mod_"),
                 // optionally add some vars
                 vars: vec![],
-                start_state: ShortString::from_unchecked("main"),
-                triggers: vec![ShortString::from_unchecked("_scr_init")],
+                start_state: StringId::from_unchecked("main"),
+                triggers: vec![StringId::from_unchecked("_scr_init")],
                 logic: LogicModel {
                     commands: Vec::new(),
                     states: FnvHashMap::default(),
@@ -161,16 +161,17 @@ impl SimModel {
             for module in &scenario.modules {
                 // create path to entry script
                 // TODO build the file name from available static vars
-                let mod_entry_file_path = scenario
-                    .path
+                let mod_entry_file_path = PathBuf::new()
                     .join(crate::SCENARIO_MODS_DIR_NAME)
                     .join(&module.manifest.name)
                     .join(format!("{}{}", crate::MODULE_ENTRY_SCRIPT_NAME, ".os"));
 
                 // TODO remove unwrap
                 // parse the module entry script
-                let mut instructions =
-                    parser::parse_script_at(mod_entry_file_path.to_str().unwrap())?;
+                let mut instructions = parser::parse_script_at(
+                    mod_entry_file_path.to_str().unwrap(),
+                    &scenario.path.to_string_lossy(),
+                )?;
 
                 // preprocess entry script
                 preprocessor::run(&mut instructions, &mut model, &program_data)?;
@@ -191,9 +192,10 @@ impl SimModel {
 
                 let mut comp_model = scr_init_mod_template.clone();
                 comp_model.name =
-                    ShortString::from_truncate(&format!("init_{}", module.manifest.name));
+                    StringId::from_truncate(&format!("init_{}", module.manifest.name));
 
                 for (n, cmd_prototype) in cmd_prototypes.iter().enumerate() {
+                    cmd_locations[n].comp_name = Some(comp_model.name.into());
                     cmd_locations[n].line = Some(n);
                     let command =
                         Command::from_prototype(cmd_prototype, &cmd_locations[n], &cmd_prototypes)?;
@@ -216,7 +218,7 @@ impl SimModel {
                 comp_model
                     .logic
                     .states
-                    .insert(ShortString::from_unchecked("main"), (0, commands.len()));
+                    .insert(StringId::from_unchecked("main"), (0, commands.len()));
                 mod_init_prefab.components.push(comp_model.name);
                 model.components.push(comp_model);
             }
@@ -689,8 +691,8 @@ pub struct EventModel {
 /// Entity prefab.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityPrefabModel {
-    pub name: ShortString,
-    pub components: Vec<ShortString>,
+    pub name: StringId,
+    pub components: Vec<StringId>,
 }
 
 // /// Component prefab.
@@ -718,12 +720,12 @@ pub struct EntityPrefabModel {
 //     }
 // }
 //
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComponentModel {
-    pub name: ShortString,
+    pub name: StringId,
     pub vars: Vec<VarModel>,
-    pub start_state: ShortString,
-    pub triggers: Vec<ShortString>,
+    pub start_state: StringId,
+    pub triggers: Vec<StringId>,
 
     #[cfg(feature = "machine")]
     pub logic: LogicModel,
@@ -734,14 +736,14 @@ pub struct ComponentModel {
 }
 
 #[cfg(feature = "machine")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogicModel {
     /// List of loc phase commands
     pub commands: Vec<crate::machine::cmd::Command>,
     /// List of pre phase commands
     pub pre_commands: FnvHashMap<ShortString, Vec<crate::machine::cmd::ExtCommand>>,
     /// Mapping of state procedure names to their start and end lines
-    pub states: FnvHashMap<ShortString, (usize, usize)>,
+    pub states: FnvHashMap<StringId, (usize, usize)>,
     /// Mapping of non-state procedure names to their start and end lines
     pub procedures: FnvHashMap<ShortString, (usize, usize)>,
     /// Location info mapped for each command on the list by vec index
@@ -765,8 +767,7 @@ impl LogicModel {
 pub struct VarModel {
     pub id: String,
     pub type_: VarType,
-    pub default: Var,
-    pub internal: bool,
+    pub default: Option<Var>,
 }
 
 /// Data entry model.
@@ -774,6 +775,7 @@ pub struct VarModel {
 pub enum DataEntry {
     Simple((String, String)),
     List((String, Vec<String>)),
+    #[cfg(feature = "grids")]
     Grid((String, Vec<Vec<String>>)),
 }
 

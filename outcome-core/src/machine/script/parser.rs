@@ -16,20 +16,23 @@ static TAG_SYMBOL: char = '@';
 static MULTILINE_SYMBOL: char = '\\';
 static END_LINE_SYMBOL: char = ';';
 
-/// Parses script at the given path. Path has to be the full path to the file.
-/// Returns a list of instructions or an error.
-pub(crate) fn parse_script_at(path: &str) -> Result<Vec<Instruction>> {
-    let text = util::read_text_file(path).map_err(|e| {
-        Error::new(
-            LocationInfo::empty().with_source(path),
-            ErrorKind::ErrorReadingFile(e.to_string()),
-        )
-    })?;
-    parse_lines(&text, path)
+/// Parses script at the given path. Returns a list of instructions or an error.
+pub(crate) fn parse_script_at(
+    script_relative_path: &str,
+    project_path: &str,
+) -> Result<Vec<Instruction>> {
+    let text = util::read_text_file(&format!("{}/{}", project_path, script_relative_path))
+        .map_err(|e| {
+            Error::new(
+                LocationInfo::empty().with_source(script_relative_path),
+                ErrorKind::ErrorReadingFile(script_relative_path.to_string()),
+            )
+        })?;
+    parse_lines(&text, script_relative_path)
 }
 
 /// Parses multiple lines from a script at given path.
-pub(crate) fn parse_lines(lines: &str, script_path: &str) -> Result<Vec<Instruction>> {
+pub(crate) fn parse_lines(lines: &str, script_relative_path: &str) -> Result<Vec<Instruction>> {
     let mut instructions = vec![];
 
     // multiline switch
@@ -42,10 +45,11 @@ pub(crate) fn parse_lines(lines: &str, script_path: &str) -> Result<Vec<Instruct
         let mut line = line.trim().to_string();
         // create a location info struct for current line
         let mut location_info = LocationInfo {
-            source: Some(LongString::from_truncate(script_path)),
+            source: Some(LongString::from_truncate(script_relative_path)),
             source_line: Some(line_number),
             line: None,
             tag: None,
+            comp_name: None,
         };
         line_number = line_number + 1;
 

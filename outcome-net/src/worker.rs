@@ -27,11 +27,11 @@ use crate::msg::coord_worker::{
 };
 use crate::msg::*;
 use crate::transport::{SocketInterface, WorkerDriverInterface};
-use crate::{error::Error, Result};
+use crate::{error::Error, sig, Result};
 use crate::{tcp_endpoint, WorkerDriver};
 
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
-use outcome_core::{Address, SimModel, StringId, Var, VarType};
+use outcome_core::{Address, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType};
 
 //TODO remove this
 /// Default address for the worker
@@ -39,6 +39,13 @@ pub const WORKER_ADDRESS: &str = "0.0.0.0:5922";
 
 /// Network-unique identifier for a single worker
 pub type WorkerId = u32;
+
+pub struct WorkerNetwork {
+    /// IP address of the worker
+    pub address: String,
+    /// Network driver
+    driver: WorkerDriver,
+}
 
 /// Represents a single cluster node, connected to and controlled by
 /// the cluster coordinator. `Worker`s are also connected to each other, either
@@ -68,8 +75,9 @@ pub type WorkerId = u32;
 pub struct Worker {
     /// List of other workers in the cluster
     pub comrades: Vec<Comrade>,
-    /// Network driver
-    driver: WorkerDriver,
+    pub network: WorkerNetwork,
+    // /// Network driver
+    // driver: WorkerDriver,
     /// Whether the worker uses a password to authorize connecting comrade workers
     pub use_auth: bool,
     /// Password used for incoming connection authorization
@@ -84,7 +92,11 @@ impl Worker {
     pub fn new(my_addr: &str) -> Result<Worker> {
         Ok(Worker {
             comrades: vec![],
-            driver: WorkerDriver::new(my_addr).unwrap(),
+            network: WorkerNetwork {
+                address: "".to_string(),
+                driver: WorkerDriver::new(my_addr).unwrap(),
+            },
+            // driver: WorkerDriver::new(my_addr).unwrap(),
             use_auth: false,
             passwd_list: vec![],
             sim_node: None,
@@ -108,23 +120,24 @@ impl Worker {
     pub fn initiate_coord_connection(&mut self, addr: &str, timeout: Duration) -> Result<()> {
         let req_msg = Message::from_payload(
             IntroduceWorkerToCoordRequest {
-                worker_addr: self.driver.my_addr.clone(),
+                worker_addr: self.network.driver.my_addr.clone(),
                 //TODO
                 worker_passwd: "".to_string(),
             },
             false,
         )?;
-        self.driver.inviter.connect(&tcp_endpoint(addr))?;
+        self.network.driver.inviter.connect(&tcp_endpoint(addr))?;
         thread::sleep(Duration::from_millis(100));
-        self.driver.inviter.send_msg(req_msg)?;
+        self.network.driver.inviter.send_msg(req_msg)?;
 
         let resp: IntroduceWorkerToCoordResponse = self
+            .network
             .driver
             .inviter
             .try_read_msg(Some(timeout.as_millis() as u32))?
             .unpack_payload()?;
 
-        self.driver.inviter.disconnect("")?;
+        self.network.driver.inviter.disconnect("")?;
         Ok(())
     }
 
@@ -133,8 +146,8 @@ impl Worker {
     pub fn handle_coordinator(&mut self) -> Result<()> {
         // io::stdout().flush()?;
 
-        let msg = self.driver.accept()?;
-        println!("got message from central: {:?}", msg);
+        let msg = self.network.driver.accept()?;
+        debug!("got message from central: {:?}", msg);
 
         let req: IntroduceCoordRequest = msg.unpack_payload().unwrap();
 
@@ -144,14 +157,16 @@ impl Worker {
             },
             false,
         )?;
-        self.driver.greeter.send_msg(resp)?;
+        self.network.driver.greeter.send_msg(resp)?;
 
-        self.driver
+        self.network
+            .driver
             .coord
-            .bind(&format!("{}6", self.driver.my_addr))?;
-        self.driver.coord.connect(&req.ip_addr)?;
+            .bind(&format!("{}6", self.network.driver.my_addr))?;
+        self.network.driver.coord.connect(&req.ip_addr)?;
 
-        self.driver
+        self.network
+            .driver
             .coord
             .send(crate::sig::Signal::from(Signal::EndOfMessages).to_bytes()?)?;
 
@@ -187,9 +202,9 @@ impl Worker {
 
         loop {
             // sleep a little to make this thread less expensive
-            sleep(Duration::from_millis(1));
+            sleep(Duration::from_micros(10));
 
-            let bytes = match self.driver.coord.try_read(None) {
+            let bytes = match self.network.driver.coord.try_read(None) {
                 Ok(m) => m,
                 Err(e) => {
                     // println!("{:?}", e);
@@ -197,8 +212,8 @@ impl Worker {
                 }
             };
             let sig = crate::sig::Signal::from_bytes(&bytes)?;
-            println!("{:?}", sig);
-            self.handle_signal(sig.inner());
+            // debug!("{:?}", sig);
+            self.handle_signal(sig.inner())?;
             // self.handle_message(msg, &mut in_stream, &mut out_stream);
         }
     }
@@ -251,31 +266,52 @@ fn handle_message_new_comrade(
 }
 impl Worker {
     fn handle_signal(&mut self, sig: Signal) -> Result<()> {
-        println!("handling signal: {:?}", sig);
+        debug!("handling signal: {:?}", sig);
 
         match sig {
-            Signal::StartProcessStep(event_queue) => self
-                .driver
-                .coord
-                .send(crate::sig::Signal::from(Signal::ProcessStepFinished).to_bytes()?)?,
-            Signal::DataRequestAll => self.handle_sig_data_request_all()?,
-            Signal::InitializeNode((model, entities)) => {
-                self.handle_sig_initialize_node(model, entities)?
+            Signal::InitializeNode(model) => self.handle_sig_initialize_node(model)?,
+            Signal::StartProcessStep(event_queue) => {
+                self.sim_node
+                    .as_mut()
+                    .unwrap()
+                    .step(&mut self.network, event_queue)?;
+                // self.network
+                //     .driver
+                //     .coord
+                //     .send(crate::sig::Signal::from(Signal::ProcessStepFinished).to_bytes()?)?
             }
-            _ => unimplemented!(),
+            Signal::DataRequestAll => self.handle_sig_data_request_all()?,
+            Signal::SpawnEntities(entities) => self.handle_sig_spawn_entities(entities)?,
+            _ => (),
         }
 
         Ok(())
     }
-    fn handle_sig_initialize_node(&mut self, model: SimModel, entities: Vec<u32>) -> Result<()> {
-        self.sim_node = Some(SimNode::from_model(&model, &entities)?);
-
+    //TODO include event_queue in the initialization process?
+    fn handle_sig_initialize_node(&mut self, model: SimModel) -> Result<()> {
+        let mut node = SimNode::from_model(&model)?;
+        self.sim_node = Some(node);
         Ok(())
     }
+
+    fn handle_sig_spawn_entities(
+        &mut self,
+        entities: Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>,
+    ) -> Result<()> {
+        // debug!("spawning entities: {:?}", entities);
+        for (ent_uid, prefab_id, target_id) in entities {
+            self.sim_node
+                .as_mut()
+                .unwrap()
+                .add_entity(ent_uid, prefab_id, target_id)?;
+        }
+        Ok(())
+    }
+
     fn handle_sig_data_request_all(&self) -> Result<()> {
         let mut collection = Vec::new();
         for (entity_uid, entity) in &self.sim_node.as_ref().unwrap().entities {
-            for ((comp_id, var_id), var) in entity.storage.get_all_str() {
+            for ((comp_id, var_id), var) in entity.storage.get_all_var() {
                 collection.push((
                     Address {
                         entity: StringId::from_truncate(&entity_uid.to_string()),
@@ -283,12 +319,13 @@ impl Worker {
                         var_type: VarType::Str,
                         var_id: *var_id,
                     },
-                    Var::Str(var.clone()),
+                    var.clone(),
                 ))
             }
         }
         let signal = Signal::DataResponse(collection);
-        self.driver
+        self.network
+            .driver
             .coord
             .send(crate::sig::Signal::from(signal).to_bytes()?)?;
 
@@ -296,7 +333,7 @@ impl Worker {
     }
     /// Handles an incoming message.
     fn handle_message(&mut self, msg: Message) -> Result<()> {
-        println!("handling message: {}", &msg.kind);
+        debug!("handling message: {}", &msg.kind);
 
         match msg.kind.as_str() {
             // PING_REQUEST => handle_ping_request(msg, worker)?,
@@ -441,6 +478,44 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
     // server.driver.send(Message::from_payload(resp, false));
 
     // send_message(message_from_payload(resp, false), stream, None);
+}
+
+impl outcome::distr::NodeCommunication for WorkerNetwork {
+    fn sig_read_central(&mut self) -> outcome::Result<Signal> {
+        let bytes = self.driver.coord.read().unwrap();
+        let sig = sig::Signal::from_bytes(&bytes).unwrap();
+        Ok(sig.inner())
+    }
+
+    fn sig_send_central(&mut self, signal: Signal) -> outcome::Result<()> {
+        let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
+        self.driver.coord.send(sig_bytes).unwrap();
+        Ok(())
+    }
+
+    fn sig_read(&mut self) -> outcome::Result<(String, Signal)> {
+        unimplemented!()
+    }
+
+    fn sig_read_from(&mut self, node_id: u32) -> outcome::Result<Signal> {
+        unimplemented!()
+    }
+
+    fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> outcome::Result<()> {
+        unimplemented!()
+    }
+
+    fn sig_send_to_entity(&mut self, entity_uid: u32) -> outcome::Result<()> {
+        unimplemented!()
+    }
+
+    fn sig_broadcast(&mut self, signal: Signal) -> outcome::Result<()> {
+        unimplemented!()
+    }
+
+    fn get_nodes(&mut self) -> Vec<String> {
+        unimplemented!()
+    }
 }
 
 // pub fn handle_distr_msg_request(payload: Vec<u8>, worker_arc: Arc<Mutex<Worker>>) -> Result<()> {

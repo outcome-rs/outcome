@@ -28,6 +28,7 @@ load_img = ["image"] # enable loading images as grid data
 small_nums = [] # use 32 bit integers and floating point numbers instead of default 64 bit
 # byte_var = [] # add 8 bit unsigned integer variable type
 # static_model = [] # disallow changes to model after initialization
+grids = []
 
 [dependencies]
 toml = { version = "0.5.7", features = ["preserve_order"] }
@@ -49,7 +50,8 @@ lz4 = { version = "1.23.2", optional = true }
 getopts = { version = "0.2.21", optional = true }
 shlex = { version = "0.1.1", optional = true }
 rayon = { version = "1.5.0", optional = true }
-fasteval = { git = "https://github.com/adamsky/fasteval", optional = true }
+#fasteval = { git = "https://github.com/adamsky/fasteval", optional = true }
+fasteval = { path = "../../fasteval", optional = true }
 smallvec = { version = "1.4.2", features = ["serde"], optional = true }
 annotate-snippets = { version = "0.9.0", features = ["color"], optional = true }
 sysinfo = { version = "0.15.3", optional = true }

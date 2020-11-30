@@ -221,7 +221,9 @@ pub fn start(mut sim_driver: SimDriver, config_path: &str) -> Result<()> {
             if run_loop_count > 0 {
                 match driver.deref_mut() {
                     SimDriver::Local(ref mut sim) => sim.step().unwrap(),
-                    _ => unimplemented!(),
+                    SimDriver::Remote(client) => {
+                        client.server_step_request(1)?;
+                    }
                 }
                 run_loop_count -= 1;
                 //                let r = match interface.lock_reader().
@@ -288,7 +290,7 @@ pub fn start(mut sim_driver: SimDriver, config_path: &str) -> Result<()> {
                     }
                     "runf" => {
                         interface.lock_reader();
-                        let mut loop_count = args.parse::<i32>().unwrap();
+                        let mut loop_count = args.parse::<u32>().unwrap();
                         match driver.deref_mut() {
                             SimDriver::Local(ref mut sim) => {
                                 while loop_count > 0 {
@@ -296,7 +298,7 @@ pub fn start(mut sim_driver: SimDriver, config_path: &str) -> Result<()> {
                                     loop_count -= 1;
                                 }
                             }
-                            _ => unimplemented!(),
+                            SimDriver::Remote(client) => client.server_step_request(loop_count)?,
                         }
                         interface.set_prompt(create_prompt(&driver, &config).as_str())?;
                     }
@@ -311,6 +313,9 @@ pub fn start(mut sim_driver: SimDriver, config_path: &str) -> Result<()> {
                                 super::test::test_sim_struct(&sim);
                                 super::test::test_mem();
                                 super::test::test_proc(sim, secs);
+                            }
+                            SimDriver::Remote(client) => {
+                                //
                             }
                             _ => unimplemented!(),
                         }
@@ -444,6 +449,7 @@ show_list               {show_list}
                         };
                     }
 
+                    #[cfg(feature = "outcome_core/grids")]
                     "show-grid" => match driver.deref() {
                         SimDriver::Local(sim) => local::print_show_grid(&sim, &config, args),
                         _ => unimplemented!(),

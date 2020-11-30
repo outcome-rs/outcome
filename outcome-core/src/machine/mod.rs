@@ -25,6 +25,8 @@ pub struct LocationInfo {
     pub line: Option<usize>,
     /// Unique tag for this location
     pub tag: Option<ShortString>,
+
+    pub comp_name: Option<StringId>,
 }
 impl LocationInfo {
     pub fn to_string(&self) -> String {
@@ -42,6 +44,7 @@ impl LocationInfo {
             source_line: None,
             line: None,
             tag: None,
+            comp_name: None,
         }
     }
 
@@ -159,9 +162,10 @@ pub struct IfElseMetaData {
 /// Contains information about a single component block call.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ComponentCallInfo {
-    pub current: usize,
-    pub passed: bool,
-    pub else_line_index: usize,
+    pub name: CompId,
+    // pub current: usize,
+    // pub passed: bool,
+    // pub else_line_index: usize,
     // pub meta: IfElseMetaData,
 }
 

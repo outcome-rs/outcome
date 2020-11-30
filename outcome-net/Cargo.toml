@@ -15,11 +15,14 @@ default = ["lz4"]
 transport_zmq = ["zmq"]
 transport_nng = ["nng"]
 
+grids = []
+
 # zmq-sys version collision if both zmq crates are present
 #transport_zmq_modern = ["libzmq"]
 
 [dependencies]
 outcome-core = { version = "0.1.0", path = "../outcome-core" }
+
 
 serde = "1.0.117"
 rmp-serde = "0.14.4"

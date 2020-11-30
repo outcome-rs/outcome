@@ -5,31 +5,34 @@ use std::str::FromStr;
 
 use shlex::Shlex;
 
-use crate::address::Address;
+use crate::address::{Address, LocalAddress};
 use crate::entity::Storage;
 use crate::model::{ComponentModel, EntityPrefabModel, EventModel, SimModel};
 use crate::sim::interface::SimInterface;
 use crate::sim::Sim;
 use crate::var::Var;
-use crate::{MedString, ShortString, StringId};
+use crate::{CompId, MedString, ShortString, StringId};
 
 #[cfg(feature = "machine_script")]
 use super::super::script::parse_script_at;
 
 use super::super::LocationInfo;
 use super::{CentralExtCommand, CommandResult};
+use crate::distr::SimCentral;
 use crate::machine;
 use crate::machine::error::{Error, ErrorKind, Result};
+use crate::machine::{CallInfo, CallStackVec};
 use crate::var::VarType::Str;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterVar {
-    addr: Address,
+    comp: CompId,
+    addr: LocalAddress,
     val: Option<Var>,
 }
 impl RegisterVar {
     pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
-        let addr = match Address::from_str(&args[0]) {
+        let addr = match LocalAddress::from_str(&args[0]) {
             Ok(a) => a,
             Err(e) => {
                 return Err(Error::new(
@@ -40,7 +43,13 @@ impl RegisterVar {
         };
 
         match args.len() {
-            1 => return Ok(RegisterVar { addr, val: None }),
+            1 => {
+                return Ok(RegisterVar {
+                    comp: CompId::new(),
+                    addr,
+                    val: None,
+                })
+            }
             // 2 => if args[1] != "=" {
             //     let val
             //     return Ok(RegisterVar {})
@@ -48,6 +57,7 @@ impl RegisterVar {
             3 => {
                 if args[1] == "=" {
                     return Ok(RegisterVar {
+                        comp: CompId::new(),
                         addr,
                         val: Var::from_str(&args[2], None),
                     });
@@ -131,7 +141,7 @@ pub enum RegisterKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegComponent {
     signature: StringId,
-    trigger_events: Vec<ShortString>,
+    trigger_events: Vec<StringId>,
     do_attach: bool,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -232,11 +242,11 @@ impl Register {
                         )),
                     ));
                 }
-                let trigger_events: Vec<ShortString> = match matches.opt_str("trigger") {
+                let trigger_events: Vec<StringId> = match matches.opt_str("trigger") {
                     Some(str) => str
                         .split(',')
-                        .map(|s| ShortString::from_truncate(s))
-                        .collect::<Vec<ShortString>>(),
+                        .map(|s| StringId::from_truncate(s))
+                        .collect::<Vec<StringId>>(),
                     None => Vec::new(),
                 };
                 RegisterKind::Component(RegComponent {
@@ -247,7 +257,8 @@ impl Register {
             }
             "event" => RegisterKind::Event,
             "var" => RegisterKind::Var(RegisterVar {
-                addr: Address::from_str(&args[0]).unwrap(),
+                comp: CompId::new(),
+                addr: LocalAddress::from_str(&args[1]).unwrap(),
                 val: None,
             }),
             _ => {
@@ -259,19 +270,35 @@ impl Register {
         };
         Ok(Register { kind })
     }
-    pub fn execute_loc(&self) -> CommandResult {
-        // match self.kind {
-        //     RegisterKind::Entity(ref mut reg) => reg.signature.resolve_loc(storage),
-        //     _ => (),
-        // }
+    pub fn execute_loc(&self, call_stack: &mut CallStackVec) -> Vec<CommandResult> {
+        let mut out_vec = Vec::new();
+        match &self.kind {
+            RegisterKind::Var(reg_var) => {
+                let mut new_reg_var = reg_var.clone();
+                if let Some(comp_info) = call_stack.iter().find_map(|ci: &CallInfo| match ci {
+                    CallInfo::Component(c) => Some(c),
+                    _ => None,
+                }) {
+                    new_reg_var.comp = comp_info.name;
+                }
+                out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Register(
+                    Register {
+                        kind: RegisterKind::Var(new_reg_var),
+                    },
+                )));
+            }
+            //     RegisterKind::Entity(ref mut reg) => reg.signature.resolve_loc(storage),
+            _ => (),
+        }
+        out_vec.push(CommandResult::Continue);
+        return out_vec;
         // println!("{:?}", self);
-        CommandResult::ExecCentralExt(CentralExtCommand::Register(self.clone()))
     }
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
-        ent_uid: &crate::EntityId,
-        comp_uid: &crate::CompId,
+        ent_name: &crate::EntityId,
+        comp_name: &crate::CompId,
     ) -> Result<()> {
         match &self.kind {
             RegisterKind::Entity(reg) => {
@@ -279,7 +306,7 @@ impl Register {
                 // let signature = Address::from_str(&self.args[0]).unwrap().resolve(sim);
                 // println!("{:?}", signature);
                 let mut ent_model = EntityPrefabModel {
-                    name: ShortString::from_truncate(&reg.signature.to_string()),
+                    name: StringId::from_truncate(&reg.signature.to_string()),
                     components: Vec::new(),
                 };
                 sim.model.entities.push(ent_model);
@@ -298,9 +325,9 @@ impl Register {
             RegisterKind::Component(reg) => {
                 debug!("registering component");
                 let comp_model = ComponentModel {
-                    name: ShortString::from_truncate(&reg.signature.to_string()),
+                    name: StringId::from_truncate(&reg.signature.to_string()),
                     vars: Vec::new(),
-                    start_state: ShortString::from_unchecked("idle"),
+                    start_state: StringId::from_unchecked("idle"),
                     triggers: reg.trigger_events.clone(),
                     // triggers: vec![ShortString::from_str_truncate("step")],
                     logic: crate::model::LogicModel::empty(),
@@ -329,17 +356,89 @@ impl Register {
             }
             RegisterKind::Event => Ok(()),
             RegisterKind::Var(reg) => {
-                debug!("registering var");
+                debug!("registering var: {:?}", reg);
 
                 sim.model
-                    .get_component_mut(comp_uid)
+                    .get_component_mut(&reg.comp)
                     .unwrap()
                     .vars
                     .push(crate::model::VarModel {
                         id: reg.addr.var_id.to_string(),
                         type_: reg.addr.var_type,
-                        default: crate::var::Var::Int(0),
-                        internal: false,
+                        default: reg.val.clone(),
+                    });
+                Ok(())
+
+                //let mut comp_type_model = ComponentTypeModel {
+                //id: signature.get_comp_type_safe().unwrap().to_string(),
+                //entity_type: signature.get_ent_type_safe().unwrap().to_string(),
+                //};
+                //sim.model.component_types.push(comp_type_model);
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub fn execute_ext_distr(
+        &self,
+        central: &mut SimCentral,
+        ent_name: &crate::EntityId,
+        comp_name: &crate::CompId,
+    ) -> Result<()> {
+        match &self.kind {
+            RegisterKind::Entity(reg) => {
+                let mut ent_model = EntityPrefabModel {
+                    name: StringId::from_truncate(&reg.signature.to_string()),
+                    components: Vec::new(),
+                };
+                central.model_changes_queue.entities.push(ent_model);
+                Ok(())
+            }
+            RegisterKind::Component(reg) => {
+                debug!("registering component");
+                let comp_model = ComponentModel {
+                    name: StringId::from_truncate(&reg.signature.to_string()),
+                    vars: Vec::new(),
+                    start_state: StringId::from_unchecked("idle"),
+                    triggers: reg.trigger_events.clone(),
+                    // triggers: vec![ShortString::from_str_truncate("step")],
+                    logic: crate::model::LogicModel::empty(),
+                    source_files: Vec::new(),
+                    script_files: Vec::new(),
+                    lib_files: Vec::new(),
+                };
+                central.model_changes_queue.components.push(comp_model);
+
+                // if reg_comp.do_attach {
+                //     for (&(ent_type, ent_id), mut entity) in &mut sim.entities {
+                //         if &ent_type.as_str() == &addr.get_ent_type_safe().unwrap().as_str() {
+                //             // entity.components.attach()
+                //             entity.components.attach(
+                //                 &sim.model,
+                //                 &mut entity.storage,
+                //                 &addr.get_comp_type_safe().unwrap(),
+                //                 &addr.get_comp_id_safe().unwrap(),
+                //                 &addr.get_comp_id_safe().unwrap(),
+                //             );
+                //         }
+                //     }
+                // }
+
+                Ok(())
+            }
+            RegisterKind::Event => Ok(()),
+            RegisterKind::Var(reg) => {
+                debug!("registering var: {:?}", reg);
+
+                central
+                    .model_changes_queue
+                    .get_component_mut(&reg.comp)
+                    .unwrap()
+                    .vars
+                    .push(crate::model::VarModel {
+                        id: reg.addr.var_id.to_string(),
+                        type_: reg.addr.var_type,
+                        default: reg.val.clone(),
                     });
                 Ok(())
 

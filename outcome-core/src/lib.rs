@@ -70,6 +70,8 @@
 extern crate serde;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate fasteval;
 
 pub mod address;
 pub mod distr;
@@ -190,7 +192,7 @@ pub type Int = i64;
 pub type StringId = arraystring::ArrayString<[u8; 23]>;
 /// Fixed-size string used internally for indexing objects.
 #[cfg(feature = "short_stringid")]
-pub type StringId = ArrayString<[u8; 10]>;
+pub type StringId = arraystring::ArrayString<[u8; 10]>;
 
 /// Short fixed-size string type.
 pub type ShortString = arraystring::ArrayString<[u8; 23]>;

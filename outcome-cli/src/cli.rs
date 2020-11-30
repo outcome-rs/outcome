@@ -494,13 +494,13 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         None => "It's a server alright.",
     };
 
-    let keep_alive_secs = match matches.value_of("keep-alive") {
-        Some(secs) => match secs.parse::<f32>() {
+    let keep_alive_millis = match matches.value_of("keep-alive") {
+        Some(millis) => match millis.parse::<usize>() {
             Ok(f) => f,
-            Err(e) => panic!("failed parsing keep-alive float value: {}", e),
+            Err(e) => panic!("failed parsing keep-alive (millis) value: {}", e),
         },
-        // -1.0 means keep alive forever
-        None => -1.0,
+        // 0 means keep alive forever
+        None => 0,
     };
 
     let scenario_path = match matches.value_of("scenario-path") {
@@ -558,51 +558,45 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         }
     };
 
-    let mut server = Arc::new(Mutex::new(Server::new(sim_instance, server_address)?));
+    let mut server = Server::new(sim_instance, server_address)?;
 
     println!("listening for new clients on: {}", server_address);
-    if let SimConnection::ClusterCoord(coord, net) = &server.lock().unwrap().sim {
+    if let SimConnection::ClusterCoord(coord, net) = &server.sim {
         println!(
             "listening for new workers on: {}",
             &net.lock().unwrap().address
         );
     }
 
+    let mut accept_timer = 0;
     loop {
-        thread::sleep(Duration::from_millis(100));
-        let mut server_guard = server.lock().unwrap();
-        server_guard.uptime += 100;
+        thread::sleep(Duration::from_millis(1));
+        server.uptime += 1;
+        accept_timer += 1;
+
         // TODO keepalive mechanism
-        // server_guard.time_since_last_msg += 100;
-        // if keep_alive_secs != -1.0 && server_guard.time_since_last_msg >= keep_alive_secs {
-        //     println!(
-        //         "no activity for {} seconds, terminating",
-        //         keep_alive_secs as u32
-        //     );
-        //     drop(server_guard);
-        //     break;
-        // }
+        if keep_alive_millis != 0 && server.time_since_last_msg >= keep_alive_millis {
+            println!(
+                "no activity for {} milliseconds, terminating",
+                keep_alive_millis as u32
+            );
+            break;
+        }
 
-        let (client_id, mut client_socket) = match server_guard.try_accept_client(true) {
-            Ok(cc) => cc,
-            Err(e) => {
-                drop(server_guard);
-                continue;
-            }
-        };
-        drop(server_guard);
+        if accept_timer >= 400 {
+            accept_timer = 0;
+            server.try_accept_client(true);
+        }
 
-        let server_clone = Arc::clone(&server);
-        thread::spawn(move || {
-            Server::handle_new_client_connection(
-                server_clone,
+        let client_ids: Vec<u32> = server.clients.keys().cloned().collect();
+        for client_id in client_ids {
+            server.try_handle_client(
                 &client_id,
-                &mut client_socket,
-                Some(2000),
                 // None,
             );
-            // serv.lock().unwrap().prune_clients();
-        });
+        }
+
+        // serv.lock().unwrap().prune_clients();
         // match listener.accept() {
         //     Ok((stream, addr)) => {
         //         stream.set_read_timeout(Some(Duration::from_secs(4)));
@@ -650,6 +644,7 @@ fn start_client(matches: &ArgMatches) -> Result<()> {
 }
 
 fn start_worker(matches: &ArgMatches) -> Result<()> {
+    setup_log_verbosity(matches);
     let my_address = match matches.value_of("ip") {
         Some(addr) => addr,
         // None => outcome_net::cluster::worker::WORKER_ADDRESS,
@@ -686,7 +681,7 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
     }
     std::io::stdout().flush()?;
     print!("waiting for message from coordinator... ");
-    worker.handle_coordinator();
+    worker.handle_coordinator()?;
     print!("success\n");
     // first connection is made by the coordinator
     // thread::spawn(move || {

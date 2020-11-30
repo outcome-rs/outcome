@@ -128,7 +128,7 @@ impl Payload for RegisterClientResponse {
     }
 }
 
-/// Requests transfer of data from server to client.
+/// Requests one-time transfer of data from server to client.
 ///
 /// `transfer_type` defines the process of data selection:
 ///     - `Full` get all the data from the sim database (ignores `selection`)
@@ -162,6 +162,19 @@ pub(crate) const DATA_TRANSFER_RESPONSE: &str = "DataTransferResponse";
 impl Payload for DataTransferResponse {
     fn kind_str(&self) -> &str {
         DATA_TRANSFER_RESPONSE
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ScheduledDataTransferRequest {
+    pub event_triggers: Vec<String>,
+    pub transfer_type: String,
+    pub selection: Vec<String>,
+}
+pub(crate) const SCHEDULED_DATA_TRANSFER_REQUEST: &str = "ScheduledDataTransferRequest";
+impl Payload for ScheduledDataTransferRequest {
+    fn kind_str(&self) -> &str {
+        SCHEDULED_DATA_TRANSFER_REQUEST
     }
 }
 

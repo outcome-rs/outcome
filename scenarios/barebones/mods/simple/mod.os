@@ -30,11 +30,11 @@ prefab monster health
 
 spawn monster monster1
 spawn monster monster2
-#set int:hund 1000000
-#for int:some in int:hund
-##    print "inside loop"
-#    spawn monster
-#end
+set int:hund 10000
+for int:some in int:hund
+#    print "inside loop"
+	spawn monster
+end
 
 #invoke init
 

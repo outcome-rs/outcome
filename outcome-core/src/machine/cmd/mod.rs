@@ -44,8 +44,8 @@ use crate::Var;
 
 pub mod assembly;
 // pub mod equal;
-// pub mod eval;
 pub mod blocks;
+pub mod eval;
 pub mod get_set;
 
 #[cfg(feature = "machine_dynlib")]
@@ -66,6 +66,7 @@ use self::get_set::*;
 // use self::lua::*;
 
 use super::{CommandPrototype, CommandResultVec, LocationInfo};
+use crate::distr::{CentralCommunication, SimCentral};
 use crate::machine;
 use crate::machine::error::{Error, ErrorKind, Result};
 // use std::ops::Try;
@@ -120,7 +121,7 @@ pub enum Command {
     Set(set::Set),
     SetIntIntAddr(set::SetIntIntAddr),
 
-    // Eval(Eval),
+    Eval(eval::Eval),
     // EvalReg(EvalReg),
 
     // Equal(Equal),
@@ -212,7 +213,7 @@ impl Command {
             )?),
             "state" => Ok(blocks::state::State::new(args, location, &commands)?),
 
-            // "eval" => Ok(eval::Eval::new(args)?),
+            "eval" => Ok(eval::Eval::new(args)?),
             // "evalreg" => Ok(eval::EvalReg::new(args, location, commands)?),
             _ => Err(Error::new(
                 *location,
@@ -251,7 +252,7 @@ impl Command {
                 out_res.push(cmd.execute_loc(ent_storage, comp_uid, location))
             }
 
-            // Command::Eval(cmd) => out_res.push(cmd.execute_loc(registry)),
+            Command::Eval(cmd) => out_res.push(cmd.execute_loc(comp_uid, ent_storage, registry)),
             // Command::EvalReg(cmd) => out_res.push(cmd.execute_loc(registry)),
 
             //Command::Eval(cmd) => out_res.push(cmd.execute_loc(ent_storage)),
@@ -292,7 +293,7 @@ impl Command {
             }
 
             Command::Extend(cmd) => out_res.push(cmd.execute_loc()),
-            Command::Register(cmd) => out_res.push(cmd.execute_loc()),
+            Command::Register(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
 
             Command::Range(cmd) => out_res.push(cmd.execute_loc(ent_storage, comp_uid, location)),
 
@@ -353,6 +354,22 @@ impl CentralExtCommand {
 
             _ => return Ok(()),
         }
+    }
+    pub fn execute_distr<N: CentralCommunication>(
+        &self,
+        mut central: &mut SimCentral,
+        net: &mut N,
+        ent_name: &EntityId,
+        comp_name: &CompId,
+    ) -> Result<()> {
+        match self {
+            CentralExtCommand::Spawn(cmd) => cmd.execute_ext_distr(central).unwrap(),
+            CentralExtCommand::Register(cmd) => {
+                cmd.execute_ext_distr(central, ent_name, comp_name).unwrap()
+            }
+            _ => (),
+        }
+        Ok(())
     }
 }
 
@@ -610,6 +627,12 @@ impl Spawn {
         sim.spawn_entity(self.prefab.as_ref(), self.spawn_id);
         #[cfg(feature = "machine_lua")]
         sim.setup_lua_state_ent();
+        Ok(())
+    }
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+        central
+            .spawn_entity(self.prefab.clone(), self.spawn_id.clone())
+            .unwrap();
         Ok(())
     }
 }

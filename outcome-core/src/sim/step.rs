@@ -68,7 +68,19 @@ impl Sim {
             exec::execute_central_ext(&central_ext_cmds.lock().unwrap(), self)?;
         }
 
+        // let arrstr_step = StringId::from_unchecked("step");
+        // if !event_queue.contains(&arrstr_step) {
+        //     event_queue.push(arrstr_step);
+        // }
+        // self.event_queue.clear();
+        // self.event_queue = event_queue;
+
         self.clock += 1;
+
+        if !self.event_queue.contains(&arrstr_step) {
+            self.event_queue.push(arrstr_step);
+        }
+
         Ok(())
     }
 }
