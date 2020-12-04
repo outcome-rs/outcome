@@ -1,3 +1,4 @@
+use crate::machine::cmd::assembly::{RegEntity, Register};
 use crate::machine::cmd::{CentralExtCommand, Command, CommandResult};
 use crate::machine::{CallStackVec, CommandPrototype, Error, LocationInfo};
 use crate::model::EntityPrefabModel;
@@ -21,8 +22,16 @@ impl Prefab {
         }))
     }
     pub fn execute_loc(&self) -> Vec<CommandResult> {
+        debug!("registering entity prefab (loc)");
         vec![
-            CommandResult::ExecCentralExt(CentralExtCommand::Prefab(self.clone())),
+            // CommandResult::ExecCentralExt(CentralExtCommand::Prefab(self.clone())),
+            CommandResult::ExecCentralExt(CentralExtCommand::Register(Register::Entity(
+                RegEntity {
+                    name: self.name,
+                    components: self.components.clone(),
+                    do_spawn: false,
+                },
+            ))),
             CommandResult::Continue,
         ]
     }

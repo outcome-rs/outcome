@@ -10,6 +10,7 @@ use super::super::super::{
     Registry,
 };
 use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
+use crate::machine::cmd::assembly::{RegComponent, Register};
 use crate::machine::error::ErrorKind;
 use crate::machine::script::parse_script_at;
 use crate::machine::ComponentCallInfo;
@@ -32,12 +33,11 @@ impl ComponentBlock {
         location: &LocationInfo,
         commands: &Vec<CommandPrototype>,
     ) -> Result<Command, Error> {
+        trace!("making new comp block");
+
         let line = location.line.unwrap();
 
-        println!("making new comp block");
-
-        // TODO all these names should probably be declared in a
-        // better place start names
+        // start names
         let mut start_names = Vec::new();
         start_names.extend(&COMMAND_NAMES);
         // middle names
@@ -56,7 +56,7 @@ impl ComponentBlock {
         let mut end_blocks = Vec::new();
         end_blocks.extend(&super::end::COMMAND_NAMES);
 
-        let positions_options = match super::super::super::command_search(
+        let positions_options = match crate::machine::command_search(
             location,
             &commands,
             (line + 1, None),
@@ -82,6 +82,12 @@ impl ComponentBlock {
                 end_line: positions.0,
                 output_variable: None,
             })),
+            // {
+            //     Ok(Command::Register(Register::Component(RegComponent {
+            //         name: StringId::from_truncate(&args[0]),
+            //         trigger_events: vec![],
+            //     })))
+            // }
             None => Err(Error::new(
                 *location,
                 ErrorKind::InvalidCommandBody("end of component block not found".to_string()),
@@ -95,51 +101,45 @@ impl ComponentBlock {
         comp_name: &CompId,
         line: usize,
     ) -> Vec<CommandResult> {
-        // unimplemented!()
-        let mut new_self = self.clone();
+        trace!("executing component block: {:?}", self);
 
-        println!("componentblock: {:?}", new_self);
+        let mut new_self = self.clone();
 
         call_stack.push(CallInfo::Component(ComponentCallInfo {
             name: new_self.name,
         }));
 
         let mut out_vec = Vec::new();
-        out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Component(
-            new_self,
+        // out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Component(
+        //     new_self,
+        // )));
+        out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Register(
+            Register::Component(RegComponent {
+                name: StringId::from_truncate(&new_self.name),
+                trigger_events: vec![],
+            }),
         )));
         out_vec.push(CommandResult::Continue);
         // out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
         out_vec
     }
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<(), Error> {
-        debug!("registering component");
-        // sim.model.components[0].
+        trace!("registering component");
+
         let comp_model = sim.model.get_component(&self.source_comp).unwrap();
 
         let component = ComponentModel {
             name: self.name.into(),
-            vars: vec![],
-            // vars: vec![VarModel {
-            //     id: "test_string".to_string(),
-            //     type_: VarType::Str,
-            //     default: crate::Var::Str("66asads2s".to_string()),
-            //     internal: false,
-            // }],
             start_state: StringId::from_unchecked("start"),
-            // triggers: vec![],
-            triggers: vec![StringId::from_unchecked("step")],
+            // triggers: vec![StringId::from_unchecked("step")],
             logic: LogicModel {
                 commands: comp_model.logic.commands.clone(),
-                pre_commands: Default::default(),
-                states: Default::default(),
-                procedures: Default::default(),
                 cmd_location_map: comp_model.logic.cmd_location_map.clone(),
+                ..LogicModel::default()
             },
-            source_files: vec![],
-            script_files: vec![],
-            lib_files: vec![],
+            ..ComponentModel::default()
         };
+
         sim.model.components.push(component);
         debug!("added new component to model: {:?}", self.name);
         Ok(())

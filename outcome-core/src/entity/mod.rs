@@ -129,10 +129,10 @@ impl Entity {
 
         #[cfg(feature = "machine")]
         {
-            ent.comp_queue.insert(
-                StringId::from_unchecked(crate::DEFAULT_TRIGGER_EVENT),
-                Vec::new(),
-            );
+            // ent.comp_queue.insert(
+            //     StringId::from_unchecked(crate::DEFAULT_TRIGGER_EVENT),
+            //     Vec::new(),
+            // );
 
             ent.comp_queue
                 .insert(StringId::from_unchecked("init"), Vec::new());

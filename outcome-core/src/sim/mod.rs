@@ -835,7 +835,7 @@ impl Sim {
                         addr
                     );
                     //                    println!("{}", img.);
-                    let img = img.to_luma();
+                    let img = img.to_luma8();
                     let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
                     let mut row: Vec<crate::Int> = Vec::new();
                     for (w, h, luma) in img.enumerate_pixels() {
@@ -860,7 +860,7 @@ impl Sim {
                         addr
                     );
                     let width = img.width();
-                    let img = img.to_rgb();
+                    let img = img.to_rgb8();
 
                     let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
                     let mut row: Vec<crate::Int> = Vec::new();
@@ -900,7 +900,7 @@ impl Sim {
                         addr
                     );
                     let width = img.width();
-                    let img = img.to_rgb();
+                    let img = img.to_rgb8();
 
                     let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
                     let mut row: Vec<crate::Int> = Vec::new();

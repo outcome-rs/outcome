@@ -66,6 +66,7 @@ use self::get_set::*;
 // use self::lua::*;
 
 use super::{CommandPrototype, CommandResultVec, LocationInfo};
+use crate::distr::central::SpawnPolicy;
 use crate::distr::{CentralCommunication, SimCentral};
 use crate::machine;
 use crate::machine::error::{Error, ErrorKind, Result};
@@ -631,7 +632,11 @@ impl Spawn {
     }
     pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
         central
-            .spawn_entity(self.prefab.clone(), self.spawn_id.clone())
+            .spawn_entity(
+                self.prefab.clone(),
+                self.spawn_id.clone(),
+                SpawnPolicy::Random,
+            )
             .unwrap();
         Ok(())
     }

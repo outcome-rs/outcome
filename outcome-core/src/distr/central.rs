@@ -38,10 +38,12 @@ pub struct SimCentral {
     pub clock: usize,
     pub event_queue: Vec<StringId>,
 
+    pub node_entities: FnvHashMap<u32, Vec<EntityUid>>,
+    // pub entity_node_routes: FnvHashMap<>
     pub entities_idx: FnvHashMap<EntityId, EntityUid>,
     entity_idpool: IdPool,
 
-    ent_spawn_queue: Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>,
+    ent_spawn_queue: FnvHashMap<u32, Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>>,
     pub model_changes_queue: SimModel,
 }
 
@@ -51,9 +53,11 @@ impl SimCentral {
     }
     pub fn flush_queue<N: CentralCommunication>(&mut self, net: &mut N) -> Result<()> {
         if !self.ent_spawn_queue.is_empty() {
-            net.sig_send_to_node(0, Signal::SpawnEntities(self.ent_spawn_queue.clone()))?;
+            for (k, v) in &self.ent_spawn_queue {
+                net.sig_send_to_node(*k, Signal::SpawnEntities(v.clone()))?;
+            }
+            self.ent_spawn_queue.clear();
         }
-        self.ent_spawn_queue.clear();
 
         Ok(())
     }
@@ -63,9 +67,10 @@ impl SimCentral {
             model: model.clone(),
             clock: 0,
             event_queue,
+            node_entities: Default::default(),
             entities_idx: Default::default(),
             entity_idpool: IdPool::new(),
-            ent_spawn_queue: vec![],
+            ent_spawn_queue: Default::default(),
             model_changes_queue: SimModel::default(),
         };
         // module script init
@@ -97,15 +102,20 @@ impl SimCentral {
         unimplemented!()
     }
 }
+pub enum SpawnPolicy {
+    Direct(u32),
+    Random,
+    EqualQuantity,
+    EqualTotalSize,
+}
 impl SimCentral {
-    /// Spawns a new entity based on the given prefab.
-    ///
-    /// If prefab is `None` then an empty entity is spawned.
-    pub fn spawn_entity(&mut self, prefab: Option<StringId>, name: Option<StringId>) -> Result<()> {
-        // let mut ent = match prefab {
-        //     Some(p) => Entity::from_prefab(p, &self.model)?,
-        //     None => Entity::empty(),
-        // };
+    /// Spawns a new entity.
+    pub fn spawn_entity(
+        &mut self,
+        prefab: Option<StringId>,
+        name: Option<StringId>,
+        policy: SpawnPolicy,
+    ) -> Result<()> {
         trace!("spawning entity from central");
 
         let new_uid = self.entity_idpool.request_id().unwrap();
@@ -120,7 +130,43 @@ impl SimCentral {
             self.entities_idx.insert(n, new_uid);
         }
 
-        self.ent_spawn_queue.push((new_uid, prefab, name));
+        match policy {
+            SpawnPolicy::Direct(node_id) => {
+                if !self.ent_spawn_queue.contains_key(&node_id) {
+                    self.ent_spawn_queue.insert(node_id, Vec::new());
+                }
+                self.ent_spawn_queue
+                    .get_mut(&node_id)
+                    .unwrap()
+                    .push((new_uid, prefab, name));
+            }
+            // TODO
+            SpawnPolicy::Random => {
+                if self.node_entities.is_empty() {
+                    return Err(Error::Other("no nodes available".to_string()));
+                }
+
+                // shuffle the existing node ids and draw one
+                let mut nums: Vec<&u32> = self.node_entities.keys().collect::<Vec<&u32>>();
+                nums.shuffle(&mut rand::thread_rng());
+                let node_id = *nums.first().unwrap();
+
+                // create place in the queue for that node
+                if !self.ent_spawn_queue.contains_key(node_id) {
+                    self.ent_spawn_queue.insert(*node_id, Vec::new());
+                }
+
+                // push to the queue
+                self.ent_spawn_queue
+                    .get_mut(&node_id)
+                    .unwrap()
+                    .push((new_uid, prefab, name));
+            }
+            _ => unimplemented!(),
+        }
+
+        // self.ent_spawn_queue.push((new_uid, prefab, name));
+
         // net.sig_send_to_node(0, Signal::SpawnEntities(vec![(new_uid, prefab, name)]));
 
         Ok(())
@@ -213,7 +259,9 @@ impl SimCentral {
             //TODO
             cext_cmd.execute_distr(self, network, &context.ent, &context.comp);
         }
+        network.sig_broadcast(Signal::UpdateModel(self.model.clone()));
         self.flush_queue(network)?;
+
         network.sig_broadcast(Signal::EndOfMessages)?;
         loop {
             if let Ok((_, s)) = network.sig_read() {

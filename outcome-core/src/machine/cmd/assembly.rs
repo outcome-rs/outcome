@@ -7,7 +7,7 @@ use shlex::Shlex;
 
 use crate::address::{Address, LocalAddress};
 use crate::entity::Storage;
-use crate::model::{ComponentModel, EntityPrefabModel, EventModel, SimModel};
+use crate::model::{ComponentModel, EntityPrefabModel, EventModel, LogicModel, SimModel};
 use crate::sim::interface::SimInterface;
 use crate::sim::Sim;
 use crate::var::Var;
@@ -124,15 +124,7 @@ impl Extend {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Register {
-    kind: RegisterKind,
-    // signature: Address,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RegisterKind {
-    EntityType(RegEntityType),
-    ComponentType(RegComponentType),
+pub enum Register {
     Entity(RegEntity),
     Component(RegComponent),
     Event,
@@ -140,22 +132,14 @@ pub enum RegisterKind {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegComponent {
-    signature: StringId,
-    trigger_events: Vec<StringId>,
-    do_attach: bool,
+    pub name: StringId,
+    pub trigger_events: Vec<StringId>,
 }
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct RegComponentType {
-    signature: StringId,
-}
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegEntity {
-    signature: StringId,
-    do_spawn: bool,
-}
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct RegEntityType {
-    signature: StringId,
+    pub name: StringId,
+    pub components: Vec<StringId>,
+    pub do_spawn: bool,
 }
 
 impl Register {
@@ -163,14 +147,7 @@ impl Register {
         let mut options = getopts::Options::new();
         let cmd_name = "register";
 
-        let kind = match args[0].as_str() {
-            "entity_type" => RegisterKind::EntityType(RegEntityType {
-                signature: StringId::from(&args[1])
-                    .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
-            }),
-            "component_type" => RegisterKind::ComponentType(RegComponentType {
-                signature: StringId::from_truncate(&args[1]),
-            }),
+        let reg = match args[0].as_str() {
             "entity" => {
                 let brief = format!("usage: {} entity <signature> [options]", cmd_name);
                 options.optflag(
@@ -201,8 +178,14 @@ impl Register {
                         )),
                     ));
                 }
-                RegisterKind::Entity(RegEntity {
-                    signature: StringId::from_truncate(&matches.free[0]),
+                Register::Entity(RegEntity {
+                    name: StringId::from_truncate(&matches.free[0]),
+                    components: matches
+                        .free
+                        .iter()
+                        .skip(1)
+                        .map(|a| StringId::from_truncate(a))
+                        .collect(),
                     do_spawn: matches.opt_present("spawn"),
                 })
             }
@@ -249,14 +232,14 @@ impl Register {
                         .collect::<Vec<StringId>>(),
                     None => Vec::new(),
                 };
-                RegisterKind::Component(RegComponent {
-                    signature: StringId::from_truncate(&matches.free[0]),
+                Register::Component(RegComponent {
+                    name: StringId::from_truncate(&matches.free[0]),
                     trigger_events,
-                    do_attach: matches.opt_present("attach"),
+                    // do_attach: matches.opt_present("attach"),
                 })
             }
-            "event" => RegisterKind::Event,
-            "var" => RegisterKind::Var(RegisterVar {
+            "event" => Register::Event,
+            "var" => Register::Var(RegisterVar {
                 comp: CompId::new(),
                 addr: LocalAddress::from_str(&args[1]).unwrap(),
                 val: None,
@@ -268,23 +251,28 @@ impl Register {
                 ))
             }
         };
-        Ok(Register { kind })
+        Ok(reg)
     }
     pub fn execute_loc(&self, call_stack: &mut CallStackVec) -> Vec<CommandResult> {
         let mut out_vec = Vec::new();
-        match &self.kind {
-            RegisterKind::Var(reg_var) => {
+        match &self {
+            // Register::Entity()
+            Register::Var(reg_var) => {
                 let mut new_reg_var = reg_var.clone();
                 if let Some(comp_info) = call_stack.iter().find_map(|ci: &CallInfo| match ci {
                     CallInfo::Component(c) => Some(c),
                     _ => None,
                 }) {
                     new_reg_var.comp = comp_info.name;
+                    debug!("comp_info.name: {}", comp_info.name);
                 }
                 out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Register(
-                    Register {
-                        kind: RegisterKind::Var(new_reg_var),
-                    },
+                    Register::Var(new_reg_var),
+                )));
+            }
+            Register::Component(reg_comp) => {
+                out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Register(
+                    self.clone(),
                 )));
             }
             //     RegisterKind::Entity(ref mut reg) => reg.signature.resolve_loc(storage),
@@ -300,13 +288,13 @@ impl Register {
         ent_name: &crate::EntityId,
         comp_name: &crate::CompId,
     ) -> Result<()> {
-        match &self.kind {
-            RegisterKind::Entity(reg) => {
+        match &self {
+            Register::Entity(reg) => {
                 // debug!("registering entity");
                 // let signature = Address::from_str(&self.args[0]).unwrap().resolve(sim);
                 // println!("{:?}", signature);
                 let mut ent_model = EntityPrefabModel {
-                    name: StringId::from_truncate(&reg.signature.to_string()),
+                    name: StringId::from_truncate(&reg.name.to_string()),
                     components: Vec::new(),
                 };
                 sim.model.entities.push(ent_model);
@@ -322,10 +310,10 @@ impl Register {
                 // CommandResult::Ok
                 Ok(())
             }
-            RegisterKind::Component(reg) => {
+            Register::Component(reg) => {
                 debug!("registering component");
                 let comp_model = ComponentModel {
-                    name: StringId::from_truncate(&reg.signature.to_string()),
+                    name: StringId::from_truncate(&reg.name.to_string()),
                     vars: Vec::new(),
                     start_state: StringId::from_unchecked("idle"),
                     triggers: reg.trigger_events.clone(),
@@ -354,8 +342,8 @@ impl Register {
 
                 Ok(())
             }
-            RegisterKind::Event => Ok(()),
-            RegisterKind::Var(reg) => {
+            Register::Event => Ok(()),
+            Register::Var(reg) => {
                 debug!("registering var: {:?}", reg);
 
                 sim.model
@@ -385,29 +373,31 @@ impl Register {
         ent_name: &crate::EntityId,
         comp_name: &crate::CompId,
     ) -> Result<()> {
-        match &self.kind {
-            RegisterKind::Entity(reg) => {
+        match &self {
+            Register::Entity(reg) => {
+                debug!("registering entity prefab");
                 let mut ent_model = EntityPrefabModel {
-                    name: StringId::from_truncate(&reg.signature.to_string()),
-                    components: Vec::new(),
+                    name: StringId::from_truncate(&reg.name.to_string()),
+                    components: reg.components.clone(),
                 };
-                central.model_changes_queue.entities.push(ent_model);
+                central.model.entities.push(ent_model);
                 Ok(())
             }
-            RegisterKind::Component(reg) => {
+            Register::Component(reg) => {
                 debug!("registering component");
                 let comp_model = ComponentModel {
-                    name: StringId::from_truncate(&reg.signature.to_string()),
+                    name: StringId::from_truncate(&reg.name.to_string()),
                     vars: Vec::new(),
                     start_state: StringId::from_unchecked("idle"),
                     triggers: reg.trigger_events.clone(),
                     // triggers: vec![ShortString::from_str_truncate("step")],
-                    logic: crate::model::LogicModel::empty(),
+                    logic: LogicModel::empty(),
                     source_files: Vec::new(),
                     script_files: Vec::new(),
                     lib_files: Vec::new(),
                 };
-                central.model_changes_queue.components.push(comp_model);
+                // central.model_changes_queue.components.push(comp_model);
+                central.model.components.push(comp_model);
 
                 // if reg_comp.do_attach {
                 //     for (&(ent_type, ent_id), mut entity) in &mut sim.entities {
@@ -426,12 +416,13 @@ impl Register {
 
                 Ok(())
             }
-            RegisterKind::Event => Ok(()),
-            RegisterKind::Var(reg) => {
+            Register::Event => Ok(()),
+            Register::Var(reg) => {
                 debug!("registering var: {:?}", reg);
 
                 central
-                    .model_changes_queue
+                    // .model_changes_queue
+                    .model
                     .get_component_mut(&reg.comp)
                     .unwrap()
                     .vars

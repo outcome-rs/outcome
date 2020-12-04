@@ -131,7 +131,7 @@ impl Client {
             false,
         )?;
         self.driver.lock().unwrap().send(req_msg)?;
-        println!("sent server status request to server");
+        debug!("sent server status request to server");
         let msg = self.driver.lock().unwrap().read()?;
         let resp: StatusResponse = msg.unpack_payload()?;
         let mut out_map = HashMap::new();

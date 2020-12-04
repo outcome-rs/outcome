@@ -76,8 +76,6 @@ pub struct Worker {
     /// List of other workers in the cluster
     pub comrades: Vec<Comrade>,
     pub network: WorkerNetwork,
-    // /// Network driver
-    // driver: WorkerDriver,
     /// Whether the worker uses a password to authorize connecting comrade workers
     pub use_auth: bool,
     /// Password used for incoming connection authorization
@@ -144,12 +142,29 @@ impl Worker {
     // TODO
     /// Handles initial connection from the cluster coordinator.
     pub fn handle_coordinator(&mut self) -> Result<()> {
-        // io::stdout().flush()?;
-
+        print!("Waiting for message from coordinator... ");
+        std::io::stdout().flush()?;
         let msg = self.network.driver.accept()?;
-        debug!("got message from central: {:?}", msg);
+        println!("success");
 
-        let req: IntroduceCoordRequest = msg.unpack_payload().unwrap();
+        debug!("message from coordinator: {:?}", msg);
+
+        let req: IntroduceCoordRequest = msg.unpack_payload()?;
+
+        print!(
+            "Coordinator announced itself as {}, with {}",
+            req.ip_addr,
+            match req.passwd.as_str() {
+                "" => "no password".to_string(),
+                s => format!("the following password: {}", s),
+            }
+        );
+        print!("... ");
+        std::io::stdout().flush()?;
+
+        // TODO check password
+
+        println!("accepted");
 
         let resp = Message::from_payload(
             IntroduceCoordResponse {
@@ -202,9 +217,9 @@ impl Worker {
 
         loop {
             // sleep a little to make this thread less expensive
-            sleep(Duration::from_micros(10));
+            // sleep(Duration::from_micros(50));
 
-            let bytes = match self.network.driver.coord.try_read(None) {
+            let bytes = match self.network.driver.coord.try_read(Some(1)) {
                 Ok(m) => m,
                 Err(e) => {
                     // println!("{:?}", e);
@@ -274,7 +289,7 @@ impl Worker {
                 self.sim_node
                     .as_mut()
                     .unwrap()
-                    .step(&mut self.network, event_queue)?;
+                    .step(&mut self.network, &event_queue)?;
                 // self.network
                 //     .driver
                 //     .coord
@@ -367,11 +382,11 @@ fn handle_comrade(local_worker: Arc<Mutex<Worker>>) {
 
 /// Fellow worker from the same cluster.
 pub struct Comrade {
-    // client self-assigned id
+    /// Client self-assigned id
     pub name: String,
-    // ip address of the client
-    pub ip_addr: SocketAddr,
-    // password used by the worker
+    /// Address of the client
+    pub addr: SocketAddr,
+    /// Password used by the comrade for authentication
     pub passwd: String,
 }
 

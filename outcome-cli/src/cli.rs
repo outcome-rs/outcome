@@ -679,10 +679,7 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
             Err(e) => print!("failed ({:?})", e),
         }
     }
-    std::io::stdout().flush()?;
-    print!("waiting for message from coordinator... ");
     worker.handle_coordinator()?;
-    print!("success\n");
     // first connection is made by the coordinator
     // thread::spawn(move || {
 

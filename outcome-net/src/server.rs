@@ -435,13 +435,13 @@ impl Server {
                 let mut collection = Vec::new();
                 match dtr.transfer_type.as_str() {
                     "Full" => {
-                        for worker in &net.workers {
+                        for (worker_id, worker) in &net.workers {
                             worker.pair_sock.send(
                                 crate::sig::Signal::from(outcome::distr::Signal::DataRequestAll)
                                     .to_bytes()?,
                             )?
                         }
-                        for worker in &net.workers {
+                        for (worker_id, worker) in &net.workers {
                             let bytes = worker.pair_sock.read()?;
                             let sig = crate::sig::Signal::from_bytes(&bytes)?.inner();
                             match sig {
@@ -683,7 +683,14 @@ impl Server {
                     SimConnection::ClusterCoord(coord, net) => {
                         let mut coord_lock = coord.lock().unwrap();
                         let mut net_lock = net.lock().unwrap();
-                        let event_queue = coord_lock.central.event_queue.clone();
+                        let mut event_queue = coord_lock.central.event_queue.clone();
+
+                        let step_event_name = StringId::from_unchecked("step");
+                        if !event_queue.contains(&step_event_name) {
+                            event_queue.push(step_event_name);
+                        }
+                        coord_lock.central.event_queue.clear();
+
                         // let network = &coord_lock.network;
                         // let central = &mut coord_lock.central;
                         coord_lock

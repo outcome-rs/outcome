@@ -134,16 +134,14 @@ impl SimNode {
     pub fn step<N: NodeCommunication>(
         &mut self,
         mut network: &mut N,
-        event_queue: Vec<StringId>,
+        event_queue: &Vec<StringId>,
     ) -> Result<()> {
         use crate::machine::cmd::{CentralExtCommand, ExtCommand};
         use crate::machine::{cmd, ExecutionContext};
-        println!("sim_node start processing step");
-        // TODO
-        // pre phase
+        trace!("sim_node start processing step");
 
         let model = &self.model;
-        let event_queue = &self.event_queue;
+        // let event_queue = &self.event_queue;
 
         // declare sync vecs for external and central-external
         let ext_cmds: Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>> =
@@ -154,7 +152,7 @@ impl SimNode {
         // loc phase
         self.entities.par_iter_mut().for_each(
             |(ent_uid, mut entity): (&EntityUid, &mut Entity)| {
-                println!("processing entity: {:?}", entity);
+                trace!("processing entity: {:?}", entity);
                 step::step_entity_local(
                     model,
                     event_queue,
@@ -165,7 +163,7 @@ impl SimNode {
                 );
             },
         );
-        println!("sim_node finished local phase");
+        trace!("sim_node finished local phase");
 
         // // send ext cmd requests
         // for (exec_context, ext_cmd) in ext_cmds.lock().unwrap().iter() {
@@ -223,12 +221,16 @@ impl SimNode {
                         self.add_entity(a, b, c)?;
                     }
                 }
+                // TODO currently rewrites the whole model with the received data
+                Signal::UpdateModel(model) => {
+                    self.model = model;
+                }
                 Signal::EndOfMessages => break,
                 _ => (),
             }
         }
         network.sig_send_central(Signal::ProcessStepFinished);
-        println!("sim_node finished send central ext cmd requests");
+        trace!("sim_node finished send central ext cmd requests");
 
         // println!("{:?}", self.entities);
         Ok(())

@@ -29,6 +29,7 @@ rmp-serde = "0.14.4"
 thiserror = "1.0.21"
 id-pool = { version = "0.2.0", default-features = false, features = ["u32", "serde"] }
 log = "0.4.11"
+fnv = "1.0.7"
 
 lz4 = { version = "1.23.2", optional = true }
 

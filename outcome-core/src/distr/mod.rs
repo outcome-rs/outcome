@@ -60,6 +60,8 @@ pub enum Signal {
     /// There are no more messages queued
     EndOfMessages,
 
+    UpdateModel(SimModel),
+
     /// Request all data from the node
     DataRequestAll,
     /// Request selected data from the node

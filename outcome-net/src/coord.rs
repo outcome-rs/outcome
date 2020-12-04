@@ -10,6 +10,12 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::{io, thread};
 
+use id_pool::IdPool;
+
+use outcome::distr::{EntityAssignMethod, Signal, SimCentral, SimNode};
+use outcome::sim::interface::SimInterface;
+use outcome::{distr, EntityUid, SimModel};
+
 use crate::msg::coord_worker::{
     IntroduceCoordRequest, IntroduceCoordResponse, IntroduceWorkerToCoordRequest,
     IntroduceWorkerToCoordResponse, INTRODUCE_WORKER_TO_COORD_REQUEST,
@@ -22,11 +28,8 @@ use crate::sig;
 use crate::transport::{CoordDriverInterface, SocketInterface};
 use crate::worker::WorkerId;
 use crate::{tcp_endpoint, CoordDriver, PairSocket};
-
-use id_pool::IdPool;
-use outcome::distr::{EntityAssignMethod, Signal, SimCentral, SimNode};
-use outcome::sim::interface::SimInterface;
-use outcome::{distr, EntityUid, SimModel};
+use fnv::FnvHashMap;
+use std::ops::DerefMut;
 
 const COORD_ADDRESS: &str = "0.0.0.0:5912";
 
@@ -44,21 +47,21 @@ pub struct CoordNetwork {
     /// Network driver
     driver: CoordDriver,
 
-    /// List of co-op workers
-    pub workers: Vec<Worker>,
-    /// Id pool for workers
+    /// Map of workers
+    pub workers: FnvHashMap<u32, Worker>,
+    /// Integer id pool for workers
     id_pool: IdPool,
-    /// Entity-worker routing table
-    pub routing_table: HashMap<EntityUid, WorkerId>,
+    // /// Entity-worker routing table
+    // pub routing_table: HashMap<EntityUid, WorkerId>,
 }
 impl CoordNetwork {
     pub fn new(addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
         let mut net = CoordNetwork {
             address: addr.to_string(),
             driver: CoordDriver::new(addr)?,
-            workers: vec![],
+            workers: Default::default(),
             id_pool: IdPool::new(),
-            routing_table: Default::default(),
+            // routing_table: Default::default(),
         };
         for worker_addr in &worker_addrs {
             net.add_worker(worker_addr)?;
@@ -75,7 +78,7 @@ impl CoordNetwork {
             entities: vec![],
             pair_sock,
         };
-        self.workers.push(worker);
+        self.workers.insert(id, worker);
         Ok(id)
     }
 
@@ -96,18 +99,21 @@ impl CoordNetwork {
     /// themselves.
     /// Initializes coordinator by connecting to all the workers.
     pub fn initialize(&mut self, model: SimModel) -> Result<()> {
-        for worker_id in self.workers.iter().map(|w| w.id).collect::<Vec<u32>>() {
+        for worker_id in self.workers.iter().map(|(id, _)| *id).collect::<Vec<u32>>() {
             self.initialize_worker(worker_id, model.clone())?;
         }
         Ok(())
     }
 
     fn initialize_worker(&mut self, id: u32, model: SimModel) -> Result<()> {
-        let worker = self
-            .workers
-            .iter()
-            .find(|w| w.id == id)
-            .ok_or(Error::Other("".to_string()))?;
+        let (worker_id, worker) =
+            self.workers
+                .iter()
+                .find(|(wid, _)| *wid == &id)
+                .ok_or(Error::Other(format!(
+                    "unable to find worker with id: {}",
+                    id
+                )))?;
 
         let req = IntroduceCoordRequest {
             ip_addr: worker.pair_sock.last_endpoint(),
@@ -130,10 +136,10 @@ impl CoordNetwork {
         Ok(())
     }
 
-    fn add_initialize_worker(&mut self, worker_addr: &str, model: SimModel) -> Result<()> {
+    fn add_initialize_worker(&mut self, worker_addr: &str, model: SimModel) -> Result<u32> {
         let id = self.add_worker(worker_addr)?;
         self.initialize_worker(id, model)?;
-        Ok(())
+        Ok(id)
     }
 }
 
@@ -145,7 +151,6 @@ impl CoordNetwork {
 pub struct Coord {
     /// Central authority abstraction
     pub central: SimCentral,
-    // pub network: CoordNetwork,
 }
 
 impl Coord {
@@ -173,20 +178,6 @@ impl Coord {
         net.initialize(model.clone());
         let mut coord = Coord::new_from_model(model)?;
 
-        // module script init
-        //TODO put this somewhere else?
-        if outcome::FEATURE_MACHINE_SCRIPT {
-            coord.central.spawn_entity(
-                Some(outcome::StringId::from("_mod_init").unwrap()),
-                Some(outcome::StringId::from("_mod_init").unwrap()),
-            )?;
-            coord
-                .central
-                .event_queue
-                .push(outcome::StringId::from("_scr_init").unwrap());
-        }
-        coord.central.flush_queue(&mut net)?;
-
         let net_arc = Arc::new(Mutex::new(net));
         let coord_arc = Arc::new(Mutex::new(coord));
         debug!("created new cluster coordinator");
@@ -210,9 +201,42 @@ impl Coord {
                             .greeter
                             .send_msg(Message::from_payload(resp, false).unwrap());
 
-                        net_guard
+                        let worker_id = net_guard
                             .add_initialize_worker(&req.worker_addr, model.clone())
                             .unwrap();
+
+                        let mut coord_lock = coord_arc_clone.lock().unwrap();
+                        coord_lock
+                            .central
+                            .node_entities
+                            .insert(worker_id, Vec::new());
+
+                        // check if this is the only (first) worker
+                        if net_guard.workers.len() == 1 {
+                            debug!("first worker connected");
+
+                            // module script init
+                            //TODO put this somewhere else?
+                            if outcome::FEATURE_MACHINE_SCRIPT {
+                                coord_lock
+                                    .central
+                                    .spawn_entity(
+                                        Some(outcome::StringId::from("_mod_init").unwrap()),
+                                        Some(outcome::StringId::from("_mod_init").unwrap()),
+                                        outcome::distr::central::SpawnPolicy::Random,
+                                    )
+                                    .unwrap();
+                                coord_lock
+                                    .central
+                                    .event_queue
+                                    .push(outcome::StringId::from("_scr_init").unwrap());
+
+                                coord_lock
+                                    .central
+                                    .flush_queue(net_guard.deref_mut())
+                                    .unwrap();
+                            }
+                        }
                     }
                     _ => trace!("msg.kind: {}", msg.kind),
                 }
@@ -220,9 +244,9 @@ impl Coord {
         });
         let net_arc_clone = net_arc.clone();
         thread::spawn(move || loop {
-            sleep(Duration::from_micros(10));
+            sleep(Duration::from_micros(100));
             let mut guard = net_arc_clone.lock().unwrap();
-            for worker in &guard.workers {
+            for (worker_id, worker) in &guard.workers {
                 match worker.pair_sock.try_read(None) {
                     Ok(sig) => debug!("{:?}", sig::Signal::from_bytes(&sig).unwrap()),
                     _ => (),
@@ -346,7 +370,7 @@ impl Coord {
 impl outcome::distr::CentralCommunication for CoordNetwork {
     fn sig_read(&self) -> outcome::Result<(String, Signal)> {
         //TODO
-        for worker in &self.workers {
+        for (worker_id, worker) in &self.workers {
             let bytes = worker.pair_sock.read().unwrap();
             let sig = sig::Signal::from_bytes(&bytes).unwrap();
             return Ok((worker.id.to_string(), sig.inner()));
@@ -363,11 +387,14 @@ impl outcome::distr::CentralCommunication for CoordNetwork {
     fn sig_send_to_node(&self, node_id: u32, signal: Signal) -> outcome::Result<()> {
         let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
         self.workers
-            .get(node_id as usize)
-            .unwrap()
+            .get(&node_id)
+            .ok_or(outcome::error::Error::Other(format!(
+                "no worker with id: {}",
+                node_id
+            )))?
             .pair_sock
             .send(sig_bytes)
-            .unwrap();
+            .map_err(|e| outcome::error::Error::Other(format!("network error: {}", e)));
         Ok(())
     }
 
@@ -377,7 +404,7 @@ impl outcome::distr::CentralCommunication for CoordNetwork {
 
     fn sig_broadcast(&self, signal: Signal) -> outcome::Result<()> {
         let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
-        for worker in &self.workers {
+        for (worker_id, worker) in &self.workers {
             worker.pair_sock.send(sig_bytes.clone()).unwrap();
         }
         Ok(())

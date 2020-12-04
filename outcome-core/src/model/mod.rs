@@ -30,7 +30,7 @@ use crate::{util, ShortString};
 use crate::{MedString, StringId};
 use crate::{Var, VarType};
 use crate::{
-    MODULE_ENTRY_SCRIPT_NAME, MODULE_MANIFEST_FILE, SCENARIO_MANIFEST_FILE, SCENARIO_MODS_DIR_NAME,
+    MODULE_ENTRY_FILE_NAME, MODULE_MANIFEST_FILE, SCENARIO_MANIFEST_FILE, SCENARIO_MODS_DIR_NAME,
     VERSION,
 };
 
@@ -74,47 +74,6 @@ impl SimModel {
             data_files: Vec::new(),
             data_imgs: Vec::new(),
         };
-        //
-        // let mut mod_init_comp_model = ComponentModel {
-        //     name: ShortString::from("mod_init").unwrap(),
-        //     // optionally add some vars
-        //     vars: vec![
-        //         VarModel {
-        //             id: "main".to_string(),
-        //             type_: VarType::Int,
-        //             default: Var::Int(666),
-        //             internal: false,
-        //         },
-        //         VarModel {
-        //             id: "main".to_string(),
-        //             type_: VarType::Float,
-        //             default: Var::Float(6.666),
-        //             internal: false,
-        //         },
-        //         VarModel {
-        //             id: "main".to_string(),
-        //             type_: VarType::IntList,
-        //             default: Var::IntList(vec![0; 10]),
-        //             internal: false,
-        //         },
-        //     ],
-        //     start_state: ShortString::from("init").unwrap(),
-        //     triggers: vec![ShortString::from("_scr_init").unwrap()],
-        //     // triggers: vec![],
-        //     #[cfg(feature = "machine")]
-        //     logic: LogicModel {
-        //         commands: Vec::new(),
-        //         states: FnvHashMap::default(),
-        //         procedures: FnvHashMap::default(),
-        //         cmd_location_map: FnvHashMap::default(),
-        //         pre_commands: FnvHashMap::default(),
-        //     },
-        //     source_files: Vec::new(),
-        //     script_files: Vec::new(),
-        //     lib_files: Vec::new(),
-        //     // model_uid: 0,
-        // };
-        // model.components.push(mod_init_comp_model);
 
         // add hardcoded content
         #[cfg(feature = "machine")]
@@ -126,7 +85,7 @@ impl SimModel {
         {
             let mut mod_init_prefab = EntityPrefabModel {
                 name: StringId::from_unchecked("_mod_init"),
-                components: vec![],
+                ..EntityPrefabModel::default()
             };
 
             model.events.push(EventModel {
@@ -135,22 +94,27 @@ impl SimModel {
 
             let scr_init_mod_template = ComponentModel {
                 name: StringId::from_unchecked("_init_mod_"),
-                // optionally add some vars
-                vars: vec![],
                 start_state: StringId::from_unchecked("main"),
                 triggers: vec![StringId::from_unchecked("_scr_init")],
-                logic: LogicModel {
-                    commands: Vec::new(),
-                    states: FnvHashMap::default(),
-                    procedures: FnvHashMap::default(),
-                    cmd_location_map: FnvHashMap::default(),
-                    pre_commands: FnvHashMap::default(),
-                },
-                source_files: Vec::new(),
-                script_files: Vec::new(),
-                lib_files: Vec::new(),
-                // model_uid: 0,
+                ..ComponentModel::default()
             };
+
+            // let scr_init_mod_template = ComponentModel {
+            //     name: StringId::from_unchecked("_init_mod_"),
+            //     vars: vec![],
+            //     start_state: StringId::from_unchecked("main"),
+            //     triggers: vec![StringId::from_unchecked("_scr_init")],
+            //     logic: LogicModel {
+            //         commands: Vec::new(),
+            //         states: FnvHashMap::default(),
+            //         procedures: FnvHashMap::default(),
+            //         cmd_location_map: FnvHashMap::default(),
+            //         pre_commands: FnvHashMap::default(),
+            //     },
+            //     source_files: Vec::new(),
+            //     script_files: Vec::new(),
+            //     lib_files: Vec::new(),
+            // };
             // #[cfg(feature = "machine")]
             use crate::machine::{cmd::Command, CommandPrototype, LocationInfo};
 
@@ -160,16 +124,18 @@ impl SimModel {
             // iterate over scenario modules
             for module in &scenario.modules {
                 // create path to entry script
-                // TODO build the file name from available static vars
                 let mod_entry_file_path = PathBuf::new()
                     .join(crate::SCENARIO_MODS_DIR_NAME)
                     .join(&module.manifest.name)
-                    .join(format!("{}{}", crate::MODULE_ENTRY_SCRIPT_NAME, ".os"));
+                    .join(format!(
+                        "{}{}",
+                        crate::MODULE_ENTRY_FILE_NAME,
+                        crate::machine::script::SCRIPT_FILE_EXTENSION
+                    ));
 
-                // TODO remove unwrap
                 // parse the module entry script
                 let mut instructions = parser::parse_script_at(
-                    mod_entry_file_path.to_str().unwrap(),
+                    &mod_entry_file_path.to_string_lossy(),
                     &scenario.path.to_string_lossy(),
                 )?;
 
@@ -197,10 +163,13 @@ impl SimModel {
                 for (n, cmd_prototype) in cmd_prototypes.iter().enumerate() {
                     cmd_locations[n].comp_name = Some(comp_model.name.into());
                     cmd_locations[n].line = Some(n);
+
+                    // create command struct from prototype
                     let command =
                         Command::from_prototype(cmd_prototype, &cmd_locations[n], &cmd_prototypes)?;
                     commands.push(command.clone());
-                    //// insert the commands into the component's logic model
+
+                    // insert the commands into the component's logic model
                     if let Command::Procedure(proc) = &command {
                         comp_model
                             .logic
@@ -255,8 +224,11 @@ impl SimModel {
 pub struct ScenarioManifest {
     // required
     pub name: String,
+    /// Semver specifier for the scenario version
     pub version: String,
+    /// Semver specifier for the engine version
     pub engine: String,
+
     // optional
     pub mods: Vec<ScenarioModuleDep>,
     pub settings: HashMap<String, Value>,
@@ -267,24 +239,12 @@ pub struct ScenarioManifest {
     pub website: Option<String>,
 }
 impl ScenarioManifest {
-    /// Create new scenario manifest object from path
-    /// reference to scenario directory
+    /// Creates new scenario manifest object from path reference to scenario
+    /// directory.
     pub fn from_dir_at(path: PathBuf) -> Result<ScenarioManifest> {
         let manifest_path = path.join(SCENARIO_MANIFEST_FILE);
         let deser_manifest: deser::ScenarioManifest =
             util::static_deser_obj_from_path(manifest_path)?;
-        // let deser_manifest: deser::ScenarioManifest =
-        //     match util::static_deser_obj_from_path(manifest_path) {
-        //         // TODO print error?
-        //         Err(e) => {
-        //             error!("Failed deserializing scenario manifest");
-        //             return None;
-        //         }
-        //         Ok(man) => match man {
-        //             Some(m) => m,
-        //             None => return None,
-        //         },
-        //     };
         let mut mods = Vec::new();
         for module in deser_manifest.mods {
             let (name, value) = module;
@@ -335,14 +295,13 @@ impl ScenarioModuleDep {
     /// Create scenario module dependency object from a
     /// serde value representation.
     pub fn from_toml_value(scenario_name: &String, value: &Value) -> Option<ScenarioModuleDep> {
-        // str field names
+        // field names
         let version_field = "version";
         let git_field = "git";
 
-        let mut version_req = String::from("*");
+        let mut version_req = "*".to_string();
         let mut git_address = None;
 
-        // simplest is a str version
         if let Some(s) = value.as_str() {
             match VersionReq::parse(s) {
                 Ok(vr) => version_req = vr.to_string(),
@@ -689,7 +648,7 @@ pub struct EventModel {
 }
 
 /// Entity prefab.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntityPrefabModel {
     pub name: StringId,
     pub components: Vec<StringId>,

@@ -178,6 +178,8 @@ pub mod util;
 
 pub(crate) use self::parser::parse_script_at;
 
+pub(crate) const SCRIPT_FILE_EXTENSION: &str = ".outcome";
+
 //TODO
 use super::{CommandPrototype, LocationInfo};
 
