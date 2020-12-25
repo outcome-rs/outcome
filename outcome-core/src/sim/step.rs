@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::{EntityId, EntityUid, SimModel, StringId};
 
 #[cfg(feature = "machine")]
-use crate::machine::{cmd::CentralExtCommand, cmd::ExtCommand, exec, ExecutionContext};
+use crate::machine::{cmd::CentralRemoteCommand, cmd::ExtCommand, exec, ExecutionContext};
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
 
@@ -33,7 +33,7 @@ impl Sim {
         // clone event queue into a local variable
         let mut event_queue = self.event_queue.clone();
 
-        let arrstr_step = StringId::from_unchecked("step");
+        let arrstr_step = StringId::from("step").unwrap();
         if !event_queue.contains(&arrstr_step) {
             event_queue.push(arrstr_step);
         }
@@ -46,7 +46,7 @@ impl Sim {
             // declare atomic vecs for ext and central-ext commands
             let ext_cmds: Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>> =
                 Arc::new(Mutex::new(Vec::new()));
-            let central_ext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>> =
+            let central_ext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>> =
                 Arc::new(Mutex::new(Vec::new()));
 
             // loc phase
@@ -92,12 +92,15 @@ pub(crate) fn step_entity_local(
     ent_uid: &EntityUid,
     mut entity: &mut Entity,
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
-    central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>>,
+    central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>>,
 ) -> Result<(), Error> {
     for event in event_queue {
+        debug!("entity.comp_queue: {:?}", entity.comp_queue);
         if let Some(event_queue) = entity.comp_queue.get(event) {
+            // debug!("event_queue: {:?}", event_queue);
             for comp_uid in event_queue {
                 if let Some(comp_state) = entity.comp_state.get_mut(comp_uid) {
+                    // debug!("comp_state: {}", comp_state);
                     // let comp_curr_state = &comp.current_state;
                     if comp_state.as_ref() == "idle" {
                         continue;

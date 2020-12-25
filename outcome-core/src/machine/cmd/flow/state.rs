@@ -1,15 +1,14 @@
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::sim::interface::SimInterface;
-use crate::{CompId, EntityId, ShortString, Sim, StringId};
+use crate::{arraystring, CompId, EntityId, ShortString, Sim, StringId};
 use std::iter::FromIterator;
 
 use super::super::super::{
     error::Error, CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo,
     Registry,
 };
-use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
+use super::super::{CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::error::ErrorKind;
 use crate::machine::ComponentCallInfo;
 
@@ -72,9 +71,9 @@ impl State {
 
         match positions_options {
             Some(positions) => Ok(Command::State(State {
-                comp: CompId::from_truncate("position"),
+                comp: arraystring::new_truncate("position"),
                 signature: None,
-                name: StringId::from_truncate(&args[0]),
+                name: arraystring::new_truncate(&args[0]),
                 start_line: line + 1,
                 end_line: positions.0,
                 output_variable: None,
@@ -105,7 +104,7 @@ impl State {
 
         //println!("{:?}", new_self);
         let mut out_vec = Vec::new();
-        out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::State(
+        out_vec.push(CommandResult::ExecCentralExt(CentralRemoteCommand::State(
             new_self,
         )));
         out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
@@ -124,7 +123,7 @@ impl State {
                 .logic
                 .states
                 .insert(self.name, (self.start_line, self.end_line));
-            debug!("inserted state {:?} at comp {:?}", self.name, comp_name);
+            debug!("inserted state {:?} at comp {:?}", self, comp_name);
         }
         Ok(())
     }

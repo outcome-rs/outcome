@@ -10,7 +10,7 @@ use crate::address::Address;
 use crate::component::Component;
 use crate::entity::{CompCollection, Entity, Storage};
 use crate::machine::cmd::{Attach, ExtSet, ExtSetVar, Get, Spawn};
-use crate::machine::cmd::{CentralExtCommand, Command, CommandResult, ExtCommand};
+use crate::machine::cmd::{CentralRemoteCommand, Command, CommandResult, ExtCommand};
 use crate::model::SimModel;
 use crate::{model, util};
 use crate::{Sim, VarType};
@@ -129,7 +129,7 @@ impl<'a> UserData for ProcHandle<'a> {
             "spawn_clone",
             |ctx: rlua::Context, data, (ent_type, ent_id, new_id): (String, String, String)| {
                 let mut cmd_res: &mut Vec<CommandResult> = &mut data.3;
-                cmd_res.push(CommandResult::ExecCentralExt(CentralExtCommand::Spawn(
+                cmd_res.push(CommandResult::ExecCentralExt(CentralRemoteCommand::Spawn(
                     Spawn {
                         model_type: StringId::from_str(&ent_type).unwrap(),
                         model_id: StringId::from_str(&ent_id).unwrap(),

@@ -129,7 +129,7 @@ impl Set {
             SetSource::Value(val) => {
                 if entity_db
                     .get_var_from_addr(&target_addr, Some(comp_uid))
-                    .is_some()
+                    .is_ok()
                 {
                     entity_db.set_from_var(&target_addr, Some(comp_uid), val);
                 } else {

@@ -1,9 +1,11 @@
+//! Node definition.
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use fnv::FnvHashMap;
 
-use crate::distr::{DistrError, NodeCommunication, Signal};
+use crate::distr::{NodeCommunication, Signal};
 use crate::entity::Entity;
 use crate::sim::step;
 use crate::{CompId, Result};
@@ -12,7 +14,7 @@ use crate::{EntityId, EntityUid, SimModel, StringId};
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
 
-/// Distributed simulation node object.
+/// Distributed simulation node.
 ///
 /// It holds the current clock value, a full copy of the sim model, and
 /// a subset of all the sim entities.
@@ -38,7 +40,7 @@ impl SimNode {
             model: model.clone(),
             entities: FnvHashMap::default(),
             entities_idx: FnvHashMap::default(),
-            event_queue: vec![StringId::from_unchecked("_scr_init")],
+            event_queue: vec![StringId::from("_scr_init").unwrap()],
         };
 
         // sim_node.apply_model_entities(entities);
@@ -114,7 +116,7 @@ impl SimNode {
     }
 
     #[cfg(not(feature = "machine"))]
-    pub fn step<E: Sized + DistrError, C: NodeCommunication + Sized + Sync + Send>(
+    pub fn step<C: NodeCommunication>(
         &mut self,
         entity_node_map: &HashMap<EntityId, String>,
         mut addr_book: &mut HashMap<String, C>,
@@ -136,9 +138,21 @@ impl SimNode {
         mut network: &mut N,
         event_queue: &Vec<StringId>,
     ) -> Result<()> {
-        use crate::machine::cmd::{CentralExtCommand, ExtCommand};
+        use crate::machine::cmd::{CentralRemoteCommand, ExtCommand};
         use crate::machine::{cmd, ExecutionContext};
-        trace!("sim_node start processing step");
+        trace!(
+            "sim_node start processing step, event queue: {:?}",
+            event_queue
+        );
+
+        // // clone event queue into a local variable
+        // let mut event_queue = self.event_queue.clone();
+        //
+        // let arrstr_step = StringId::from_unchecked("step");
+        // if !event_queue.contains(&arrstr_step) {
+        //     event_queue.push(arrstr_step);
+        // }
+        // self.event_queue.clear();
 
         let model = &self.model;
         // let event_queue = &self.event_queue;
@@ -146,7 +160,7 @@ impl SimNode {
         // declare sync vecs for external and central-external
         let ext_cmds: Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>> =
             Arc::new(Mutex::new(Vec::new()));
-        let central_ext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>> =
+        let central_ext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>> =
             Arc::new(Mutex::new(Vec::new()));
 
         // loc phase
@@ -155,7 +169,7 @@ impl SimNode {
                 trace!("processing entity: {:?}", entity);
                 step::step_entity_local(
                     model,
-                    event_queue,
+                    &event_queue,
                     ent_uid,
                     entity,
                     &ext_cmds,

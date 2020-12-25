@@ -1,6 +1,7 @@
 use crate::address::LocalAddress;
+use crate::error::{Error, Result};
 use crate::model::ComponentModel;
-use crate::{Address, CompId, StringId, Var, VarType};
+use crate::{arraystring, Address, CompId, StringId, Var, VarType};
 use fnv::FnvHashMap;
 use std::collections::HashMap;
 
@@ -34,12 +35,41 @@ impl Storage {
         self.map.get_mut(&idx)
     }
 
-    pub fn get_var_from_addr(&self, addr: &Address, comp_uid: Option<&CompId>) -> Option<Var> {
+    pub fn get_var_from_addr(&self, addr: &Address, comp_uid: Option<&CompId>) -> Result<&Var> {
         match comp_uid {
-            Some(_comp_uid) => return self.map.get(&(*_comp_uid, addr.var_id)).cloned(),
-            None => return self.map.get(&(addr.component, addr.var_id)).cloned(),
+            Some(_comp_uid) => {
+                return self
+                    .map
+                    .get(&(*_comp_uid, addr.var_id))
+                    .ok_or(Error::FailedGettingVariable(addr.to_string()))
+            }
+            None => {
+                return self
+                    .map
+                    .get(&(addr.component, addr.var_id))
+                    .ok_or(Error::FailedGettingVariable(addr.to_string()))
+            }
         };
-        None
+    }
+    pub fn get_var_mut_from_addr(
+        &mut self,
+        addr: &Address,
+        comp_uid: Option<&CompId>,
+    ) -> Result<&mut Var> {
+        match comp_uid {
+            Some(_comp_uid) => {
+                return self
+                    .map
+                    .get_mut(&(*_comp_uid, addr.var_id))
+                    .ok_or(Error::FailedGettingVariable(addr.to_string()))
+            }
+            None => {
+                return self
+                    .map
+                    .get_mut(&(addr.component, addr.var_id))
+                    .ok_or(Error::FailedGettingVariable(addr.to_string()))
+            }
+        };
     }
 }
 /// Generic type setters and inserts.
@@ -72,8 +102,8 @@ impl Storage {
 
     pub fn insert(&mut self, comp_name: &str, var_id: &str, var_type: &VarType, var: Option<Var>) {
         let var_suid = (
-            StringId::from_truncate(comp_name),
-            StringId::from_truncate(var_id),
+            arraystring::new_truncate(comp_name),
+            arraystring::new_truncate(var_id),
         );
         if let Some(v) = var {
             self.insert_var(comp_name, var_id, v);
@@ -83,8 +113,8 @@ impl Storage {
     }
     pub fn insert_var(&mut self, comp_name: &str, var_id: &str, var: Var) {
         let var_suid = (
-            StringId::from_truncate(comp_name),
-            StringId::from_truncate(var_id),
+            arraystring::new_truncate(comp_name),
+            arraystring::new_truncate(var_id),
         );
         self.map.insert(var_suid, var);
     }
@@ -453,8 +483,8 @@ impl Storage {
         &self,
         source: &Address,
         comp_uid: Option<&CompId>,
-    ) -> Option<String> {
-        Some(self.get_var_from_addr(source, comp_uid)?.to_string())
+    ) -> Result<String> {
+        Ok(self.get_var_from_addr(source, comp_uid)?.to_string())
     }
     pub fn get_all_coerce_to_string(&self) -> HashMap<String, String> {
         let mut out_map = HashMap::new();

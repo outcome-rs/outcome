@@ -4,7 +4,7 @@
 
 use super::{DirectivePrototype, Instruction, InstructionKind};
 
-use crate::ShortString;
+use crate::{arraystring, ShortString};
 use crate::{util, LongString};
 
 use crate::machine::error::{Error, ErrorKind, Result};
@@ -45,7 +45,7 @@ pub(crate) fn parse_lines(lines: &str, script_relative_path: &str) -> Result<Vec
         let mut line = line.trim().to_string();
         // create a location info struct for current line
         let mut location_info = LocationInfo {
-            source: Some(LongString::from_truncate(script_relative_path)),
+            source: Some(arraystring::new_truncate(script_relative_path)),
             source_line: Some(line_number),
             line: None,
             tag: None,
@@ -195,7 +195,7 @@ fn parse_command(
                 index = next_index;
 
                 if let Some(val) = value {
-                    location_info.tag = Some(ShortString::from_truncate(&val));
+                    location_info.tag = Some(arraystring::new_truncate(&val));
                 }
                 //if value.is_some() {
                 //location_info.tag = Some(ArrStr10::from_str_truncate(value));

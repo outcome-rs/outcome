@@ -12,8 +12,7 @@ use std::{io, thread};
 
 use id_pool::IdPool;
 
-use outcome::distr::{EntityAssignMethod, Signal, SimCentral, SimNode};
-use outcome::sim::interface::SimInterface;
+use outcome::distr::{Signal, SimCentral, SimNode};
 use outcome::{distr, EntityUid, SimModel};
 
 use crate::msg::coord_worker::{
@@ -25,9 +24,9 @@ use crate::msg::{unpack_payload, Message};
 
 use crate::error::{Error, Result};
 use crate::sig;
-use crate::transport::{CoordDriverInterface, SocketInterface};
+use crate::transport::{CoordDriverInterface, PairSocket, SocketInterface};
 use crate::worker::WorkerId;
-use crate::{tcp_endpoint, CoordDriver, PairSocket};
+use crate::{util::tcp_endpoint, CoordDriver};
 use fnv::FnvHashMap;
 use std::ops::DerefMut;
 
@@ -71,7 +70,15 @@ impl CoordNetwork {
     fn add_worker(&mut self, worker_addr: &str) -> Result<u32> {
         let pair_sock = self.driver.new_pair_socket()?;
         let id = self.id_pool.request_id().unwrap();
-        pair_sock.bind(&format!("127.0.0.1:898{}", id))?;
+        pair_sock.bind(&format!(
+            "{}:898{}",
+            self.address
+                .split(':')
+                .collect::<Vec<&str>>()
+                .first()
+                .unwrap(),
+            id
+        ))?;
         let worker = Worker {
             id,
             address: worker_addr.to_string(),
@@ -223,7 +230,7 @@ impl Coord {
                                     .spawn_entity(
                                         Some(outcome::StringId::from("_mod_init").unwrap()),
                                         Some(outcome::StringId::from("_mod_init").unwrap()),
-                                        outcome::distr::central::SpawnPolicy::Random,
+                                        outcome::distr::DistributionPolicy::Random,
                                     )
                                     .unwrap();
                                 coord_lock

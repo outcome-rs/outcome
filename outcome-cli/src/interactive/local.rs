@@ -105,8 +105,8 @@ pub fn print_show(sim: &Sim, config: &Config) {
             Err(_) => continue,
         };
         let val = match sim.get_as_string(&addr) {
-            Some(v) => v,
-            None => continue,
+            Ok(v) => v,
+            Err(_) => continue,
         };
 
         println!("{}{}{}", addr_str, diff, val);

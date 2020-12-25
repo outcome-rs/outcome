@@ -361,7 +361,7 @@ pub fn start(mut sim_driver: SimDriver, config_path: &str) -> Result<()> {
                             },
                             _ => unimplemented!(),
                         };
-                        let data = file.write(&data);
+                        file.write(&data)?;
                     }
                     // Write a compressed snapshot to disk.
                     "snapc" => {
@@ -387,7 +387,7 @@ pub fn start(mut sim_driver: SimDriver, config_path: &str) -> Result<()> {
                             },
                             _ => unimplemented!(),
                         };
-                        file.write(&data);
+                        file.write(&data)?;
                     }
 
                     "help" => {

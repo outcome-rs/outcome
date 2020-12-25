@@ -11,7 +11,7 @@ use std::time::Duration;
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
 
-use outcome::distr::{DistrError, Signal};
+use outcome::distr::Signal;
 use outcome::StringId;
 
 use crate::error::{Error, Result};
@@ -21,6 +21,7 @@ use crate::server::{ClientId, SERVER_ADDRESS};
 use crate::transport::{
     ClientDriverInterface, CoordDriverInterface, SocketInterface, WorkerDriverInterface,
 };
+use crate::util::tcp_endpoint;
 use crate::worker::WorkerId;
 
 use super::ServerDriverInterface;
@@ -30,6 +31,7 @@ pub(crate) struct ClientDriver {
     ctx: zmq::Context,
     conn: zmq::Socket,
 }
+
 impl ClientDriver {
     pub fn req_socket(&self) -> Result<ReqSocket> {
         Ok(ReqSocket {
@@ -52,6 +54,7 @@ impl ClientDriver {
         Ok(message)
     }
 }
+
 impl ClientDriverInterface for ClientDriver {
     fn new() -> Result<ClientDriver> {
         let ctx = zmq::Context::new();
@@ -199,9 +202,11 @@ impl SocketInterface for ReqSocket {
         self.send(msg.to_bytes())
     }
 }
+
 pub struct RepSocket {
     inner: zmq::Socket,
 }
+
 impl SocketInterface for RepSocket {
     fn bind(&self, addr: &str) -> Result<()> {
         Ok(self.inner.bind(&tcp_endpoint(addr))?)
@@ -572,12 +577,3 @@ impl WorkerDriverInterface for WorkerDriver {
 //         self.comrades.keys().map(|s| s.clone()).collect()
 //     }
 // }
-
-/// Create a valid tcp address that includes the prefix.
-pub(crate) fn tcp_endpoint(s: &str) -> String {
-    if s.contains("://") {
-        s.to_string()
-    } else {
-        format!("tcp://{}", s)
-    }
-}

@@ -3,7 +3,7 @@ extern crate rmp_serde as rmps;
 extern crate serde;
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -21,16 +21,69 @@ use crate::{Coord, PairSocket, ServerDriver, Worker};
 
 use crate::coord::CoordNetwork;
 use crate::{error::Error, Result};
-use outcome_core::StringId;
+use outcome_core::{arraystring, StringId};
 use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 use std::thread::{current, sleep};
-use zmq::PollEvents;
 
 pub const SERVER_ADDRESS: &str = "0.0.0.0:9124";
 pub const GREETER_ADDRESS: &str = "0.0.0.0:9123";
 
+pub const CLIENT_KEEP_ALIVE_MILLIS: usize = 3000;
+
 pub type ClientId = u32;
+
+#[derive(Default)]
+pub struct ServerSettings {
+    pub name: String,
+    pub description: String,
+    pub address: String,
+
+    pub project_path: String,
+
+    pub use_auth: bool,
+    pub passwd_list: Vec<String>,
+    pub use_compression: bool,
+    pub keepalive_millis: usize,
+
+    pub cluster: Option<String>,
+    pub workers: Vec<String>,
+}
+
+impl ServerSettings {
+    pub fn build(self) -> Result<Server> {
+        let sim = match &self.cluster {
+            Some(cluster_addr) => {
+                /// run a coordinator
+                let (mut coord, coord_net) =
+                    Coord::start(&self.project_path, cluster_addr, self.workers)?;
+                SimConnection::ClusterCoord(coord, coord_net)
+            }
+            None => {
+                /// run a local simulation instance
+                let sim = Sim::from_scenario_at_path(PathBuf::from(&self.project_path))
+                    .expect("failed creating new sim instance");
+                SimConnection::Local(sim)
+            }
+        };
+        Ok(Server {
+            name: self.name,
+            description: self.description,
+            address: self.address.split(":").collect::<Vec<&str>>()[0].to_string(),
+            clients: HashMap::new(),
+            driver: ServerDriver::new(&self.address)?,
+            default_client_keepalive_millis: self.keepalive_millis,
+            use_auth: false,
+            passwd_list: vec![],
+            sim,
+            uptime: 0,
+            // time_since_last_msg: HashMap::new(),
+            use_compression: false,
+            time_since_last_msg: 0,
+            local_project_path: PathBuf::from(self.project_path),
+        })
+    }
+}
 
 /// Connection entry point for clients.
 ///
@@ -55,48 +108,74 @@ pub type ClientId = u32;
 /// client should connect to.
 pub struct Server {
     /// Name of the server
-    pub name: String,
+    pub(crate) name: String,
     /// Description of the server
-    pub description: String,
+    pub(crate) description: String,
     /// IP address of the server
-    pub address: String,
+    pub(crate) address: String,
 
     /// List of clients
-    pub clients: HashMap<ClientId, Client>,
+    pub(crate) clients: HashMap<ClientId, Client>,
     /// Network driver
     driver: ServerDriver,
 
+    /// Time until client connection is terminated since last message
+    pub(crate) default_client_keepalive_millis: usize,
     /// Ues a password to authorize connecting clients
-    pub use_auth: bool,
+    pub(crate) use_auth: bool,
     /// Passwords used for new client authorization
-    pub passwd_list: Vec<String>,
+    pub(crate) passwd_list: Vec<String>,
     /// Compress outgoing messages
-    pub use_compression: bool,
+    pub(crate) use_compression: bool,
+
+    pub(crate) local_project_path: PathBuf,
 
     /// Connection point with the simulation
-    pub sim: SimConnection,
+    pub(crate) sim: SimConnection,
 
     /// Uptime in milliseconds
-    pub uptime: usize,
+    pub(crate) uptime: usize,
     /// Time since last message in milliseconds
-    pub time_since_last_msg: usize,
+    pub(crate) time_since_last_msg: usize,
 }
+
 impl Server {
-    pub fn new(sim: SimConnection, my_addr: &str) -> Result<Server> {
-        Ok(Server {
-            name: "".to_string(),
-            description: "".to_string(),
-            address: my_addr.split(":").collect::<Vec<&str>>()[0].to_string(),
-            clients: HashMap::new(),
-            driver: ServerDriver::new(my_addr)?,
-            use_auth: false,
-            passwd_list: vec![],
-            sim,
-            uptime: 0,
-            // time_since_last_msg: HashMap::new(),
-            use_compression: false,
-            time_since_last_msg: 0,
-        })
+    pub fn start(&mut self) -> Result<()> {
+        let mut keep_alive_millis = self.default_client_keepalive_millis;
+        let mut accept_timer = 0;
+        loop {
+            thread::sleep(Duration::from_millis(1));
+            self.uptime += 1;
+            accept_timer += 1;
+
+            // TODO keepalive mechanism
+            if keep_alive_millis != 0 && self.time_since_last_msg >= keep_alive_millis {
+                println!(
+                    "no activity for {} milliseconds, terminating",
+                    keep_alive_millis as u32
+                );
+                break;
+            }
+
+            if accept_timer >= 400 {
+                accept_timer = 0;
+                self.try_accept_client(true);
+            }
+
+            let client_ids: Vec<u32> = self.clients.keys().cloned().collect();
+            for client_id in client_ids {
+                if let Err(e) = self.try_handle_client(
+                    &client_id,
+                    // None,
+                ) {
+                    match e {
+                        Error::WouldBlock => (),
+                        _ => warn!("try_handle_client failed: {}", e),
+                    }
+                }
+            }
+        }
+        Ok(())
     }
     fn prune_clients(&mut self) {
         let mut buf = [0; 1024];
@@ -177,6 +256,7 @@ impl Server {
             // connection: client_socket.clone(),
             connection: client_socket,
             is_blocking: req.is_blocking,
+            keepalive_millis: 0,
             event_trigger: "".to_string(),
             passwd: "".to_string(),
             name: "".to_string(),
@@ -249,19 +329,21 @@ impl Server {
     //     Ok(())
     // }
 }
+
 pub struct MsgChannel {
     pub title: String,
     pub password: String,
     pub messages: Vec<String>,
 }
 
+/// High-level representation of a simulation interface.
 pub enum SimConnection {
     Local(Sim),
     ClusterCoord(Arc<Mutex<Coord>>, Arc<Mutex<CoordNetwork>>),
     ClusterWorker(Worker),
 }
 
-/// Representation of a connected client.
+/// Represents a connected client.
 pub struct Client {
     /// Unique id assigned at registration.
     pub id: ClientId,
@@ -273,6 +355,7 @@ pub struct Client {
     /// Blocking client has to explicitly agree to let server continue to next turn,
     /// non-blocking client is more of a passive observer.
     pub is_blocking: bool,
+    pub keepalive_millis: usize,
     /// Simulation tick event the client is interested in.
     pub event_trigger: String,
     /// Password used by the client.
@@ -294,6 +377,7 @@ impl Server {
             // TODO enabling compression for incoming requests would require
             // rewriting this bit, sending whole msg to the handler instead of
             // just the payload
+            HEARTBEAT => (),
             PING_REQUEST => self.handle_ping_request(msg, client_id)?,
             STATUS_REQUEST => self.handle_status_request(msg, client_id)?,
             TURN_ADVANCE_REQUEST => self.handle_turn_advance_request(msg, client_id)?,
@@ -302,6 +386,10 @@ impl Server {
                 self.handle_scheduled_data_transfer_request(msg, client_id)?
             }
             DATA_PULL_REQUEST => self.handle_data_pull_request(msg, client_id)?,
+
+            SPAWN_ENTITIES_REQUEST => self.handle_spawn_entities_request(msg, client_id)?,
+            EXPORT_SNAPSHOT_REQUEST => self.handle_export_snapshot_request(msg, client_id)?,
+
             // LIST_LOCAL_SCENARIOS_REQUEST => {
             //     handle_list_local_scenarios_request(payload, server_arc, client_id)
             // }
@@ -311,12 +399,70 @@ impl Server {
             // LOAD_REMOTE_SCENARIO_REQUEST => {
             //     handle_load_remote_scenario_request(payload, server_arc, client_id)
             // }
-            HEARTBEAT => (),
             _ => println!("unknown message type: {}", msg.kind.as_str()),
         }
 
+        trace!("handled");
         Ok(())
-        // println!("handled");
+    }
+    pub fn handle_export_snapshot_request(
+        &mut self,
+        msg: Message,
+        client_id: &ClientId,
+    ) -> Result<()> {
+        let req: ExportSnapshotRequest = msg.unpack_payload()?;
+        if req.save_to_disk {
+            let snap = match &self.sim {
+                SimConnection::Local(sim) => sim.to_snapshot(false)?,
+                _ => unimplemented!(),
+            };
+            let target_path = self.local_project_path.join("snapshots").join(req.name);
+            if std::fs::File::open(&target_path).is_ok() {
+                std::fs::remove_file(&target_path);
+            }
+            let mut file = std::fs::File::create(target_path)?;
+            file.write(&snap);
+        }
+
+        let resp = ExportSnapshotResponse {
+            error: "".to_string(),
+            snapshot: vec![],
+        };
+
+        self.clients
+            .get(client_id)
+            .unwrap()
+            .connection
+            .send_msg(Message::from_payload(resp, false)?)?;
+        Ok(())
+    }
+
+    pub fn handle_spawn_entities_request(
+        &mut self,
+        msg: Message,
+        client_id: &ClientId,
+    ) -> Result<()> {
+        let req: SpawnEntitiesRequest = msg.unpack_payload()?;
+
+        for prefab in req.entity_prefabs {
+            trace!("handling prefab: {}", prefab);
+            match &mut self.sim {
+                SimConnection::Local(sim) => {
+                    sim.spawn_entity(Some(&outcome::arraystring::new_truncate(&prefab)), None)?;
+                }
+                _ => unimplemented!(),
+            }
+        }
+
+        let resp = SpawnEntitiesResponse {
+            error: "".to_string(),
+        };
+        trace!("starting send..");
+        self.clients
+            .get(client_id)
+            .unwrap()
+            .connection
+            .send_msg(Message::from_payload(resp, false)?)
     }
 
     pub fn handle_ping_request(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
@@ -328,6 +474,7 @@ impl Server {
             .connection
             .send_msg(Message::from_payload(resp, false)?)
     }
+
     pub fn handle_status_request(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
         let req: StatusRequest = msg.unpack_payload()?;
         let model_scenario = match &self.sim {
@@ -343,7 +490,7 @@ impl Server {
             address: self.address.clone(),
             connected_clients: self.clients.iter().map(|(id, c)| c.name.clone()).collect(),
             //TODO
-            endgame_version: outcome_core::VERSION.to_owned(),
+            engine_version: outcome_core::VERSION.to_owned(),
             uptime: self.uptime,
             current_tick: match &self.sim {
                 SimConnection::Local(sim) => sim.get_clock(),
@@ -499,7 +646,7 @@ impl Server {
         let sdtr: ScheduledDataTransferRequest = msg.unpack_payload()?;
         let mut client = self.clients.get_mut(client_id).unwrap();
         for event_trigger in sdtr.event_triggers {
-            let event_id = StringId::from(&event_trigger)?;
+            let event_id = outcome::arraystring::new(&event_trigger)?;
             if !client.scheduled_dts.contains_key(&event_id) {
                 client.scheduled_dts.insert(event_id, Vec::new());
             }
@@ -685,7 +832,7 @@ impl Server {
                         let mut net_lock = net.lock().unwrap();
                         let mut event_queue = coord_lock.central.event_queue.clone();
 
-                        let step_event_name = StringId::from_unchecked("step");
+                        let step_event_name = arraystring::new_unchecked("step");
                         if !event_queue.contains(&step_event_name) {
                             event_queue.push(step_event_name);
                         }
@@ -990,7 +1137,7 @@ fn handle_data_transfer_request_local(
                     Ok(a) => a,
                     Err(_) => continue,
                 };
-                if let Some(var) = sim_instance.get_var(&address) {
+                if let Ok(var) = sim_instance.get_var(&address) {
                     if var.is_float() {
                         data_pack
                             .floats

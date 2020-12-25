@@ -1,3 +1,5 @@
+//! Message definitions.
+
 #![allow(unused)]
 
 // use crate::msg::server_client::BUF_SIZE;

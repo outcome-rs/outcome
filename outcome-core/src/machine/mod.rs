@@ -34,7 +34,7 @@ impl LocationInfo {
             "Source: {}, Line: {}",
             self.source
                 .as_ref()
-                .unwrap_or(&LongString::from_unchecked("unknown")),
+                .unwrap_or(&LongString::from("unknown").unwrap()),
             self.source_line.as_ref().unwrap_or(&0)
         )
     }
@@ -49,7 +49,7 @@ impl LocationInfo {
     }
 
     pub fn with_source(mut self, source: &str) -> Self {
-        self.source = Some(LongString::from_truncate(source));
+        self.source = Some(crate::arraystring::new_truncate(source));
         self
     }
 }

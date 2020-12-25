@@ -25,13 +25,12 @@ use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::error::{Error, Result};
 use crate::model::{DataEntry, DataImageEntry, Scenario};
-use crate::sim::interface::SimInterface;
 use crate::sim::step;
 use crate::{model, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType};
 
 #[cfg(feature = "machine")]
 use crate::machine::{
-    cmd::CentralExtCommand, cmd::Command, cmd::CommandResult, cmd::ExtCommand, ExecutionContext,
+    cmd::CentralRemoteCommand, cmd::Command, cmd::CommandResult, cmd::ExtCommand, ExecutionContext,
 };
 
 //TODO
@@ -78,10 +77,10 @@ pub enum Signal {
     ExecuteExtCmd((ExecutionContext, ExtCommand)),
     /// Central-external command to be executed on central
     #[cfg(feature = "machine")]
-    ExecuteCentralExtCmd((ExecutionContext, CentralExtCommand)),
+    ExecuteCentralExtCmd((ExecutionContext, CentralRemoteCommand)),
 }
 
-/// Trait representing central orchestrator's ability to send and receive
+/// Trait representing central coordinator's ability to send and receive
 /// messages over the wire.
 pub trait CentralCommunication {
     /// Reads a single incoming signal.
@@ -124,14 +123,40 @@ pub trait NodeCommunication {
     fn get_nodes(&mut self) -> Vec<String>;
 }
 
-pub trait DistrError {
-    fn would_block(&self) -> bool;
-    fn timed_out(&self) -> bool;
-}
-
-pub enum EntityAssignMethod {
+/// Entity distribution policy.
+///
+/// # Distribution optimization at runtime
+///
+/// Some policies define a more rigid distribution, while others work by
+/// actively monitoring the situation across different nodes and transferring
+/// entities around as needed.
+#[derive(Serialize, Deserialize)]
+pub enum DistributionPolicy {
+    /// Set binding to a specific node
+    BindToNode(u32),
+    /// Set binding to a specific node based on parameters. For example
+    BindToNodeWithParams(String),
+    /// Naive random distribution using an RNG
     Random,
-    Complexity,
-    VarCount,
-    MemorySize,
+    /// Optimize for processing speed, using the most capable nodes first
+    MaxSpeed,
+    /// Optimize for lowest network traffic, grouping together entity pairs
+    /// that tend to cause most inter-machine chatter
+    LowTraffic,
+    /// Balanced approach, sane default policy for most cases
+    Balanced,
+    /// Focus on similar memory usage across nodes, relative to capability
+    SimilarMemoryUsage,
+    /// Focus on similar processor usage across nodes, relative to capability
+    SimilarProcessorUsage,
+    /// Spatial distribution based on entity world coordinates.
+    ///
+    /// # Details
+    ///
+    /// Based on a standard `position` component containing floats for
+    /// x, y and z coordinates.
+    ///
+    /// Three-dimensional bounding box is defined for each node. Entities are
+    /// distributed based on which box they are currently in.
+    Spatial,
 }

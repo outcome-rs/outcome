@@ -3,7 +3,7 @@ use std::iter::FromIterator;
 
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{Address, ShortString};
+use crate::{arraystring, Address, ShortString};
 
 use super::super::super::{
     error::Error, CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo,
@@ -68,7 +68,7 @@ impl Procedure {
 
         match positions_options {
             Some(positions) => Ok(Procedure {
-                name: ShortString::from_truncate(&args[0]),
+                name: arraystring::new_truncate(&args[0]),
                 start_line: line,
                 end_line: positions.0,
                 output_variable: None,

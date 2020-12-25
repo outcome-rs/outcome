@@ -3,7 +3,10 @@
 #![allow(unused)]
 
 #[macro_use]
+extern crate log;
+#[macro_use]
 extern crate serde;
+
 extern crate anyhow;
 extern crate clap;
 extern crate colored;

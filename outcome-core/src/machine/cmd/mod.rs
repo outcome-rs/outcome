@@ -31,21 +31,20 @@ use smallvec::SmallVec;
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
 
-use crate::{model, util, CompId, ShortString};
+use crate::{arraystring, model, util, CompId, ShortString};
 use crate::{EntityId, MedString, Sim, StringId, VarType};
 
 use crate::address::Address;
 use crate::entity::{Entity, EntityNonSer, Storage};
 // use crate::error::Error;
 use crate::model::SimModel;
-use crate::sim::interface::SimInterface;
 // use crate::Result;
 use crate::Var;
 
-pub mod assembly;
+pub mod register;
 // pub mod equal;
-pub mod blocks;
 pub mod eval;
+pub mod flow;
 pub mod get_set;
 
 #[cfg(feature = "machine_dynlib")]
@@ -53,7 +52,6 @@ pub mod lib;
 #[cfg(feature = "machine_lua")]
 pub mod lua;
 
-pub mod prefab;
 pub mod print;
 pub mod range;
 pub mod set;
@@ -66,7 +64,7 @@ use self::get_set::*;
 // use self::lua::*;
 
 use super::{CommandPrototype, CommandResultVec, LocationInfo};
-use crate::distr::central::SpawnPolicy;
+use crate::distr::DistributionPolicy;
 use crate::distr::{CentralCommunication, SimCentral};
 use crate::machine;
 use crate::machine::error::{Error, ErrorKind, Result};
@@ -88,7 +86,7 @@ pub enum CommandResult {
     /// Execute command that needs access to another entity
     ExecExt(ExtCommand),
     /// Execute command that needs access to central authority
-    ExecCentralExt(CentralExtCommand),
+    ExecCentralExt(CentralRemoteCommand),
     /// Signalize that an error has occurred during execution of command
     Err(machine::Error),
 }
@@ -145,22 +143,25 @@ pub enum Command {
     // central ext
     Invoke(Invoke),
     Spawn(Spawn),
-    Prefab(prefab::Prefab),
 
-    // model assembly commands
-    Register(assembly::Register),
-    Extend(assembly::Extend),
+    // register
+    RegisterEntityPrefab(register::RegisterEntityPrefab),
+    RegisterComponent(register::RegisterComponent),
+    RegisterTrigger(register::RegisterTrigger),
+    RegisterVar(register::RegisterVar),
+    Extend(register::Extend),
+
+    // register blocks
+    State(flow::state::State),
+    Component(flow::component::ComponentBlock),
 
     // flow control
-    If(blocks::ifelse::If),
-    Else(blocks::ifelse::Else),
-    End(blocks::end::End),
-    Call(blocks::call::Call),
-    ForIn(blocks::forin::ForIn),
-
-    Procedure(blocks::procedure::Procedure),
-    State(blocks::state::State),
-    Component(blocks::component::ComponentBlock),
+    If(flow::ifelse::If),
+    Else(flow::ifelse::Else),
+    End(flow::end::End),
+    Call(flow::call::Call),
+    ForIn(flow::forin::ForIn),
+    Procedure(flow::procedure::Procedure),
 
     Range(range::Range),
 }
@@ -181,41 +182,50 @@ impl Command {
             None => Vec::new(),
         };
         match cmd_name.as_str() {
-            "sim" => Ok(sim::SimControl::new(args)?),
-            "set" => Ok(set::Set::new(args, location)?),
-            "extend" => Ok(Command::Extend(assembly::Extend::new(args, location)?)),
-            "register" => Ok(Command::Register(assembly::Register::new(args, location)?)),
             "print" => Ok(Command::PrintFmt(print::PrintFmt::new(args)?)),
+            "set" => Ok(set::Set::new(args, location)?),
             "spawn" => Ok(Command::Spawn(Spawn::new(args, location)?)),
-            "prefab" => Ok(prefab::Prefab::new(args, location)?),
-
             "invoke" => Ok(Command::Invoke(Invoke::new(args)?)),
+            "sim" => Ok(sim::SimControl::new(args)?),
 
-            "range" => Ok(Command::Range(range::Range::new(args)?)),
+            "extend" => Ok(Command::Extend(register::Extend::new(args, location)?)),
+
+            // register one-liners
+            "entity" | "prefab" => Ok(Command::RegisterEntityPrefab(
+                register::RegisterEntityPrefab::new(args, location)?,
+            )),
+            "trigger" | "triggered_by" => Ok(Command::RegisterTrigger(
+                register::RegisterTrigger::new(args, location)?,
+            )),
+            "var" => Ok(Command::RegisterVar(register::RegisterVar::new(
+                args, location,
+            )?)),
+
+            // register blocks
+            "component" | "comp" => Ok(flow::component::ComponentBlock::new(
+                args, location, &commands,
+            )?),
+            "state" => Ok(flow::state::State::new(args, location, &commands)?),
 
             // flow control
-            "if" => Ok(Command::If(blocks::ifelse::If::new(
+            "if" => Ok(Command::If(flow::ifelse::If::new(
                 args, location, &commands,
             )?)),
-            "else" => Ok(Command::Else(blocks::ifelse::Else::new(args)?)),
-            "proc" | "procedure" => Ok(Command::Procedure(blocks::procedure::Procedure::new(
+            "else" => Ok(Command::Else(flow::ifelse::Else::new(args)?)),
+            "proc" | "procedure" => Ok(Command::Procedure(flow::procedure::Procedure::new(
                 args, location, &commands,
             )?)),
-            "call" => Ok(Command::Call(blocks::call::Call::new(
+            "call" => Ok(Command::Call(flow::call::Call::new(
                 args, location, &commands,
             )?)),
-            "end" => Ok(Command::End(blocks::end::End::new(args)?)),
-            "for" => Ok(Command::ForIn(blocks::forin::ForIn::new(
+            "end" => Ok(Command::End(flow::end::End::new(args)?)),
+            "for" => Ok(Command::ForIn(flow::forin::ForIn::new(
                 args, location, commands,
             )?)),
 
-            "component" => Ok(blocks::component::ComponentBlock::new(
-                args, location, &commands,
-            )?),
-            "state" => Ok(blocks::state::State::new(args, location, &commands)?),
+            "range" => Ok(Command::Range(range::Range::new(args)?)),
 
             "eval" => Ok(eval::Eval::new(args)?),
-            // "evalreg" => Ok(eval::EvalReg::new(args, location, commands)?),
             _ => Err(Error::new(
                 *location,
                 ErrorKind::UnknownCommand(cmd_name.to_string()),
@@ -226,11 +236,11 @@ impl Command {
     /// single entity).
     pub fn execute(
         &self,
-        mut ent_storage: &mut Storage,
-        mut ent_insta: &mut EntityNonSer,
-        mut comp_state: &mut StringId,
-        mut call_stack: &mut super::CallStackVec,
-        mut registry: &mut super::Registry,
+        ent_storage: &mut Storage,
+        ent_insta: &mut EntityNonSer,
+        comp_state: &mut StringId,
+        call_stack: &mut super::CallStackVec,
+        registry: &mut super::Registry,
         comp_uid: &CompId,
         ent_name: &EntityId,
         sim_model: &SimModel,
@@ -269,9 +279,14 @@ impl Command {
             //Command::Jump(cmd) => out_res.push(cmd.execute_loc()),
 
             //Command::Get(cmd) => out_res.push(cmd.execute_loc()),
+            Command::RegisterEntityPrefab(cmd) => out_res.extend(cmd.execute_loc()),
+
+            Command::RegisterComponent(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
+            Command::RegisterVar(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
+            Command::RegisterTrigger(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
+
             Command::Invoke(cmd) => out_res.push(cmd.execute_loc()),
             Command::Spawn(cmd) => out_res.push(cmd.execute_loc()),
-            Command::Prefab(cmd) => out_res.extend(cmd.execute_loc()),
             Command::Call(cmd) => {
                 out_res.push(cmd.execute_loc(call_stack, line, sim_model, comp_uid, location))
             }
@@ -294,8 +309,7 @@ impl Command {
             }
 
             Command::Extend(cmd) => out_res.push(cmd.execute_loc()),
-            Command::Register(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
-
+            // Command::Register(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
             Command::Range(cmd) => out_res.push(cmd.execute_loc(ent_storage, comp_uid, location)),
 
             _ => out_res.push(CommandResult::Continue),
@@ -311,47 +325,55 @@ impl Command {
     }
 }
 
-/// External, meaning not entity-local, command meant for execution
-/// within central authority scope.
+/// External (non-entity-local) command meant for execution within central
+/// authority scope.
 ///
-/// ### Distinction between external and central-external
+/// ### Distinction between remote and central-remote
 ///
 /// Distinction is made because of the potentially distributed nature of the
-/// simulation. In such setting, there are certain things, like the simulation
-/// model, that have to be managed from a central point.
-///
-/// Central authority requirement is necessary for commands that make changes
-/// to the model or the event queue, or those that spawn entities, or attach
-/// components to entities other than the caller's.
+/// simulation. In a distributed setting, there are certain things, like the
+/// simulation model, that have to be managed from a central point.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum CentralExtCommand {
+pub enum CentralRemoteCommand {
     Sim(sim::SimControl),
-    Register(assembly::Register),
-    Extend(assembly::Extend),
+    // Register(register::Register),
+    RegisterComponent(register::RegisterComponent),
+    RegisterTrigger(register::RegisterTrigger),
+    RegisterVar(register::RegisterVar),
+    RegisterEntityPrefab(register::RegisterEntityPrefab),
+
+    Extend(register::Extend),
     Invoke(Invoke),
     Spawn(Spawn),
-    Prefab(prefab::Prefab),
 
-    State(blocks::state::State),
-    Component(blocks::component::ComponentBlock),
+    State(flow::state::State),
+    Component(flow::component::ComponentBlock),
 }
-impl CentralExtCommand {
+impl CentralRemoteCommand {
+    /// Executes the command locally, using a reference to the monolithic `Sim`
+    /// struct.
     pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityId, comp_uid: &CompId) -> Result<()> {
         match self {
-            //            ExtCommand::Get(cmd) => return cmd.execute_ext(sim, ent_uid),
-            //            ExtCommand::Set(cmd) => return cmd.execute_ext(sim, ent_puid, comp_puid),
-            //            ExtCommand::Eval(cmd) => return cmd.execute_ext(sim),
-            //            ExtCommand::Equal(cmd) => return cmd.execute_ext(sim),
-            CentralExtCommand::Sim(cmd) => return cmd.execute_ext(sim),
-            //TODO
-            CentralExtCommand::Extend(cmd) => return cmd.execute_ext(sim, ent_uid),
-            CentralExtCommand::Register(cmd) => return cmd.execute_ext(sim, ent_uid, comp_uid),
-            CentralExtCommand::Invoke(cmd) => return cmd.execute_ext(sim),
-            CentralExtCommand::Spawn(cmd) => return cmd.execute_ext(sim),
-            CentralExtCommand::Prefab(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::Sim(cmd) => return cmd.execute_ext(sim),
 
-            CentralExtCommand::State(cmd) => return cmd.execute_ext(sim),
-            CentralExtCommand::Component(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::RegisterComponent(cmd) => {
+                return cmd.execute_ext(sim, ent_uid, comp_uid)
+            }
+            CentralRemoteCommand::RegisterEntityPrefab(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::RegisterTrigger(cmd) => {
+                // unimplemented!()
+                return cmd.execute_ext(sim, ent_uid, comp_uid);
+            }
+            CentralRemoteCommand::RegisterVar(cmd) => {
+                return cmd.execute_ext(sim, ent_uid, comp_uid)
+            }
+
+            CentralRemoteCommand::Extend(cmd) => return cmd.execute_ext(sim, ent_uid),
+            CentralRemoteCommand::Invoke(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::Spawn(cmd) => return cmd.execute_ext(sim),
+            // CentralRemoteCommand::Prefab(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::State(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::Component(cmd) => return cmd.execute_ext(sim),
 
             _ => return Ok(()),
         }
@@ -364,9 +386,10 @@ impl CentralExtCommand {
         comp_name: &CompId,
     ) -> Result<()> {
         match self {
-            CentralExtCommand::Spawn(cmd) => cmd.execute_ext_distr(central).unwrap(),
-            CentralExtCommand::Register(cmd) => {
-                cmd.execute_ext_distr(central, ent_name, comp_name).unwrap()
+            CentralRemoteCommand::Spawn(cmd) => cmd.execute_ext_distr(central).unwrap(),
+            CentralRemoteCommand::RegisterEntityPrefab(cmd) => {
+                unimplemented!()
+                // cmd.execute_ext_distr(central, ent_name, comp_name).unwrap()
             }
             _ => (),
         }
@@ -505,7 +528,7 @@ pub struct Goto {
 impl Goto {
     fn from_str(args_str: &str) -> Result<Self> {
         Ok(Goto {
-            target_state: StringId::from_truncate(args_str),
+            target_state: arraystring::new_truncate(args_str),
         })
     }
     pub fn execute_loc(&self) -> CommandResult {
@@ -550,7 +573,7 @@ impl Invoke {
 }
 impl Invoke {
     pub fn execute_loc(&self) -> CommandResult {
-        return CommandResult::ExecCentralExt(CentralExtCommand::Invoke(self.clone()));
+        return CommandResult::ExecCentralExt(CentralRemoteCommand::Invoke(self.clone()));
     }
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
         for event in &self.events {
@@ -577,13 +600,13 @@ impl Spawn {
             })
         } else if args.len() == 1 {
             Ok(Self {
-                prefab: Some(StringId::from_truncate(&args[0])),
+                prefab: Some(arraystring::new_truncate(&args[0])),
                 spawn_id: None,
             })
         } else if args.len() == 2 {
             Ok(Self {
-                prefab: Some(StringId::from_truncate(&args[0])),
-                spawn_id: Some(StringId::from_truncate(&args[1])),
+                prefab: Some(arraystring::new_truncate(&args[0])),
+                spawn_id: Some(arraystring::new_truncate(&args[1])),
             })
         } else {
             return Err(Error::new(
@@ -613,7 +636,7 @@ impl Spawn {
     //     });
     // }
     pub fn execute_loc(&self) -> CommandResult {
-        CommandResult::ExecCentralExt(CentralExtCommand::Spawn(*self))
+        CommandResult::ExecCentralExt(CentralRemoteCommand::Spawn(*self))
     }
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
         // let model = &sim.model;
@@ -635,7 +658,7 @@ impl Spawn {
             .spawn_entity(
                 self.prefab.clone(),
                 self.spawn_id.clone(),
-                SpawnPolicy::Random,
+                DistributionPolicy::Random,
             )
             .unwrap();
         Ok(())

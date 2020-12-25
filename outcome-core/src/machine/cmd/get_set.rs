@@ -77,13 +77,11 @@ impl Get {
                 return Ok(());
             }
         };
-        let ext_var: Var = match ext_ent.storage.get_var_from_addr(&self.source, None) {
-            Some(v) => v,
-            None => {
-                debug!("failed");
-                return Ok(());
-            }
-        };
+        let ext_var = ext_ent
+            .storage
+            .get_var_from_addr(&self.source, None)
+            .unwrap()
+            .clone();
         let loc_ent = match sim.get_entity_str_mut(&ent_uid) {
             Some(e) => e,
             None => {
@@ -185,13 +183,10 @@ impl ExtSet {
                 return Ok(());
             }
         };
-        let loc_var: Var = match loc_ent.storage.get_var_from_addr(&self.source, None) {
-            Some(v) => v,
-            None => {
-                debug!("failed");
-                return Ok(());
-            }
-        };
+        let loc_var = loc_ent
+            .storage
+            .get_var_from_addr(&self.source, None)
+            .unwrap();
         let ext_ent = match sim.get_entity_str_mut(&(self.target.entity)) {
             Some(e) => e,
             None => {

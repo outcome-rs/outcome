@@ -17,12 +17,11 @@ use super::{Instruction, InstructionKind};
 
 use crate::entity::Entity;
 use crate::machine;
-use crate::machine::cmd::{CentralExtCommand, Command, CommandResult, ExtCommand};
+use crate::machine::cmd::{CentralRemoteCommand, Command, CommandResult, ExtCommand};
 use crate::machine::{cmd, exec, CommandPrototype, ErrorKind, LocationInfo};
 use crate::model::{
     ComponentModel, EntityPrefabModel, EventModel, LogicModel, Scenario, SimModel, VarModel,
 };
-use crate::sim::interface::SimInterface;
 use crate::sim::Sim;
 use crate::var::{Var, VarType};
 use crate::ShortString;
@@ -34,11 +33,11 @@ pub const FILE_EXTENSION: &'static str = ".os";
 
 impl SimModel {}
 
-impl cmd::assembly::Extend {
+impl cmd::register::Extend {
     /// Extends the given component's model by whatever is found in the target
     /// source files.
     ///
-    /// For each given outcomescript source file, this command will read it,
+    /// For each given script source file, this command will read it,
     /// apply preprocessor, and then execute found commands.
     pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> machine::Result<()> {
         //println!("execute ext extend");

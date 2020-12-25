@@ -9,8 +9,12 @@
 
 #[cfg(feature = "transport_nng")]
 pub(crate) mod nng;
+#[cfg(feature = "transport_nng")]
+pub use self::nng::*;
 #[cfg(feature = "transport_zmq")]
 pub(crate) mod zmq;
+#[cfg(feature = "transport_zmq")]
+pub use self::zmq::*;
 
 use crate::msg::Message;
 use crate::server::ClientId;

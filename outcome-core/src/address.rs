@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::entity::{Storage, StorageIndex};
 use crate::error::{Error, Result};
-use crate::{CompId, StringId};
+use crate::{arraystring, CompId, StringId};
 use crate::{Sim, VarType};
 
 pub const SEPARATOR_SYMBOL: &'static str = ":";
@@ -26,7 +26,7 @@ impl LocalAddress {
             Ok(LocalAddress {
                 comp: None,
                 var_type: VarType::from_str(split[0]).unwrap(),
-                var_id: StringId::from_truncate(split[1]),
+                var_id: arraystring::new_truncate(split[1]),
             })
         } else {
             Err(Error::Other(input.to_string()))
@@ -67,11 +67,11 @@ impl Address {
         }
 
         Ok(Address {
-            entity: StringId::from(split[0])?,
-            component: StringId::from(split[1])?,
+            entity: arraystring::new_truncate(split[0]),
+            component: arraystring::new_truncate(split[1]),
             var_type: VarType::from_str(split[2])
                 .ok_or(Error::Other("Failed parsing vartype".to_string()))?,
-            var_id: StringId::from(split[3])?,
+            var_id: arraystring::new_truncate(split[3]),
         })
     }
     pub fn to_string(&self) -> String {
@@ -108,14 +108,14 @@ impl PartialAddress {
         if split.len() == 2 {
             Ok(PartialAddress::ComponentLocal {
                 var_type: VarType::from_str(split[0]).unwrap(),
-                var_id: StringId::from_truncate(split[1]),
+                var_id: arraystring::new_truncate(split[1]),
             })
         } else {
             //if split.len() == 3 {
             Ok(PartialAddress::EntityLocal {
-                component: StringId::from_truncate(split[0]),
+                component: arraystring::new_truncate(split[0]),
                 var_type: VarType::from_str(split[1]).unwrap(),
-                var_id: StringId::from_truncate(split[2]),
+                var_id: arraystring::new_truncate(split[2]),
             })
         }
     }

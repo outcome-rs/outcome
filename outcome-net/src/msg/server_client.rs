@@ -59,7 +59,7 @@ pub struct StatusResponse {
     pub description: String,
     pub address: String,
     pub connected_clients: Vec<String>,
-    pub endgame_version: String,
+    pub engine_version: String,
     pub uptime: usize,
     pub current_tick: usize,
 
@@ -312,6 +312,59 @@ pub(crate) const TURN_ADVANCE_RESPONSE: &str = "TurnAdvanceResponse";
 impl Payload for TurnAdvanceResponse {
     fn kind_str(&self) -> &str {
         TURN_ADVANCE_RESPONSE
+    }
+}
+
+/// Requests the server to spawn a number of entities.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SpawnEntitiesRequest {
+    /// List of entity prefabs to be spawned as new entities
+    pub entity_prefabs: Vec<String>,
+}
+pub(crate) const SPAWN_ENTITIES_REQUEST: &str = "SpawnEntitiesRequest";
+impl Payload for SpawnEntitiesRequest {
+    fn kind_str(&self) -> &str {
+        SPAWN_ENTITIES_REQUEST
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SpawnEntitiesResponse {
+    pub error: String,
+}
+pub(crate) const SPAWN_ENTITIES_RESPONSE: &str = "SpawnEntitiesResponse";
+impl Payload for SpawnEntitiesResponse {
+    fn kind_str(&self) -> &str {
+        SPAWN_ENTITIES_RESPONSE
+    }
+}
+
+/// Requests the server to export a snapshot.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportSnapshotRequest {
+    /// Name for the snapshot file
+    pub name: String,
+    /// Whether to save created snapshot to disk locally on the server.
+    pub save_to_disk: bool,
+    /// Whether the snapshot should be send back.
+    pub send_back: bool,
+}
+pub(crate) const EXPORT_SNAPSHOT_REQUEST: &str = "ExportSnapshotRequest";
+impl Payload for ExportSnapshotRequest {
+    fn kind_str(&self) -> &str {
+        EXPORT_SNAPSHOT_REQUEST
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ExportSnapshotResponse {
+    pub error: String,
+    pub snapshot: Vec<u8>,
+}
+pub(crate) const EXPORT_SNAPSHOT_RESPONSE: &str = "ExportSnapshotResponse";
+impl Payload for ExportSnapshotResponse {
+    fn kind_str(&self) -> &str {
+        EXPORT_SNAPSHOT_RESPONSE
     }
 }
 

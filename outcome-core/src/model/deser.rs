@@ -56,6 +56,8 @@ pub struct ScenarioManifest {
     pub mods: LinkedHashMap<String, toml::Value>,
     #[serde(default)]
     pub settings: HashMap<String, toml::Value>,
+    #[serde(default)]
+    pub services: HashMap<String, toml::Value>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ScenarioManifestScenario {

@@ -11,11 +11,10 @@
 //! # Networking
 //!
 //! By itself, this library does not provide any networking capability. Only
-//! the most basic structures for implementing distributed storage and
-//! processing are provided. These can be used to implement distributed
+//! the most basic structures and traits for implementing distributed storage
+//! and processing are provided. These can be used to implement distributed
 //! simulation capability using different configurations, transports and
-//! topologies. For an example networking implementation using `outcome-core`
-//! see `outcome-net`.
+//! topologies. For an example networking implementation see `outcome-net`.
 //!
 //! # Using the library
 //!
@@ -74,6 +73,7 @@ extern crate log;
 extern crate fasteval;
 
 pub mod address;
+pub mod arraystring;
 pub mod distr;
 pub mod entity;
 pub mod error;
@@ -82,7 +82,6 @@ pub mod query;
 pub mod sim;
 pub mod var;
 
-mod arraystring;
 mod util;
 
 // features
@@ -189,17 +188,17 @@ pub type Int = i64;
 /// Default length is 23 characters, but it can be restricted to just
 /// 10 characters using the `short_stringid` feature.
 #[cfg(not(feature = "short_stringid"))]
-pub type StringId = arraystring::ArrayString<[u8; 23]>;
+pub type StringId = arrayvec::ArrayString<[u8; 23]>;
 /// Fixed-size string used internally for indexing objects.
 #[cfg(feature = "short_stringid")]
-pub type StringId = arraystring::ArrayString<[u8; 10]>;
+pub type StringId = arrayvec::ArrayString<[u8; 10]>;
 
 /// Short fixed-size string type.
-pub type ShortString = arraystring::ArrayString<[u8; 23]>;
+pub type ShortString = arrayvec::ArrayString<[u8; 23]>;
 /// Medium-length fixed-size string type.
-type MedString = arraystring::ArrayString<[u8; 40]>;
+type MedString = arrayvec::ArrayString<[u8; 40]>;
 /// Long fixed-size string type.
-type LongString = arraystring::ArrayString<[u8; 100]>;
+type LongString = arrayvec::ArrayString<[u8; 100]>;
 
 /// Entity identifier type.
 pub type EntityId = StringId;

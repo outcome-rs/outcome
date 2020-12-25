@@ -1,9 +1,5 @@
 //! Definitions for model contents, as well as logic for turning
 //! deserialized data into model objects.
-//!
-//! `SimModel` object contains a collection of all the model objects as found
-//! in user files. It can be used to spawn a simulation instance. Spawning an
-//! object at runtime requires a reference to a model.
 
 #![allow(unused)]
 
@@ -25,7 +21,7 @@ use std::str::FromStr;
 
 use fnv::FnvHashMap;
 
-use crate::Result;
+use crate::{arraystring, Result};
 use crate::{util, ShortString};
 use crate::{MedString, StringId};
 use crate::{Var, VarType};
@@ -47,8 +43,29 @@ use crate::machine::script::{parser, preprocessor, InstructionKind};
 use self::semver::{Version, VersionReq};
 use self::toml::Value;
 
-/// Simulation model is a basis for creating simulation instance. It contains
-/// all the relevant elements found in the user-files.
+/// Contains a collection of all the model data for the simulation.
+///
+/// # Instantiating simulation from `SimModel`
+///
+/// Creating a simulation instance requires passing an existing `SimModel`.
+///
+/// # Dynamic model
+///
+/// As `SimModel` is stored within, and used for runtime processing of, the
+/// simulation instance, it can be mutated at runtime. This allows for dynamic
+/// changing of the underlying simulation rules at any point during simulation
+/// processing.
+///
+/// # Role of the model in a distributed setting
+///
+/// In a situation where there are multiple nodes, each holding and processing
+/// locally stored entities, the model serves as the collection of common rules
+/// shared by the whole system. As such it needs to always stay synchronized
+/// across the whole system. This is especially true since the rules may change
+/// at runtime.
+///
+/// In a distributed setting, any changes to the model are handled centrally
+/// and propagated to all the nodes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SimModel {
     pub scenario: Scenario,
@@ -78,24 +95,24 @@ impl SimModel {
         // add hardcoded content
         #[cfg(feature = "machine")]
         model.events.push(crate::model::EventModel {
-            id: ShortString::from_unchecked(crate::DEFAULT_TRIGGER_EVENT),
+            id: ShortString::from(crate::DEFAULT_TRIGGER_EVENT).unwrap(),
         });
 
         #[cfg(feature = "machine_script")]
         {
             let mut mod_init_prefab = EntityPrefabModel {
-                name: StringId::from_unchecked("_mod_init"),
+                name: StringId::from("_mod_init").unwrap(),
                 ..EntityPrefabModel::default()
             };
 
             model.events.push(EventModel {
-                id: ShortString::from_unchecked("_scr_init"),
+                id: ShortString::from("_scr_init").unwrap(),
             });
 
             let scr_init_mod_template = ComponentModel {
-                name: StringId::from_unchecked("_init_mod_"),
-                start_state: StringId::from_unchecked("main"),
-                triggers: vec![StringId::from_unchecked("_scr_init")],
+                name: StringId::from("_init_mod_").unwrap(),
+                start_state: StringId::from("main").unwrap(),
+                triggers: vec![StringId::from("_scr_init").unwrap()],
                 ..ComponentModel::default()
             };
 
@@ -158,7 +175,7 @@ impl SimModel {
 
                 let mut comp_model = scr_init_mod_template.clone();
                 comp_model.name =
-                    StringId::from_truncate(&format!("init_{}", module.manifest.name));
+                    arraystring::new_truncate(&format!("init_{}", module.manifest.name));
 
                 for (n, cmd_prototype) in cmd_prototypes.iter().enumerate() {
                     cmd_locations[n].comp_name = Some(comp_model.name.into());
@@ -187,7 +204,7 @@ impl SimModel {
                 comp_model
                     .logic
                     .states
-                    .insert(StringId::from_unchecked("main"), (0, commands.len()));
+                    .insert(StringId::from("main").unwrap(), (0, commands.len()));
                 mod_init_prefab.components.push(comp_model.name);
                 model.components.push(comp_model);
             }
@@ -219,7 +236,7 @@ impl SimModel {
     }
 }
 
-/// Scenario manifest model. Slightly different from the raw static deser form.
+/// Scenario manifest model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScenarioManifest {
     // required
@@ -231,13 +248,14 @@ pub struct ScenarioManifest {
 
     // optional
     pub mods: Vec<ScenarioModuleDep>,
-    pub settings: HashMap<String, Value>,
+    pub settings: HashMap<String, String>,
     pub title: Option<String>,
     pub desc: Option<String>,
     pub desc_long: Option<String>,
     pub author: Option<String>,
     pub website: Option<String>,
 }
+
 impl ScenarioManifest {
     /// Creates new scenario manifest object from path reference to scenario
     /// directory.
@@ -245,6 +263,7 @@ impl ScenarioManifest {
         let manifest_path = path.join(SCENARIO_MANIFEST_FILE);
         let deser_manifest: deser::ScenarioManifest =
             util::static_deser_obj_from_path(manifest_path)?;
+        // println!("{:?}", deser_manifest);
         let mut mods = Vec::new();
         for module in deser_manifest.mods {
             let (name, value) = module;
@@ -259,7 +278,11 @@ impl ScenarioManifest {
             version: deser_manifest.scenario.version,
             engine: deser_manifest.scenario.engine,
             // optional
-            settings: deser_manifest.settings,
+            settings: deser_manifest
+                .settings
+                .iter()
+                .map(|(s, v)| (s.to_string(), v.to_string()))
+                .collect(),
             title: match deser_manifest.scenario.title.as_str() {
                 "" => None,
                 s => Some(s.to_owned()),
@@ -284,6 +307,7 @@ impl ScenarioManifest {
         })
     }
 }
+
 /// Scenario module dependency.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioModuleDep {
@@ -291,9 +315,10 @@ pub struct ScenarioModuleDep {
     pub version_req: String,
     pub git_address: Option<String>,
 }
+
 impl ScenarioModuleDep {
-    /// Create scenario module dependency object from a
-    /// serde value representation.
+    /// Create scenario module dependency object from a serde value
+    /// representation.
     pub fn from_toml_value(scenario_name: &String, value: &Value) -> Option<ScenarioModuleDep> {
         // field names
         let version_field = "version";
@@ -343,14 +368,17 @@ impl ScenarioModuleDep {
     }
 }
 
-/// Scenario model, consisting of the manifest and list of modules.
+/// Scenario model consisting of the manifest and list of modules.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Scenario {
     /// Full path to scenario root directory
     pub path: PathBuf,
+    /// Scenario manifest
     pub manifest: ScenarioManifest,
+    /// List of modules
     pub modules: Vec<Module>,
 }
+
 impl Scenario {
     /// Create a scenario model from a path reference to scenario directory.
     pub fn from_dir_at(path: PathBuf) -> Result<Scenario> {
@@ -538,19 +566,31 @@ impl Scenario {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleManifest {
     // required
+    /// Module name
     pub name: String,
+    /// Module version
     pub version: String,
+    /// Required engine version
     pub engine_version_req: String,
+    /// Required engine features
     pub engine_features: Vec<String>,
+    /// List of other module dependencies for this module
     pub dependencies: HashMap<String, ModuleDep>,
     pub reqs: Vec<String>,
+
     // optional
+    /// Free-form module name
     pub title: Option<String>,
+    /// Module description
     pub desc: Option<String>,
+    /// Longer module description
     pub desc_long: Option<String>,
+    /// Author information
     pub author: Option<String>,
+    /// Website information
     pub website: Option<String>,
 }
+
 impl ModuleManifest {
     /// Create module manifest from path to module directory
     pub fn from_dir_at(path: PathBuf) -> Result<ModuleManifest> {
@@ -631,6 +671,7 @@ pub struct ModuleDep {
 pub struct Module {
     pub manifest: ModuleManifest,
 }
+
 impl Module {
     pub fn from_dir_at(path: PathBuf) -> Result<Module> {
         let module_manifest = ModuleManifest::from_dir_at(path.clone())?;
@@ -647,14 +688,13 @@ pub struct EventModel {
     pub id: ShortString,
 }
 
-/// Entity prefab.
+/// Entity prefab model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntityPrefabModel {
     pub name: StringId,
     pub components: Vec<StringId>,
 }
 
-// /// Component prefab.
 // cfg_if! {
 //     if #[cfg(feature = "machine")] {
 //         #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -679,6 +719,7 @@ pub struct EntityPrefabModel {
 //     }
 // }
 //
+/// Component model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComponentModel {
     pub name: StringId,
@@ -694,6 +735,7 @@ pub struct ComponentModel {
     pub lib_files: Vec<PathBuf>,
 }
 
+/// Component-bound state machine logic model.
 #[cfg(feature = "machine")]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogicModel {
@@ -706,8 +748,9 @@ pub struct LogicModel {
     /// Mapping of non-state procedure names to their start and end lines
     pub procedures: FnvHashMap<ShortString, (usize, usize)>,
     /// Location info mapped for each command on the list by vec index
-    pub cmd_location_map: FnvHashMap<usize, crate::machine::LocationInfo>,
+    pub cmd_location_map: Vec<crate::machine::LocationInfo>,
 }
+
 #[cfg(feature = "machine")]
 impl LogicModel {
     pub fn empty() -> LogicModel {
@@ -715,9 +758,16 @@ impl LogicModel {
             commands: Vec::new(),
             states: FnvHashMap::default(),
             procedures: FnvHashMap::default(),
-            cmd_location_map: FnvHashMap::default(),
+            cmd_location_map: Vec::new(),
             pre_commands: FnvHashMap::default(),
         }
+    }
+
+    pub fn get_subset(&self, start_line: usize, last_line: usize) -> LogicModel {
+        let mut new_logic = LogicModel::empty();
+        new_logic.commands = self.commands[start_line - 1..last_line - 1].to_vec();
+        new_logic.cmd_location_map = self.cmd_location_map[start_line - 1..last_line - 1].to_vec();
+        new_logic
     }
 }
 
@@ -751,16 +801,15 @@ pub enum DataFileEntry {
     CsvGrid(String),
 }
 
-/// Data image entry model. Used specifically for importing
-/// grid data.
+/// Data image entry model. Used specifically for importing grid data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DataImageEntry {
     BmpU8(String, String),
     BmpU8U8U8(String, String),
-    //    BmpCombineU8U8U8U8Int(String, String),
+    // BmpCombineU8U8U8U8Int(String, String),
     // TODO
     PngU8(String, String),
     PngU8U8U8(String, String),
     PngU8U8U8Concat(String, String),
-    //    PngCombineU8U8U8U8(String, String),
+    // PngCombineU8U8U8U8(String, String),
 }

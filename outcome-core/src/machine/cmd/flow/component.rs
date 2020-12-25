@@ -1,19 +1,20 @@
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, LogicModel, SimModel, VarModel};
-use crate::sim::interface::SimInterface;
-use crate::{CompId, EntityId, LongString, ShortString, Sim, StringId, VarType};
+use crate::{arraystring, CompId, EntityId, LongString, ShortString, Sim, StringId, VarType};
 use std::iter::FromIterator;
 
-use super::super::super::{
-    error::Error, CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo,
-    Registry,
+use crate::machine::cmd::register::{RegisterComponent, RegisterEntityPrefab};
+use crate::machine::cmd::{
+    CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo,
 };
-use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
-use crate::machine::cmd::assembly::{RegComponent, Register};
 use crate::machine::error::ErrorKind;
 use crate::machine::script::parse_script_at;
 use crate::machine::ComponentCallInfo;
+use crate::machine::{
+    error::Error, CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo,
+    Registry,
+};
 
 pub const COMMAND_NAMES: [&'static str; 1] = ["component"];
 
@@ -75,7 +76,7 @@ impl ComponentBlock {
 
         match positions_options {
             Some(positions) => Ok(Command::Component(ComponentBlock {
-                name: StringId::from_truncate(&args[0]),
+                name: arraystring::new_truncate(&args[0]),
                 source_comp: location.comp_name.unwrap(),
                 source_file: location.source.unwrap(),
                 start_line: line + 1,
@@ -113,12 +114,15 @@ impl ComponentBlock {
         // out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Component(
         //     new_self,
         // )));
-        out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Register(
-            Register::Component(RegComponent {
-                name: StringId::from_truncate(&new_self.name),
+        out_vec.push(CommandResult::ExecCentralExt(
+            CentralRemoteCommand::RegisterComponent(RegisterComponent {
+                name: arraystring::new_truncate(&new_self.name),
                 trigger_events: vec![],
+                source_comp: self.source_comp,
+                start_line: self.start_line,
+                end_line: self.end_line,
             }),
-        )));
+        ));
         out_vec.push(CommandResult::Continue);
         // out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
         out_vec
@@ -130,13 +134,14 @@ impl ComponentBlock {
 
         let component = ComponentModel {
             name: self.name.into(),
-            start_state: StringId::from_unchecked("start"),
+            start_state: arraystring::new_unchecked("start"),
             // triggers: vec![StringId::from_unchecked("step")],
-            logic: LogicModel {
-                commands: comp_model.logic.commands.clone(),
-                cmd_location_map: comp_model.logic.cmd_location_map.clone(),
-                ..LogicModel::default()
-            },
+            // logic: LogicModel {
+            //     commands: comp_model.logic.commands.clone(),
+            //     cmd_location_map: comp_model.logic.cmd_location_map.clone(),
+            //     ..LogicModel::default()
+            // },
+            logic: comp_model.logic.get_subset(self.start_line, self.end_line),
             ..ComponentModel::default()
         };
 

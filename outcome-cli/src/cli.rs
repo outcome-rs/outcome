@@ -18,7 +18,7 @@ use std::{env, thread};
 use anyhow::{Error, Result};
 use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
 use outcome::Sim;
-use outcome_net::{Coord, Server, SimConnection, Worker};
+use outcome_net::{Coord, Server, ServerSettings, SimConnection, Worker};
 
 use self::simplelog::{Level, LevelPadding};
 use crate::init;
@@ -428,6 +428,7 @@ fn start_run_scenario(matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
+    setup_log_verbosity(matches);
     let mut path = env::current_dir()?;
     match matches.value_of("path") {
         Some(p_str) => {
@@ -459,8 +460,10 @@ fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
         );
         // first try uncompressed, then compressed
         // TODO match errors properly
-        let sim =
-            Sim::from_snapshot_at(&path, false).unwrap_or(Sim::from_snapshot_at(&path, true)?);
+        // let sim =
+        //     Sim::from_snapshot_at(&path, true).unwrap_or(Sim::from_snapshot_at(&path, false)?);
+
+        let sim = Sim::from_snapshot_at(&path)?;
         // let sim = match Sim::from_snapshot_at(&path, false) {
         //     Ok(s) => s,
         //     Err(_) => match Sim::from_snapshot_at(&path, true) {
@@ -484,41 +487,9 @@ fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
 fn start_server(matches: &ArgMatches) -> Result<()> {
     setup_log_verbosity(matches);
 
-    let name = match matches.value_of("name") {
-        Some(n) => n,
-        None => "outcome_server",
-    };
-
-    let description = match matches.value_of("description") {
-        Some(d) => d,
-        None => "It's a server alright.",
-    };
-
-    let keep_alive_millis = match matches.value_of("keep-alive") {
-        Some(millis) => match millis.parse::<usize>() {
-            Ok(f) => f,
-            Err(e) => panic!("failed parsing keep-alive (millis) value: {}", e),
-        },
-        // 0 means keep alive forever
-        None => 0,
-    };
-
-    let scenario_path = match matches.value_of("scenario-path") {
-        Some(path) => path,
-        None => unimplemented!(),
-    };
-
     let server_address = match matches.value_of("ip-address") {
         Some(addr) => addr,
         None => unimplemented!(),
-    };
-
-    let worker_addrs = match matches.value_of("workers") {
-        Some(workers_str) => workers_str
-            .split(",")
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>(),
-        None => Vec::new(),
     };
 
     let mut use_auth = matches.is_present("password");
@@ -536,88 +507,55 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         use_auth = true;
     }
 
-    let no_delay = matches.is_present("no-delay");
-
-    let use_compression = matches.is_present("use-compression");
-
-    let sim_instance = match matches.is_present("cluster") {
-        true => {
-            /// run a coordinator
-            let (mut coord, coord_net) = Coord::start(
-                scenario_path,
-                matches.value_of("cluster").unwrap(),
-                worker_addrs,
-            )?;
-            SimConnection::ClusterCoord(coord, coord_net)
-        }
-        false => {
-            /// run a local simulation instance
-            let sim = Sim::from_scenario_at_path(PathBuf::from(scenario_path))
-                .expect("failed creating new sim instance");
-            SimConnection::Local(sim)
-        }
-    };
-
-    let mut server = Server::new(sim_instance, server_address)?;
-
     println!("listening for new clients on: {}", server_address);
-    if let SimConnection::ClusterCoord(coord, net) = &server.sim {
-        println!(
-            "listening for new workers on: {}",
-            &net.lock().unwrap().address
-        );
+    if let Some(cluster_addr) = matches.value_of("cluster") {
+        println!("listening for new workers on: {}", &cluster_addr);
     }
 
-    let mut accept_timer = 0;
-    loop {
-        thread::sleep(Duration::from_millis(1));
-        server.uptime += 1;
-        accept_timer += 1;
-
-        // TODO keepalive mechanism
-        if keep_alive_millis != 0 && server.time_since_last_msg >= keep_alive_millis {
-            println!(
-                "no activity for {} milliseconds, terminating",
-                keep_alive_millis as u32
-            );
-            break;
-        }
-
-        if accept_timer >= 400 {
-            accept_timer = 0;
-            server.try_accept_client(true);
-        }
-
-        let client_ids: Vec<u32> = server.clients.keys().cloned().collect();
-        for client_id in client_ids {
-            server.try_handle_client(
-                &client_id,
-                // None,
-            );
-        }
-
-        // serv.lock().unwrap().prune_clients();
-        // match listener.accept() {
-        //     Ok((stream, addr)) => {
-        //         stream.set_read_timeout(Some(Duration::from_secs(4)));
-        //
-        //         // if server.lock().unwrap().no_delay {
-        //         //     stream.set_nodelay(true);
-        //         // }
-        //     }
-        //     Err(e) => {
-        //         if e.kind() == ErrorKind::WouldBlock {
-        //             //...
-        //         } else {
-        //             println!("couldn't get client: {:?}", e);
-        //         }
-        //     }
-        // }
+    ServerSettings {
+        name: match matches.value_of("name") {
+            Some(n) => n.to_string(),
+            None => "outcome_server".to_string(),
+        },
+        description: match matches.value_of("description") {
+            Some(d) => d.to_string(),
+            None => "It's a server alright.".to_string(),
+        },
+        address: server_address.to_string(),
+        project_path: match matches.value_of("scenario-path") {
+            Some(path) => path.to_string(),
+            None => unimplemented!(),
+        },
+        use_auth,
+        passwd_list,
+        use_compression: matches.is_present("use-compression"),
+        keepalive_millis: match matches.value_of("keep-alive") {
+            Some(millis) => match millis.parse::<usize>() {
+                Ok(f) => f,
+                Err(e) => panic!("failed parsing keep-alive (millis) value: {}", e),
+            },
+            // 0 means keep alive forever
+            None => 0,
+        },
+        cluster: matches.value_of("cluster").map(|s| s.to_string()),
+        workers: match matches.value_of("workers") {
+            Some(workers_str) => workers_str
+                .split(",")
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+            None => Vec::new(),
+        },
     }
+    .build()?
+    .start()?;
+
+    // Server::start(sim_instance, server_address)?;
+
     Ok(())
 }
 
 fn start_client(matches: &ArgMatches) -> Result<()> {
+    setup_log_verbosity(matches);
     let mut client = outcome_net::Client::new(
         matches.value_of("name").unwrap_or("cli-client"),
         matches.is_present("blocking"),

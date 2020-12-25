@@ -7,14 +7,14 @@ use crate::entity::{Entity, EntityNonSer, Storage};
 use crate::{Address, CompId, EntityId, StringId};
 use crate::{Sim, SimModel};
 
-use super::cmd::{CentralExtCommand, Command, CommandResult, ExtCommand};
+use super::cmd::{CentralRemoteCommand, Command, CommandResult, ExtCommand};
 use super::{error::Error, CallStackVec, ExecutionContext, LocationInfo, Registry};
 use crate::machine::{ErrorKind, Result};
 
 /// Executes a given set of central-external commands.
 //TODO missing component uid information
 pub(crate) fn execute_central_ext(
-    central_ext_cmds: &Vec<(ExecutionContext, CentralExtCommand)>,
+    central_ext_cmds: &Vec<(ExecutionContext, CentralRemoteCommand)>,
     sim: &mut Sim,
 ) -> Result<()> {
     for (exe_loc, central_ext_cmd) in central_ext_cmds {
@@ -66,10 +66,12 @@ pub(crate) fn execute_loc(
     comp_uid: &CompId,
     sim_model: &SimModel,
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
-    central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>>,
+    central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>>,
     start: Option<usize>,
     end: Option<usize>,
 ) -> Result<()> {
+    // debug!("execute_loc: cmds: {:?}", cmds);
+
     // initialize a new call stack
     let mut call_stack = CallStackVec::new();
     let mut registry = Registry::new();
@@ -92,7 +94,7 @@ pub(crate) fn execute_loc(
             .unwrap()
             .logic
             .cmd_location_map
-            .get(&cmd_n)
+            .get(cmd_n)
             .ok_or(Error::new(LocationInfo::empty(), ErrorKind::Panic))?;
         // let mut comp = entity.components.get_mut(&comp_uid).unwrap();
         let results = loc_cmd.execute(
@@ -184,7 +186,7 @@ pub fn execute(
             .expect("can't get component model")
             .logic
             .cmd_location_map
-            .get(&cmd_n)
+            .get(cmd_n)
             .unwrap_or(&empty_locinfo);
 
         let entity = match sim.entities.get_mut(sim.entities_idx.get(ent_uid).unwrap()) {

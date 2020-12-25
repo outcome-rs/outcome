@@ -28,10 +28,12 @@ use crate::msg::coord_worker::{
 use crate::msg::*;
 use crate::transport::{SocketInterface, WorkerDriverInterface};
 use crate::{error::Error, sig, Result};
-use crate::{tcp_endpoint, WorkerDriver};
+use crate::{util::tcp_endpoint, WorkerDriver};
 
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
-use outcome_core::{Address, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType};
+use outcome_core::{
+    arraystring, Address, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType,
+};
 
 //TODO remove this
 /// Default address for the worker
@@ -329,9 +331,9 @@ impl Worker {
             for ((comp_id, var_id), var) in entity.storage.get_all_var() {
                 collection.push((
                     Address {
-                        entity: StringId::from_truncate(&entity_uid.to_string()),
+                        entity: arraystring::new_truncate(&entity_uid.to_string()),
                         component: *comp_id,
-                        var_type: VarType::Str,
+                        var_type: var.get_type(),
                         var_id: *var_id,
                     },
                     var.clone(),

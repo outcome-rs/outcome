@@ -92,17 +92,17 @@ mod client;
 mod coord;
 mod error;
 mod server;
+mod util;
 mod worker;
 
-// #[cfg(feature = "transport_nng")]
-// pub(crate) use transport::nng::*;
+#[cfg(feature = "transport_nng")]
+pub(crate) use transport::nng::*;
 #[cfg(feature = "transport_zmq")]
 pub(crate) use transport::zmq::*;
 
 pub use client::Client;
 pub use coord::Coord;
-pub use server::Server;
-pub use server::SimConnection;
+pub use server::{Server, ServerSettings, SimConnection};
 pub use worker::Worker;
 
-pub(crate) use error::Result;
+pub use error::{Error, Result};

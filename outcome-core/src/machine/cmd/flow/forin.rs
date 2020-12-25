@@ -6,8 +6,8 @@ use crate::model::{ComponentModel, SimModel};
 use crate::var::Var;
 use crate::{CompId, MedString, StringId, VarType};
 
-use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
-use crate::machine::cmd::blocks::{end, ifelse};
+use super::super::{CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo};
+use crate::machine::cmd::flow::{end, ifelse};
 use crate::machine::error::{Error, ErrorKind};
 use crate::machine::{
     command_search, CallInfo, CallStackVec, ForInCallInfo, IfElseCallInfo, IfElseMetaData,

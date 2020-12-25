@@ -1,18 +1,22 @@
+//!
+
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{CompId, ShortString, StringId};
+use crate::{arraystring, CompId, ShortString, StringId};
 
-use super::super::super::{
-    error::Error, CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo,
-    Registry,
+use crate::machine::cmd::{CommandPrototype, CommandResult, LocationInfo};
+use crate::machine::error::{Error, ErrorKind};
+use crate::machine::{
+    CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo, Registry,
 };
-use super::super::{CommandPrototype, CommandResult, LocationInfo};
-use crate::machine::error::ErrorKind;
 
+/// Call a procedure by name.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Call {
+    /// Name of the procedure to call
     pub proc_name: ShortString,
 }
+
 impl Call {
     pub fn new(
         args: Vec<String>,
@@ -20,9 +24,10 @@ impl Call {
         commands: &Vec<CommandPrototype>,
     ) -> Result<Call, Error> {
         Ok(Call {
-            proc_name: ShortString::from_truncate(&args[0]),
+            proc_name: arraystring::new_truncate(&args[0]),
         })
     }
+
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
@@ -31,25 +36,31 @@ impl Call {
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {
+        // get the model of the currently executed component
         let comp_model = sim_model.get_component(comp_uid).unwrap();
+
+        // find the procedure by name and get it's start and end lines
         let (start_line, end_line) = match comp_model.logic.procedures.get(&self.proc_name) {
             Some(se) => se,
             None => {
                 return CommandResult::Err(Error::new(
                     *location,
                     ErrorKind::InvalidCommandBody(format!(
-                    "call error: procedure with that name doesn't exist in the current scope: {}",
+                    "call failed: procedure with the name `{}` doesn't exist in the current scope",
                     &self.proc_name
                 )),
                 ))
             }
         };
+
+        // push the call to the call stack
         call_stack.push(CallInfo::Procedure(ProcedureCallInfo {
             call_line: line,
             start_line: *start_line,
             end_line: *end_line,
-            // output_variable: target_proc.output_variable,
         }));
+
+        // continue execution at the beginning of the called procedure
         CommandResult::JumpToLine(start_line + 1)
     }
 }

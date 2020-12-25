@@ -18,7 +18,7 @@ use crate::address::{Address, LocalAddress};
 use crate::entity::{Entity, Storage};
 // use crate::error::Error;
 use crate::model::{ComponentModel, SimModel};
-use crate::{CompId, MedString, Sim, StringId, VarType};
+use crate::{arraystring, CompId, MedString, Sim, StringId, VarType};
 
 use super::super::{CommandPrototype, Error, LocationInfo, Registry, RegistryTarget, Result};
 use super::{Command, CommandResult};
@@ -63,8 +63,8 @@ impl Eval {
         let xval = *storage
             .get_var(
                 &(
-                    StringId::from_truncate("position"),
-                    StringId::from_truncate("x"),
+                    arraystring::new_truncate("position"),
+                    arraystring::new_truncate("x"),
                 ),
                 Some(VarType::Float),
             )

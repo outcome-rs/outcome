@@ -44,6 +44,11 @@ pub enum Error {
     #[error("model: no component named: {0}")]
     NoComponentModel(String),
 
+    #[error("no entity found: {0}")]
+    NoEntity(u32),
+    #[error("failed getting variable: {0}")]
+    FailedGettingVariable(String),
+
     #[error("other error: {0}")]
     Other(String),
     #[cfg(feature = "machine")]

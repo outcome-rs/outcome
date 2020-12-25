@@ -1,3 +1,5 @@
+//! Central authority definition.
+
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -5,16 +7,13 @@ use std::sync::{Arc, Mutex};
 
 use rand::prelude::SliceRandom;
 
-use crate::distr::{
-    CentralCommunication, DistrError, EntityAssignMethod, NodeCommunication, Signal,
-};
+use crate::distr::{CentralCommunication, DistributionPolicy, NodeCommunication, Signal};
 use crate::error::{Error, Result};
 use crate::model::Scenario;
-use crate::sim::interface::{SimInterface, SimInterfaceStorage};
-use crate::{Address, EntityId, EntityUid, ShortString, SimModel, StringId, Var};
+use crate::{arraystring, Address, EntityId, EntityUid, ShortString, SimModel, StringId, Var};
 
 #[cfg(feature = "machine")]
-use crate::machine::{cmd::CentralExtCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
+use crate::machine::{cmd::CentralRemoteCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
 
@@ -22,21 +21,26 @@ use crate::entity::Entity;
 use fnv::FnvHashMap;
 use id_pool::IdPool;
 
-/// Distributed simulation main authority. Does the necessary
-/// coordination work for distributed sim instances.
+/// Distributed simulation central authority. Does the necessary coordination
+/// work for distributed sim instances.
 ///
-/// It holds the main simulation model object, the current clock
-/// and the current event queue. It doesn't hold any entity data.
+/// It holds the main simulation model object, the current clock and the
+/// current event queue, as well as a list of entities.
+/// It doesn't hold any entity data.
 ///
 /// Some of its tasks include:
-/// - executing central commands that require global authority, for
-///   example those mutating the sim model
-/// - load balancing, division of entities between nodes
+/// - executing central commands that require global authority, for example
+/// related to mutating the sim model or invoking events
+/// - load balancing, distribution of entities between nodes
 #[derive(Serialize, Deserialize)]
 pub struct SimCentral {
     pub model: SimModel,
     pub clock: usize,
     pub event_queue: Vec<StringId>,
+
+    /// Default distribution policy for entities. Note that entities can be
+    /// assigned custom individual policies that override it.
+    pub distribution_policy: DistributionPolicy,
 
     pub node_entities: FnvHashMap<u32, Vec<EntityUid>>,
     // pub entity_node_routes: FnvHashMap<>
@@ -48,9 +52,13 @@ pub struct SimCentral {
 }
 
 impl SimCentral {
+    /// Gets the current value of the globally synchronized simulation clock.
     pub fn get_clock(&self) -> usize {
         self.clock
     }
+
+    /// Flushes the communication queue, lumping requests of the same type
+    /// together if possible.
     pub fn flush_queue<N: CentralCommunication>(&mut self, net: &mut N) -> Result<()> {
         if !self.ent_spawn_queue.is_empty() {
             for (k, v) in &self.ent_spawn_queue {
@@ -61,12 +69,15 @@ impl SimCentral {
 
         Ok(())
     }
+
+    /// Creates a new `SimCentral` using a model object.
     pub fn from_model(model: SimModel) -> Result<SimCentral> {
-        let mut event_queue = vec![StringId::from_truncate("step")];
+        let mut event_queue = vec![arraystring::new_truncate("step")];
         let mut sim_central = SimCentral {
             model: model.clone(),
             clock: 0,
             event_queue,
+            distribution_policy: DistributionPolicy::Random,
             node_entities: Default::default(),
             entities_idx: Default::default(),
             entity_idpool: IdPool::new(),
@@ -88,33 +99,32 @@ impl SimCentral {
 
         Ok(sim_central)
     }
+
     pub fn apply_model(&mut self) -> Result<()> {
         unimplemented!()
     }
+
     pub fn get_entity_names(&self) -> Vec<StringId> {
         unimplemented!()
     }
+
     pub fn add_entity(&mut self, model_name: &str, name: &str) -> Result<()> {
         unimplemented!()
     }
+
     #[cfg(feature = "machine_lua")]
     pub fn setup_lua_state_ent(&mut self) {
         unimplemented!()
     }
 }
-pub enum SpawnPolicy {
-    Direct(u32),
-    Random,
-    EqualQuantity,
-    EqualTotalSize,
-}
+
 impl SimCentral {
     /// Spawns a new entity.
     pub fn spawn_entity(
         &mut self,
         prefab: Option<StringId>,
         name: Option<StringId>,
-        policy: SpawnPolicy,
+        policy: DistributionPolicy,
     ) -> Result<()> {
         trace!("spawning entity from central");
 
@@ -131,7 +141,7 @@ impl SimCentral {
         }
 
         match policy {
-            SpawnPolicy::Direct(node_id) => {
+            DistributionPolicy::BindToNode(node_id) => {
                 if !self.ent_spawn_queue.contains_key(&node_id) {
                     self.ent_spawn_queue.insert(node_id, Vec::new());
                 }
@@ -141,7 +151,7 @@ impl SimCentral {
                     .push((new_uid, prefab, name));
             }
             // TODO
-            SpawnPolicy::Random => {
+            DistributionPolicy::Random => {
                 if self.node_entities.is_empty() {
                     return Err(Error::Other("no nodes available".to_string()));
                 }
@@ -171,12 +181,13 @@ impl SimCentral {
 
         Ok(())
     }
+
     pub fn assign_entities(
         &self,
         node_count: usize,
-        method: EntityAssignMethod,
+        policy: DistributionPolicy,
     ) -> Vec<Vec<EntityUid>> {
-        match method {
+        match policy {
             // EntityAssignMethod::Random => {
             //     let mut ent_models = self.model.entities.clone();
             //     let mut thread_rng = rand::thread_rng();
@@ -216,19 +227,33 @@ impl SimCentral {
     //// let ent =
     //}
 
+    /// Processes a single simulation step.
+    ///
+    /// Uses a reference to a network object that implements
+    /// `CentralCommunication` for all the network communication needs.
+    ///
+    /// # Protocol overview
+    ///
+    /// 1. All nodes are signalled to start processing next step.
+    /// 2. Nodes send back central remote commands that came up during their
+    /// local processing, if any.
+    /// 3. Incoming central remote commands are executed and results are sent
+    /// back. Any model changes are also sent to the nodes.
+    /// 4. Nodes signal their readiness to move on to the next step.
     pub fn step_network<N: CentralCommunication>(
         &mut self,
         network: &mut N,
         event_queue: Vec<StringId>,
     ) -> Result<()> {
         debug!("starting processing step");
-        // tell nodes to start processing step
+
+        // tell nodes to start processing next step
         network.sig_broadcast(Signal::StartProcessStep(event_queue))?;
         debug!("sent `StartProcessStep` signal to all nodes");
 
         debug!("starting reading incoming signals");
         #[cfg(feature = "machine")]
-        let mut cext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralExtCommand)>>> =
+        let mut cext_cmds: Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>> =
             Arc::new(Mutex::new(Vec::new()));
         loop {
             match network.sig_read() {
@@ -352,103 +377,4 @@ impl SimCentral {
 
     //self.clock += 1;
     //}
-}
-
-impl SimInterfaceStorage for SimCentral {
-    fn get_as_string(&self, addr: &Address) -> Option<String> {
-        unimplemented!()
-    }
-    fn get_as_int(&self, addr: &Address) -> Option<i32> {
-        unimplemented!()
-    }
-    fn get_all_as_strings(&self) -> HashMap<String, String, RandomState> {
-        unimplemented!()
-    }
-
-    fn get_var(&self, addr: &Address) -> Option<Var> {
-        unimplemented!()
-    }
-
-    fn get_str(&self, addr: &Address) -> Option<&String> {
-        unimplemented!()
-    }
-    fn get_str_mut(&mut self, addr: &Address) -> Option<&mut String> {
-        unimplemented!()
-    }
-    fn get_int(&self, addr: &Address) -> Option<&i32> {
-        unimplemented!()
-    }
-    fn get_int_mut(&mut self, addr: &Address) -> Option<&mut i32> {
-        unimplemented!()
-    }
-    fn get_float(&self, addr: &Address) -> Option<&f32> {
-        unimplemented!()
-    }
-    fn get_float_mut(&mut self, addr: &Address) -> Option<&mut f32> {
-        unimplemented!()
-    }
-    fn get_bool(&self, addr: &Address) -> Option<&bool> {
-        unimplemented!()
-    }
-    fn get_bool_mut(&mut self, addr: &Address) -> Option<&mut bool> {
-        unimplemented!()
-    }
-    fn get_str_list(&self, addr: &Address) -> Option<&Vec<String>> {
-        unimplemented!()
-    }
-    fn get_str_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<String>> {
-        unimplemented!()
-    }
-    fn get_int_list(&self, addr: &Address) -> Option<&Vec<i32>> {
-        unimplemented!()
-    }
-    fn get_int_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<i32>> {
-        unimplemented!()
-    }
-    fn get_float_list(&self, addr: &Address) -> Option<&Vec<f32>> {
-        unimplemented!()
-    }
-    fn get_float_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<f32>> {
-        unimplemented!()
-    }
-    fn get_bool_list(&self, addr: &Address) -> Option<&Vec<bool>> {
-        unimplemented!()
-    }
-    fn get_bool_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<bool>> {
-        unimplemented!()
-    }
-    fn get_str_grid(&self, addr: &Address) -> Option<&Vec<Vec<String>>> {
-        unimplemented!()
-    }
-    fn get_str_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<String>>> {
-        unimplemented!()
-    }
-    fn get_int_grid(&self, addr: &Address) -> Option<&Vec<Vec<i32>>> {
-        unimplemented!()
-    }
-    fn get_int_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<i32>>> {
-        unimplemented!()
-    }
-    fn get_float_grid(&self, addr: &Address) -> Option<&Vec<Vec<f32>>> {
-        unimplemented!()
-    }
-    fn get_float_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<f32>>> {
-        unimplemented!()
-    }
-    fn get_bool_grid(&self, addr: &Address) -> Option<&Vec<Vec<bool>>> {
-        unimplemented!()
-    }
-    fn get_bool_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<bool>>> {
-        unimplemented!()
-    }
-
-    fn set_from_string(&mut self, addr: &Address, val: &String) -> Result<()> {
-        unimplemented!()
-    }
-    fn set_from_string_list(&mut self, addr: &Address, vec: &Vec<String>) -> Result<()> {
-        unimplemented!()
-    }
-    fn set_from_string_grid(&mut self, addr: &Address, vec2d: &Vec<Vec<String>>) -> Result<()> {
-        unimplemented!()
-    }
 }

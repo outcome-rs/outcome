@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::{Error, Result};
 use crate::model::{ComponentModel, EntityPrefabModel};
-use crate::SimModel;
+use crate::{arraystring, SimModel};
 use crate::{model, CompId, StringId};
 
 use fnv::FnvHashMap;
@@ -109,12 +109,12 @@ pub struct Entity {
     // pub comp_queue: FnvHashMap<EventIndex, Vec<CompUid>>,
     /// Non-serializable aspects of an entity
     // TODO use cfg_if to include this only if related features are enabled
-    #[serde(skip)]
+    // #[serde(skip)]
     pub insta: EntityNonSer,
 }
 
 /// Contains all the non-serializable constructs stored on an entity instance.
-#[derive(Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct EntityNonSer {
     #[cfg(feature = "machine_lua")]
     pub lua_state: Option<Arc<Mutex<Lua>>>,
@@ -125,6 +125,7 @@ pub struct EntityNonSer {
 impl Entity {
     /// Creates a new entity using the prefab model.
     fn from_prefab_model(ent_model: &EntityPrefabModel, sim_model: &SimModel) -> Result<Entity> {
+        trace!("started from_prefab_model");
         let mut ent = Entity::empty();
 
         #[cfg(feature = "machine")]
@@ -135,11 +136,11 @@ impl Entity {
             // );
 
             ent.comp_queue
-                .insert(StringId::from_unchecked("init"), Vec::new());
+                .insert(StringId::from("init").unwrap(), Vec::new());
 
             for event in &sim_model.events {
                 ent.comp_queue
-                    .insert(StringId::from_truncate(&event.id), Vec::new());
+                    .insert(arraystring::new_truncate(&event.id), Vec::new());
             }
         }
 
@@ -172,9 +173,11 @@ impl Entity {
             //         .get_component(&ent_model_type, &comp.model_type, &comp.model_id)
             //         .unwrap();
             #[cfg(feature = "machine")]
+            warn!("triggers: {:?}", comp_model.triggers);
             for trigger in &comp_model.triggers {
-                let t = StringId::from_truncate(trigger);
+                let t = arraystring::new_truncate(trigger);
                 if let Some(q) = ent.comp_queue.get_mut(&t) {
+                    warn!("pushing to comp_queue: {}", comp_model.name);
                     q.push(comp_model.name);
                 }
             }
@@ -201,6 +204,7 @@ impl Entity {
 
     /// Creates a new entity from model.
     pub fn from_prefab(prefab: &StringId, sim_model: &model::SimModel) -> Result<Entity> {
+        trace!("creating entity from prefab");
         let ent_model = sim_model
             .get_entity(prefab)
             .ok_or(Error::NoEntityPrefab(prefab.to_string()))?;

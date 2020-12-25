@@ -1,6 +1,5 @@
 //! Local simulation abstraction.
 
-pub mod interface;
 pub mod step;
 
 use std::collections::{BTreeMap, HashMap};
@@ -20,12 +19,11 @@ use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::error::Error;
 use crate::model::{DataEntry, DataImageEntry, Scenario};
-use crate::sim::interface::{SimInterface, SimInterfaceStorage};
-use crate::{model, EntityId, Result, SimModel, Var, VarType};
+use crate::{arraystring, model, EntityId, Result, SimModel, Var, VarType};
 use crate::{EntityUid, StringId};
 use fnv::FnvHashMap;
 
-/// Local simulation instance object.
+/// Local (non-distributed) simulation instance object.
 ///
 /// One of the main abstractions provided by the library. It allows for quick
 /// assembly of a full-fledged simulation instance from either a scenario or
@@ -50,8 +48,8 @@ use fnv::FnvHashMap;
 /// [`distr::SimNode`]: ../distr/node/struct.SimNode.html
 #[derive(Serialize, Deserialize)]
 pub struct Sim {
-    /// Serves as the base for creation and potentially also runtime processing
-    /// of the simulation
+    /// Serves as the base for creation and runtime processing of the
+    /// simulation
     pub model: SimModel,
 
     /// Number of steps that have been processed so far
@@ -59,7 +57,7 @@ pub struct Sim {
     /// Global queue of events waiting for execution
     pub event_queue: Vec<StringId>,
 
-    /// All entities that exist within the simulation world are stored here
+    /// All entities that exist within the simulation are stored here
     pub entities: FnvHashMap<EntityUid, Entity>,
     /// Map of string indexes for entities (string indexes are optional)
     pub entities_idx: FnvHashMap<StringId, EntityUid>,
@@ -67,7 +65,7 @@ pub struct Sim {
     entity_idpool: id_pool::IdPool,
 }
 
-/// Transformations.
+/// Snapshot functionality.
 impl Sim {
     /// Serialize simulation to a vector of bytes.
     ///
@@ -75,7 +73,7 @@ impl Sim {
     ///
     /// Optional compression using LZ4 algorithm can be performed.
     pub fn to_snapshot(&self, compress: bool) -> Result<Vec<u8>> {
-        let mut data = bincode::serialize(&self).unwrap();
+        let mut data: Vec<u8> = bincode::serialize(&self).unwrap();
         #[cfg(feature = "lz4")]
         if compress {
             data = lz4::block::compress(&data, None, true)?;
@@ -84,14 +82,14 @@ impl Sim {
     }
 
     /// Create simulation instance from a vector of bytes representing a snapshot.
-    pub fn from_snapshot(mut buf: Vec<u8>, compressed: bool) -> Result<Self> {
+    pub fn from_snapshot(mut buf: &Vec<u8>, compressed: bool) -> Result<Self> {
         if compressed {
             #[cfg(feature = "lz4")]
             let data = lz4::block::decompress(&buf, None)?;
             #[cfg(feature = "lz4")]
-            let mut sim: Self = match bincode::deserialize(&data) {
+            let mut sim = match bincode::deserialize::<Sim>(&data) {
                 Ok(ms) => ms,
-                Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
+                Err(e) => return Err(Error::FailedReadingSnapshot(format!("{}", e))),
             };
             #[cfg(not(feature = "lz4"))]
             let mut sim: Self = match bincode::deserialize(&buf) {
@@ -103,10 +101,12 @@ impl Sim {
             // sim.setup_lua_state_ent();
             return Ok(sim);
         } else {
-            let mut sim: Self = match bincode::deserialize(&buf) {
-                Ok(ms) => ms,
-                Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
-            };
+            // let mut sim = match bincode::deserialize::<Sim>(&buf) {
+            //     Ok(ms) => ms,
+            //     Err(e) => return Err(Error::FailedReadingSnapshot(format!("{}", e))),
+            // };
+
+            let mut sim = bincode::deserialize::<Sim>(&buf).unwrap();
             // sim.setup_lua_state(&model);
             // sim.setup_lua_state_ent();
             return Ok(sim);
@@ -114,23 +114,24 @@ impl Sim {
     }
 
     /// Create simulation instance using a path to snapshot file.
-    ///
-    /// # Decompression
-    ///
-    /// If the snapshot was compressed before saved to disk, reading it
-    /// successfully will require setting the `compressed` argument to true.
-    pub fn from_snapshot_at(path: &PathBuf, compressed: bool) -> Result<Self> {
+    pub fn from_snapshot_at(path: &PathBuf) -> Result<Self> {
         let path = path.canonicalize().unwrap();
         let mut file = match File::open(path) {
             Ok(f) => f,
             Err(e) => {
-                error!("{}", e);
-                return Err(Error::FailedReadingSnapshot("".to_string()));
+                // error!("{}", e);
+                return Err(Error::FailedReadingSnapshot(format!("{}", e)));
             }
         };
         let mut buf: Vec<u8> = Vec::new();
         file.read_to_end(&mut buf);
-        Self::from_snapshot(buf, compressed)
+
+        // first try deserializing as compressed, otherwise it must be uncompressed
+        if let Ok(s) = Self::from_snapshot(&buf, true) {
+            return Ok(s);
+        } else {
+            return Self::from_snapshot(&buf, false);
+        }
     }
 }
 
@@ -192,10 +193,11 @@ impl Sim {
         #[cfg(feature = "machine_script")]
         {
             sim.spawn_entity(
-                Some(&StringId::from_unchecked("_mod_init")),
-                Some(StringId::from_unchecked("_mod_init")),
+                Some(&arraystring::new_unchecked("_mod_init")),
+                Some(arraystring::new_unchecked("_mod_init")),
             )?;
-            sim.event_queue.push(StringId::from_unchecked("_scr_init"));
+            sim.event_queue
+                .push(arraystring::new_unchecked("_scr_init"));
         }
 
         // add entities
@@ -211,6 +213,10 @@ impl Sim {
 
         // apply settings from scenario manifest
         sim.apply_settings();
+
+        // apply single step to setup the model
+        #[cfg(feature = "machine_script")]
+        sim.step();
 
         Ok(sim)
     }
@@ -232,13 +238,20 @@ impl Sim {
         prefab: Option<&StringId>,
         name: Option<StringId>,
     ) -> Result<()> {
+        trace!("starting spawn_entity");
+
+        trace!("creating new entity");
         let mut ent = match prefab {
             Some(p) => Entity::from_prefab(p, &self.model)?,
             None => Entity::empty(),
         };
+        trace!("done");
 
+        trace!("getting new_uid from pool");
         let new_uid = self.entity_idpool.request_id().unwrap();
+        trace!("done");
 
+        trace!("inserting entity");
         if let Some(n) = &name {
             if !self.entities_idx.contains_key(n) {
                 self.entities_idx.insert(*n, new_uid);
@@ -252,12 +265,14 @@ impl Sim {
         } else {
             self.entities.insert(new_uid, ent);
         }
+        trace!("done");
+
         Ok(())
     }
 }
 
-#[cfg(feature = "machine_lua")]
 /// Functionality related to handling lua.
+#[cfg(feature = "machine_lua")]
 impl Sim {
     /// Setup lua states for the individual entities.
     /// This is used during initialization from snapshot.
@@ -325,20 +340,15 @@ impl Sim {
 /// Data access helpers.
 impl Sim {
     /// Get any var using absolute address and coerce it to string.
-    pub fn get_as_string(&self, addr: &Address) -> Option<String> {
-        if let Some(var) = self.get_var(addr) {
-            return Some(var.to_string());
-        }
-        None
+    pub fn get_as_string(&self, addr: &Address) -> Result<String> {
+        Ok(self.get_var(addr)?.to_string())
     }
 
     /// Get any var by absolute address and coerce it to integer.
-    pub fn get_as_int(&self, addr: &Address) -> Option<crate::Int> {
-        if let Some(var) = self.get_var(addr) {
-            return Some(var.to_int());
-        }
-        None
+    pub fn get_as_int(&self, addr: &Address) -> Result<crate::Int> {
+        Ok(self.get_var(addr)?.to_int())
     }
+
     /// Get all vars, coerce each to string.
     pub fn get_all_as_strings(&self) -> HashMap<String, String> {
         let mut out_map = HashMap::new();
@@ -358,25 +368,44 @@ impl Sim {
         }
         out_map
     }
+
     /// Get a `Var` from the sim using an absolute address.
-    pub fn get_var(&self, addr: &Address) -> Option<Var> {
+    pub fn get_var(&self, addr: &Address) -> Result<&Var> {
         if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
             if let Some(ent) = self.entities.get(ent_uid) {
                 return ent.storage.get_var_from_addr(addr, None);
             }
+        }
+        if let Some(ent) = self.entities.get(
+            &addr
+                .entity
+                .parse::<u32>()
+                .map_err(|e| Error::ParsingError(e.to_string()))?,
+        ) {
+            return ent.storage.get_var_from_addr(addr, None);
+        }
+        Err(Error::FailedGettingVariable(addr.to_string()))
+    }
+
+    /// Get a variable from the sim using an absolute address.
+    pub fn get_var_mut(&mut self, addr: &Address) -> Result<&mut Var> {
+        if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
+            if let Some(ent) = self.entities.get_mut(ent_uid) {
+                return ent.storage.get_var_mut_from_addr(addr, None);
+            }
         } else {
-            return self.get_var_ent_uid(addr);
+            if let Some(ent) = self.entities.get_mut(
+                &addr
+                    .entity
+                    .parse::<u32>()
+                    .map_err(|e| Error::ParsingError(e.to_string()))?,
+            ) {
+                return ent.storage.get_var_mut_from_addr(addr, None);
+            }
         }
-        None
+        Err(Error::FailedGettingVariable(addr.to_string()))
     }
-    /// Get a `Var` from the sim using an absolute address.
-    pub fn get_var_ent_uid(&self, addr: &Address) -> Option<Var> {
-        let ent_uid: u32 = addr.entity.parse().unwrap();
-        if let Some(entity) = self.entities.get(&ent_uid) {
-            return entity.storage.get_var_from_addr(addr, None);
-        }
-        None
-    }
+
     /// Get a reference to `Str` variable from the sim using
     /// an absolute address.
     pub fn get_str(&self, addr: &Address) -> Option<&String> {
@@ -388,6 +417,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `Str` variable from the sim
     /// using an absolute address.
     pub fn get_str_mut(&mut self, addr: &Address) -> Option<&mut String> {
@@ -399,6 +429,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a reference to `Int` variable from the sim using
     /// an absolute address.
     pub fn get_int(&self, addr: &Address) -> Option<&crate::Int> {
@@ -410,6 +441,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `Int` variable from the sim
     /// using an absolute address.
     pub fn get_int_mut(&mut self, addr: &Address) -> Option<&mut crate::Int> {
@@ -421,6 +453,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a reference to `Float` variable from the sim
     /// using an absolute address.
     pub fn get_float(&self, addr: &Address) -> Option<&crate::Float> {
@@ -429,6 +462,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `Float` variable from the sim
     /// using an absolute address.
     pub fn get_float_mut(&mut self, addr: &Address) -> Option<&mut crate::Float> {
@@ -440,6 +474,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a reference to `Bool` variable from the sim
     /// using an absolute address.
     pub fn get_bool(&self, addr: &Address) -> Option<&bool> {
@@ -451,6 +486,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `Bool` variable from the sim
     /// using an absolute address.
     pub fn get_bool_mut(&mut self, addr: &Address) -> Option<&mut bool> {
@@ -462,6 +498,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a reference to `StrList` variable from the sim
     /// using an absolute address.
     pub fn get_str_list(&self, addr: &Address) -> Option<&Vec<String>> {
@@ -473,6 +510,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `StrList` variable from the
     /// sim using an absolute address.
     pub fn get_str_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<String>> {
@@ -484,6 +522,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a reference to `IntList` variable from the sim
     /// using an absolute address.
     pub fn get_int_list(&self, addr: &Address) -> Option<&Vec<crate::Int>> {
@@ -495,6 +534,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `IntList` variable from the
     /// sim using an absolute address.
     pub fn get_int_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<crate::Int>> {
@@ -506,6 +546,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a reference to `FloatList` variable from the sim
     /// using an absolute address.
     pub fn get_float_list(&self, addr: &Address) -> Option<&Vec<crate::Float>> {
@@ -517,6 +558,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `FloatList` variable from the
     /// sim using an absolute address.
     pub fn get_float_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<crate::Float>> {
@@ -530,6 +572,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a reference to `BoolList` variable from the sim
     /// using an absolute address.
     pub fn get_bool_list(&self, addr: &Address) -> Option<&Vec<bool>> {
@@ -541,6 +584,7 @@ impl Sim {
         }
         None
     }
+
     /// Get a mut reference to `BoolList` variable from the
     /// sim using an absolute address.
     pub fn get_bool_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<bool>> {
@@ -587,7 +631,10 @@ impl Sim {
                 }
             }
             VarType::Float => {
-                *self.get_float_mut(&addr).unwrap() = val.parse::<crate::Float>().unwrap()
+                *self.get_var_mut(&addr)? = Var::Float(
+                    val.parse::<crate::Float>()
+                        .map_err(|e| Error::ParsingError(e.to_string()))?,
+                )
             }
             VarType::Bool => *self.get_bool_mut(&addr).unwrap() = val.parse::<bool>().unwrap(),
             _ => debug!(
@@ -597,6 +644,7 @@ impl Sim {
         }
         Ok(())
     }
+
     /// Set a var of any type using a string list as input.
     pub fn set_from_string_list(&mut self, addr: &Address, vec: &Vec<String>) -> Result<()> {
         match addr.var_type {
@@ -966,35 +1014,37 @@ impl Sim {
             match addr.var_type {
                 VarType::Str | VarType::Int | VarType::Float | VarType::Bool => {
                     //                    println!("{}", &addr.to_string());
-                    self.set_from_string(&addr, &coerce_toml_val_to_string(&val));
+                    self.set_from_string(&addr, &val);
                 }
                 //                    self.set_from_string(&addr, &val.as_str().to_string()),
                 VarType::StrList | VarType::IntList | VarType::FloatList | VarType::BoolList => {
-                    self.set_from_string_list(
-                        &addr,
-                        &val.as_array()
-                            .unwrap()
-                            .iter()
-                            .map(|v| coerce_toml_val_to_string(&v))
-                            .collect(),
-                    );
+                    unimplemented!()
+                    // self.set_from_string_list(
+                    //     &addr,
+                    //     &val.as_array()
+                    //         .unwrap()
+                    //         .iter()
+                    //         .map(|v| coerce_toml_val_to_string(&v))
+                    //         .collect(),
+                    // );
                 }
                 #[cfg(feature = "grids")]
                 VarType::StrGrid | VarType::IntGrid | VarType::FloatGrid | VarType::BoolGrid => {
-                    self.set_from_string_grid(
-                        &addr,
-                        &val.as_array()
-                            .unwrap()
-                            .iter()
-                            .map(|v| {
-                                v.as_array()
-                                    .unwrap()
-                                    .iter()
-                                    .map(|vv| coerce_toml_val_to_string(&vv))
-                                    .collect()
-                            })
-                            .collect(),
-                    );
+                    unimplemented!()
+                    // self.set_from_string_grid(
+                    //     &addr,
+                    //     &val.as_array()
+                    //         .unwrap()
+                    //         .iter()
+                    //         .map(|v| {
+                    //             v.as_array()
+                    //                 .unwrap()
+                    //                 .iter()
+                    //                 .map(|vv| coerce_toml_val_to_string(&vv))
+                    //                 .collect()
+                    //         })
+                    //         .collect(),
+                    // );
                 }
             };
         }

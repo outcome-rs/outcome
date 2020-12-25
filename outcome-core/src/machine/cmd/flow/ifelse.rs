@@ -8,7 +8,7 @@ use super::super::super::{
     error::Error, CallInfo, CallStackVec, ForInCallInfo, IfElseCallInfo, IfElseMetaData,
     ProcedureCallInfo, Registry,
 };
-use super::super::{CentralExtCommand, Command, CommandPrototype, CommandResult, LocationInfo};
+use super::super::{CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::error::ErrorKind;
 use crate::machine::Result;
 
