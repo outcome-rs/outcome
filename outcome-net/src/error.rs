@@ -1,3 +1,5 @@
+use crate::msg;
+use num_enum::TryFromPrimitiveError;
 use thiserror::Error;
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -18,17 +20,26 @@ pub enum Error {
     #[error("data store disconnected")]
     Disconnect(#[from] std::io::Error),
 
-    #[cfg(feature = "transport_nng")]
-    #[error("driver error")]
-    DriverError(#[from] nng::Error),
-    #[cfg(feature = "transport_zmq")]
-    #[error("driver error")]
-    DriverError(#[from] zmq::Error),
+    #[cfg(feature = "nng_transport")]
+    #[error("nng error")]
+    NngError(#[from] nng::Error),
+    #[cfg(feature = "zmq_transport")]
+    #[error("zmq error")]
+    ZmqError(#[from] zmq::Error),
 
+    #[error("bincode error")]
+    BincodeError(#[from] bincode::Error),
+
+    #[cfg(feature = "msgpack_encoding")]
     #[error("rmp_serde decode error")]
     RmpsDecodeError(#[from] rmp_serde::decode::Error),
+    #[cfg(feature = "msgpack_encoding")]
     #[error("rmp_serde encode error")]
     RmpsEncodeError(#[from] rmp_serde::encode::Error),
+
+    #[error("unknown message code: {0}")]
+    UnknownMsgCode(#[from] TryFromPrimitiveError<msg::MessageType>),
+
     #[error("core error")]
     CoreError(#[from] outcome_core::error::Error),
     // #[error("the data for key `{0}` is not available")]

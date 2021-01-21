@@ -1,0 +1,14 @@
+[package]
+name = "flock_dynlib"
+version = "0.1.0"
+authors = ["adamsky <adamsky@enum.space>"]
+edition = "2018"
+
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["dylib"]
+
+[dependencies]
+outcome-core = { path = "../../../../../outcome-core", features = ["machine_sandbox"] }

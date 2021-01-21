@@ -26,6 +26,9 @@ use crate::interactive;
 use crate::test;
 use core::mem;
 
+#[cfg(feature = "watcher")]
+use notify::{RecommendedWatcher, Watcher};
+
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 pub const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
 
@@ -129,7 +132,7 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
 
         // run subcommand
         .subcommand(SubCommand::with_name("run")
-//            .setting(AppSettings::DisableHelpSubcommand)
+            // .setting(AppSettings::DisableHelpSubcommand)
             .display_order(20)
             .about("Run simulation from scenario, snapshot or experiment")
             // Note: If there are no arguments supplied \
@@ -147,6 +150,12 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
                 .default_value("./interactive.yaml")
                 .long("iconfig")
                 .help("specify path to interactive config file"))
+            .arg(Arg::with_name("watch")
+                .long("watch")
+                .value_name("on-change")
+                .default_value("restart")
+                .possible_values(&["restart", "update"])
+                .help("Watch project directory for changes"))
 
             .subcommand(SubCommand::with_name("scenario")
                 .about("Run simulation from a scenario")
@@ -259,14 +268,10 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
                 .value_name("address")
                 .help("Address of the server, together with port (e.g. 127.0.0.1:9999)"))
             .arg(Arg::with_name("client-addr")
-                .required(false)
-                .long("addr")
+                .long("address")
                 .short("a")
                 .value_name("address")
-                .long_help("Long Help")
-                .hidden_long_help(true)
                 .help("Address of this client, together with port (e.g. 127.0.0.1:9999)"))
-                // .default_value("127.0.0.1:3123")
             .arg(Arg::with_name("password")
                 .long("password")
                 .takes_value(true)
@@ -277,27 +282,25 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
                 .takes_value(true)
                 .value_name("path")
                 .default_value("./interactive.yaml")
-                .help("Specify path to interactive config file"))
+                .help("Path to interactive config file"))
             .arg(Arg::with_name("name")
                 .takes_value(true)
                 .long("name")
                 .value_name("string")
                 .help("Name for the client"))
-            .arg(Arg::with_name("no-delay")
-                .long("no-delay")
-                .short("n")
-                .help("Disables Nagle's algorithm and decreases overall latency for messages"))
             .arg(Arg::with_name("blocking")
                 .long("blocking")
                 .short("b")
                 .help("Sets the client as blocking, requiring it to explicitly agree to advance simulation")
-                // .long_help("Set to true to make the client blocking when processing turn advance requests.\
-                // This is used for game-like behavior with synchronisation between clients")
             )
-            .arg(Arg::with_name("compress")
-                .long("compress")
+            .arg(Arg::with_name("compression")
+                .long("compression")
                 .short("c")
-                .help("Flag specifying whether lz4 compression should be used by default"))
+                .takes_value(true)
+                .value_name("policy")
+                .default_value("none")
+                .possible_values(&["all", "only_data", "only_larger_than:[bytes]", "none"])
+                .help("What outgoing messages should be compressed"))
         )
 
         // worker subcommand
@@ -415,15 +418,74 @@ fn start_run_scenario(matches: &ArgMatches) -> Result<()> {
     setup_log_verbosity(matches);
 
     if matches.is_present("interactive") {
-        println!("Running interactive session using scenario at: {:?}", path);
-        let sim = outcome::Sim::from_scenario_at_path(path)?;
-        let driver = interactive::SimDriver::Local(sim);
+        // println!("Running interactive session using scenario at: {:?}", path);
+        // let sim = outcome::Sim::from_scenario_at_path(path.clone())?;
+
+        let config_path = matches
+            .value_of("iconfig")
+            .unwrap_or(interactive::CONFIG_FILE)
+            .to_string();
+
+        #[cfg(feature = "watcher")]
+        {
+            let watch_path = path.parent().unwrap().to_owned();
+            // let driver = interactive::SimDriver::Local(sim);
+            let change_detected = Arc::new(Mutex::new(false));
+            let change_detected_clone = change_detected.clone();
+            let mut watcher: RecommendedWatcher = Watcher::new_immediate(
+                move |res: Result<notify::Event, notify::Error>| match res {
+                    Ok(event) => {
+                        debug!("change detected: {:?}", event);
+                        *change_detected_clone.lock().unwrap() = true;
+                    }
+                    Err(e) => {
+                        error!("watch error: {:?}", e);
+                        *change_detected_clone.lock().unwrap() = true;
+                    }
+                },
+            )?;
+            watcher.watch(watch_path, notify::RecursiveMode::Recursive)?;
+
+            let on_change = match matches.value_of("watch") {
+                Some("restart") => Some(interactive::OnChange {
+                    trigger: change_detected.clone(),
+                    action: interactive::OnChangeAction::Restart,
+                }),
+                Some("update") => Some(interactive::OnChange {
+                    trigger: change_detected.clone(),
+                    action: interactive::OnChangeAction::UpdateModel,
+                }),
+                Some(_) | None => None,
+            };
+
+            interactive::start(
+                interactive::InterfaceType::Scenario(path.to_string_lossy().to_string()),
+                &config_path,
+                on_change,
+            )?;
+        }
+        #[cfg(not(feature = "watcher"))]
         interactive::start(
-            driver,
-            matches
-                .value_of("iconfig")
-                .unwrap_or(interactive::CONFIG_FILE),
-        );
+            interactive::InterfaceType::Scenario(path.to_string_lossy().to_string()),
+            &config_path,
+            None,
+        )?;
+
+        // let mut changed = change_detected.lock().unwrap();
+        // if !*changed {
+        //     drop(changed);
+        // }
+        // let mut changed = change_detected.lock().unwrap();
+        // if *changed && matches.value_of("watch") == Some("restart") {
+        //     // restart
+        //     *changed = false;
+        //     println!("\n\n-------\n");
+        //     continue;
+        // } else {
+        //     // quit
+        //     break;
+        // }
+        // }
     }
     Ok(())
 }
@@ -443,7 +505,7 @@ fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
             println!("path arg not found");
         }
     }
-    path = path.canonicalize().unwrap_or(path);
+    // path = path.canonicalize().unwrap_or(path);
     println!("Running interactive session using snapshot at: {:?}", path);
     if matches.is_present("interactive") {
         use self::simplelog::{Config, LevelFilter, TermLogger};
@@ -463,7 +525,6 @@ fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
         // let sim =
         //     Sim::from_snapshot_at(&path, true).unwrap_or(Sim::from_snapshot_at(&path, false)?);
 
-        let sim = Sim::from_snapshot_at(&path)?;
         // let sim = match Sim::from_snapshot_at(&path, false) {
         //     Ok(s) => s,
         //     Err(_) => match Sim::from_snapshot_at(&path, true) {
@@ -471,13 +532,16 @@ fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
         //         Err(_) => return Err("fail".to_string()),
         //     },
         // };
-        let driver = interactive::SimDriver::Local(sim);
+
+        // let sim = Sim::from_snapshot_at(&path)?;
+        // let driver = interactive::SimDriver::Local(sim);
         //TODO
         interactive::start(
-            driver,
+            interactive::InterfaceType::Snapshot(path.to_string_lossy().to_string()),
             matches
                 .value_of("iconfig")
                 .unwrap_or(interactive::CONFIG_FILE),
+            None,
         );
     }
     Ok(())
@@ -556,27 +620,30 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
 
 fn start_client(matches: &ArgMatches) -> Result<()> {
     setup_log_verbosity(matches);
-    let mut client = outcome_net::Client::new(
-        matches.value_of("name").unwrap_or("cli-client"),
-        matches.is_present("blocking"),
-        matches.is_present("compress"),
+    let mut client = outcome_net::Client::new_with_config(
         matches.value_of("public-addr").map(|s| s.to_string()),
-        // TODO
-        Some(1000),
+        outcome_net::ClientConfig {
+            name: matches.value_of("name").unwrap_or("cli-client").to_string(),
+            is_blocking: matches.is_present("blocking"),
+            //matches.is_present("compress"),
+            ..Default::default()
+        },
     )?;
     println!("created new client");
     client.connect(
         matches
             .value_of("server-addr")
             .map(|s| s.to_string())
-            .ok_or(Error::msg("server address must be provided"))?,
+            .ok_or(Error::msg("server adddress must be provided"))?,
         matches.value_of("password").map(|s| s.to_string()),
     )?;
     interactive::start(
-        interactive::SimDriver::Remote(client),
+        //interactive::SimDriver::Remote(client),
+        interactive::InterfaceType::Remote(client),
         matches
             .value_of("iconfig")
             .unwrap_or(interactive::CONFIG_FILE),
+        None,
     );
     Ok(())
 }
@@ -684,7 +751,8 @@ fn setup_log_verbosity(matches: &ArgMatches) {
     let logger_conf = config_builder
         .set_time_level(LevelFilter::Error)
         .set_target_level(LevelFilter::Debug)
-        .set_location_level(LevelFilter::Trace)
+        .set_location_level(LevelFilter::Error)
+        //.set_location_level(LevelFilter::Trace)
         .set_time_format_str("%H:%M:%S%.6f")
         .build();
     TermLogger::init(level_filter, logger_conf, simplelog::TerminalMode::Mixed);

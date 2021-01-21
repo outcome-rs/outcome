@@ -6,9 +6,9 @@ use std::str::FromStr;
 
 use shlex::Shlex;
 
-use crate::address::{Address, LocalAddress};
+use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::Storage;
-use crate::model::{ComponentModel, EntityPrefabModel, EventModel, LogicModel, SimModel};
+use crate::model::{ComponentModel, EntityPrefab, EventModel, LogicModel, SimModel};
 use crate::sim::Sim;
 use crate::var::Var;
 use crate::{arraystring, CompId, MedString, ShortString, StringId};
@@ -20,20 +20,21 @@ use super::super::LocationInfo;
 use super::{CentralRemoteCommand, CommandResult};
 use crate::distr::SimCentral;
 use crate::machine;
+use crate::machine::cmd::flow::component::ComponentBlock;
 use crate::machine::cmd::Command;
 use crate::machine::error::{Error, ErrorKind, Result};
-use crate::machine::{CallInfo, CallStackVec};
+use crate::machine::{CallInfo, CallStackVec, CommandPrototype, ComponentCallInfo};
 use crate::var::VarType::Str;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterVar {
     comp: CompId,
-    addr: LocalAddress,
+    addr: ShortLocalAddress,
     val: Option<Var>,
 }
 impl RegisterVar {
     pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
-        let addr = match LocalAddress::from_str(&args[0]) {
+        let addr = match ShortLocalAddress::from_str(&args[0]) {
             Ok(a) => a,
             Err(e) => {
                 return Err(Error::new(
@@ -51,18 +52,26 @@ impl RegisterVar {
                     val: None,
                 })
             }
-            // 2 => if args[1] != "=" {
-            //     let val
-            //     return Ok(RegisterVar {})
-            // },
-            3 => {
-                if args[1] == "=" {
+            2 => {
+                if args[1] != "=" {
+                    let val = Var::from_str(&args[1], None)?;
                     return Ok(RegisterVar {
                         comp: CompId::new(),
                         addr,
-                        val: Var::from_str(&args[2], None),
+                        val: Some(val),
                     });
                 }
+            }
+            3 => {
+                let val = match args[1].as_str() {
+                    "=" => Var::from_str(&args[2], None)?,
+                    _ => Var::from_str(&args[1], None)?,
+                };
+                return Ok(RegisterVar {
+                    comp: CompId::new(),
+                    addr,
+                    val: Some(val),
+                });
             }
             _ => (),
         }
@@ -91,7 +100,7 @@ impl RegisterVar {
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
-        ent_name: &crate::EntityId,
+        ent_name: &crate::EntityUid,
         comp_name: &crate::CompId,
     ) -> Result<()> {
         debug!("registering var: {:?}", self);
@@ -101,7 +110,7 @@ impl RegisterVar {
             .unwrap()
             .vars
             .push(crate::model::VarModel {
-                id: self.addr.var_id.to_string(),
+                id: self.addr.var_id,
                 type_: self.addr.var_type,
                 default: self.val.clone(),
             });
@@ -190,7 +199,15 @@ impl RegisterEntityPrefab {
     }
 
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
-        sim.model.entities.push(EntityPrefabModel {
+        sim.model.entities.push(EntityPrefab {
+            name: self.name,
+            components: self.components.clone(),
+        });
+        Ok(())
+    }
+
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+        central.model.entities.push(EntityPrefab {
             name: self.name,
             components: self.components.clone(),
         });
@@ -208,7 +225,55 @@ pub struct RegisterComponent {
 }
 
 impl RegisterComponent {
+    pub fn new(
+        args: Vec<String>,
+        location: &LocationInfo,
+        commands: &Vec<CommandPrototype>,
+    ) -> Result<Command> {
+        // println!("{:?}", args);
+        let mut options = getopts::Options::new();
+        options.optflag("", "marker", "");
+
+        let matches = options.parse(&args).unwrap();
+        if matches.opt_present("marker") && !matches.free.is_empty() {
+            Ok(Command::RegisterComponent(Self {
+                name: arraystring::new_truncate(&matches.free[0]),
+                trigger_events: vec![],
+                source_comp: Default::default(),
+                start_line: 0,
+                end_line: 0,
+            }))
+        } else {
+            ComponentBlock::new(args, location, commands)
+        }
+    }
+
     pub fn execute_loc(&self, call_stack: &mut CallStackVec) -> Vec<CommandResult> {
+        // trace!("executing component block: {:?}", self);
+        //
+        // let mut new_self = self.clone();
+        //
+        // call_stack.push(CallInfo::Component(ComponentCallInfo {
+        //     name: new_self.name,
+        // }));
+        //
+        // let mut out_vec = Vec::new();
+        // // out_vec.push(CommandResult::ExecCentralExt(
+        // //     CentralRemoteCommand::Component(new_self),
+        // // ));
+        // out_vec.push(CommandResult::ExecCentralExt(
+        //     CentralRemoteCommand::RegisterComponent(RegisterComponent {
+        //         name: arraystring::new_truncate(&new_self.name),
+        //         trigger_events: vec![],
+        //         source_comp: self.source_comp,
+        //         start_line: self.start_line,
+        //         end_line: self.end_line,
+        //     }),
+        // ));
+        // out_vec.push(CommandResult::Continue);
+        // out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
+        // out_vec
+
         vec![
             CommandResult::ExecCentralExt(CentralRemoteCommand::RegisterComponent(self.clone())),
             CommandResult::Continue,
@@ -218,28 +283,28 @@ impl RegisterComponent {
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
-        ent_name: &crate::EntityId,
+        ent_name: &crate::EntityUid,
         comp_name: &crate::CompId,
     ) -> Result<()> {
-        trace!("executing register component cmd: {:?}", self);
+        // trace!("executing register component cmd: {:?}", self);
 
-        let comp_model = sim.model.get_component(&self.source_comp).unwrap();
-        trace!("source_comp: {:?}", comp_model);
+        // let comp_model = sim.model.get_component(&self.source_comp).unwrap();
+        // trace!("source_comp: {:?}", comp_model);
 
         let component = ComponentModel {
             name: self.name.into(),
-            start_state: arraystring::new_unchecked("init"),
             triggers: self.trigger_events.clone(),
+            // logic: comp_model.logic.get_subset(self.start_line, self.end_line),
             // logic: LogicModel {
             //     commands: comp_model.logic.commands.clone(),
             //     cmd_location_map: comp_model.logic.cmd_location_map.clone(),
             //     ..LogicModel::default()
             // },
-            logic: comp_model.logic.get_subset(self.start_line, self.end_line),
+            // logic: comp_model.logic.get_subset(self.start_line, self.end_line),
             ..ComponentModel::default()
         };
 
-        debug!("registering component: {:?}", comp_model);
+        debug!("registering component: {:?}", component.name);
         sim.model.components.push(component);
 
         // let comp_model = ComponentModel {
@@ -310,7 +375,7 @@ impl RegisterTrigger {
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
-        ent_name: &crate::EntityId,
+        ent_name: &crate::EntityUid,
         comp_name: &crate::CompId,
     ) -> Result<()> {
         debug!("registering comp trigger: {:?}", self);

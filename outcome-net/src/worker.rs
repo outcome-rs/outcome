@@ -1,16 +1,14 @@
 #![allow(dead_code)]
 
 extern crate outcome_core as outcome;
-extern crate rmp_serde as rmps;
-extern crate serde;
 
 use std::io::prelude::*;
 use std::io::Write;
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::{io, thread};
 
-use self::rmps::{Deserializer, Serializer};
-use self::serde::{Deserialize, Serialize};
+//use rmp_serde::{Deserializer, Serializer};
+use serde::{Deserialize, Serialize};
 
 use std::io::ErrorKind;
 use std::path::PathBuf;
@@ -27,9 +25,10 @@ use crate::msg::coord_worker::{
 };
 use crate::msg::*;
 use crate::transport::{SocketInterface, WorkerDriverInterface};
+use crate::util::tcp_endpoint;
 use crate::{error::Error, sig, Result};
-use crate::{util::tcp_endpoint, WorkerDriver};
 
+use crate::socket::{Encoding, Socket, Transport};
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
 use outcome_core::{
     arraystring, Address, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType,
@@ -42,13 +41,6 @@ pub const WORKER_ADDRESS: &str = "0.0.0.0:5922";
 /// Network-unique identifier for a single worker
 pub type WorkerId = u32;
 
-pub struct WorkerNetwork {
-    /// IP address of the worker
-    pub address: String,
-    /// Network driver
-    driver: WorkerDriver,
-}
-
 /// Represents a single cluster node, connected to and controlled by
 /// the cluster coordinator. `Worker`s are also connected to each other, either
 /// directly or not, depending on network topology used.
@@ -58,7 +50,7 @@ pub struct WorkerNetwork {
 /// In a simulation cluster made up of multiple machines, there is at least
 /// one `Worker` running on each machine.
 ///
-/// In terms of initialization, `Worker`s can be either actively reach out to
+/// In terms of initialization, `Worker`s can either actively reach out to
 /// an already existing cluster to join in, or passively wait for incoming
 /// connection from a coordinator.
 ///
@@ -68,16 +60,25 @@ pub struct WorkerNetwork {
 ///
 /// # Discussion
 ///
-/// Worker abstraction could work well with "thread per core" strategy. This
+/// Worker abstraction could work well with a "thread per core" strategy. This
 /// means there would be a single worker per every machine core, instead of
 /// single worker per machine utilizing multiple cores with thread-pooling.
 /// "Thread per core" promises performance improvements caused by reducing
 /// expensive context switching operations. It would require having the ability
 /// to switch `SimNode`s to process entities in a single-threaded fashion.
+///
+/// "Worker spawner" mode could allow for instantiating multiple workers within
+/// a context of a single CLI application, based on incoming coordinators'
+/// requests. This could make it easier for people to share their machines
+/// with people who want to run simulations. For safety reasons it would make
+/// sense to allow running it in "sandbox" mode, with only the runtime-level
+/// logic enabled.
 pub struct Worker {
-    /// List of other workers in the cluster
-    pub comrades: Vec<Comrade>,
+    pub addr: String,
+    pub greeter: Socket,
+    pub inviter: Socket,
     pub network: WorkerNetwork,
+
     /// Whether the worker uses a password to authorize connecting comrade workers
     pub use_auth: bool,
     /// Password used for incoming connection authorization
@@ -87,16 +88,24 @@ pub struct Worker {
     pub sim_node: Option<outcome::distr::SimNode>,
 }
 
+pub struct WorkerNetwork {
+    /// List of other workers in the cluster
+    pub comrades: Vec<Comrade>,
+    /// Main coordinator
+    pub coord: Option<Socket>,
+}
+
 impl Worker {
     /// Creates a new `Worker`.
-    pub fn new(my_addr: &str) -> Result<Worker> {
+    pub fn new(addr: &str) -> Result<Worker> {
         Ok(Worker {
-            comrades: vec![],
+            addr: addr.to_string(),
+            greeter: Socket::bind(addr, Transport::Tcp)?,
+            inviter: Socket::bind_any(Transport::Tcp)?,
             network: WorkerNetwork {
-                address: "".to_string(),
-                driver: WorkerDriver::new(my_addr).unwrap(),
+                comrades: vec![],
+                coord: None,
             },
-            // driver: WorkerDriver::new(my_addr).unwrap(),
             use_auth: false,
             passwd_list: vec![],
             sim_node: None,
@@ -110,34 +119,31 @@ impl Worker {
                 println!("Client provided wrong password");
                 return Err(Error::Other(String::from("WrongPasswd")));
             }
-            self.comrades.push(comrade);
+            self.network.comrades.push(comrade);
         } else {
-            self.comrades.push(comrade);
+            self.network.comrades.push(comrade);
         }
         return Ok(());
     }
 
     pub fn initiate_coord_connection(&mut self, addr: &str, timeout: Duration) -> Result<()> {
-        let req_msg = Message::from_payload(
+        self.inviter.connect(addr)?;
+        thread::sleep(Duration::from_millis(100));
+        self.inviter.pack_send_msg_payload(
             IntroduceWorkerToCoordRequest {
-                worker_addr: self.network.driver.my_addr.clone(),
+                worker_addr: self.addr.clone(),
                 //TODO
                 worker_passwd: "".to_string(),
             },
-            false,
+            None,
         )?;
-        self.network.driver.inviter.connect(&tcp_endpoint(addr))?;
-        thread::sleep(Duration::from_millis(100));
-        self.network.driver.inviter.send_msg(req_msg)?;
 
         let resp: IntroduceWorkerToCoordResponse = self
-            .network
-            .driver
             .inviter
-            .try_read_msg(Some(timeout.as_millis() as u32))?
-            .unpack_payload()?;
+            .try_recv_msg()?
+            .unpack_payload(self.inviter.encoding())?;
 
-        self.network.driver.inviter.disconnect("")?;
+        self.inviter.disconnect(None)?;
         Ok(())
     }
 
@@ -146,12 +152,12 @@ impl Worker {
     pub fn handle_coordinator(&mut self) -> Result<()> {
         print!("Waiting for message from coordinator... ");
         std::io::stdout().flush()?;
-        let msg = self.network.driver.accept()?;
+        let (_, msg) = self.greeter.recv_msg()?;
         println!("success");
 
         debug!("message from coordinator: {:?}", msg);
 
-        let req: IntroduceCoordRequest = msg.unpack_payload()?;
+        let req: IntroduceCoordRequest = msg.unpack_payload(self.greeter.encoding())?;
 
         print!(
             "Coordinator announced itself as {}, with {}",
@@ -168,24 +174,25 @@ impl Worker {
 
         println!("accepted");
 
-        let resp = Message::from_payload(
+        let addr_stem = self.addr.split(":").collect::<Vec<&str>>()[0];
+        let laminar_addr = format!("{}:6223", addr_stem);
+
+        self.greeter.pack_send_msg_payload(
             IntroduceCoordResponse {
+                laminar_socket: laminar_addr.clone(),
                 error: "".to_string(),
             },
-            false,
+            None,
         )?;
-        self.network.driver.greeter.send_msg(resp)?;
 
-        self.network
-            .driver
-            .coord
-            .bind(&format!("{}6", self.network.driver.my_addr))?;
-        self.network.driver.coord.connect(&req.ip_addr)?;
+        //let addr_stem = self.addr.split(":").collect::<Vec<&str>>()[0];
+        //let laminar_addr = format!("{}:6223", addr_stem);
+        let mut coord = Socket::bind(&laminar_addr, Transport::Laminar)?;
+        coord.connect(&req.ip_addr)?;
 
-        self.network
-            .driver
-            .coord
-            .send(crate::sig::Signal::from(Signal::EndOfMessages).to_bytes()?)?;
+        coord.send_sig(crate::sig::Signal::from(Signal::EndOfMessages), None)?;
+
+        self.network.coord = Some(coord);
 
         // self.driver.connect_to_coord(&req.ip_addr, resp)?;
 
@@ -221,17 +228,12 @@ impl Worker {
             // sleep a little to make this thread less expensive
             // sleep(Duration::from_micros(50));
 
-            let bytes = match self.network.driver.coord.try_read(Some(1)) {
-                Ok(m) => m,
-                Err(e) => {
-                    // println!("{:?}", e);
-                    continue;
-                }
-            };
-            let sig = crate::sig::Signal::from_bytes(&bytes)?;
-            // debug!("{:?}", sig);
-            self.handle_signal(sig.inner())?;
-            // self.handle_message(msg, &mut in_stream, &mut out_stream);
+            if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
+                self.handle_signal(sig.into_inner())?;
+            } else {
+                //println!("in loop");
+                continue;
+            }
         }
     }
 }
@@ -288,10 +290,9 @@ impl Worker {
         match sig {
             Signal::InitializeNode(model) => self.handle_sig_initialize_node(model)?,
             Signal::StartProcessStep(event_queue) => {
-                self.sim_node
-                    .as_mut()
-                    .unwrap()
-                    .step(&mut self.network, &event_queue)?;
+                let sim_node = self.sim_node.as_mut().unwrap();
+                sim_node.step(&mut self.network, &event_queue)?;
+                // self.sim_node.as_mut().unwrap().step(self, &event_queue)?;
                 // self.network
                 //     .driver
                 //     .coord
@@ -325,10 +326,10 @@ impl Worker {
         Ok(())
     }
 
-    fn handle_sig_data_request_all(&self) -> Result<()> {
+    fn handle_sig_data_request_all(&mut self) -> Result<()> {
         let mut collection = Vec::new();
         for (entity_uid, entity) in &self.sim_node.as_ref().unwrap().entities {
-            for ((comp_id, var_id), var) in entity.storage.get_all_var() {
+            for ((comp_id, var_id), var) in entity.storage.map.iter() {
                 collection.push((
                     Address {
                         entity: arraystring::new_truncate(&entity_uid.to_string()),
@@ -342,19 +343,20 @@ impl Worker {
         }
         let signal = Signal::DataResponse(collection);
         self.network
-            .driver
             .coord
-            .send(crate::sig::Signal::from(signal).to_bytes()?)?;
+            .as_mut()
+            .unwrap()
+            .send_sig(crate::sig::Signal::from(signal), None)?;
 
         Ok(())
     }
     /// Handles an incoming message.
     fn handle_message(&mut self, msg: Message) -> Result<()> {
-        debug!("handling message: {}", &msg.kind);
+        debug!("handling message: {:?}", &msg.type_);
 
-        match msg.kind.as_str() {
+        match msg.type_ {
             // PING_REQUEST => handle_ping_request(msg, worker)?,
-            // DATA_TRANSFER_REQUEST => handle_data_transfer_request(msg, worker)?,
+            // MessageKind::DataTransferRequest => handle_data_transfer_request(msg, worker)?,
             // DATA_PULL_REQUEST => handle_data_pull_request(msg, worker)?,
             // STATUS_REQUEST => handle_status_request(msg, worker)?,
 
@@ -384,11 +386,9 @@ fn handle_comrade(local_worker: Arc<Mutex<Worker>>) {
 
 /// Fellow worker from the same cluster.
 pub struct Comrade {
-    /// Client self-assigned id
     pub name: String,
-    /// Address of the client
     pub addr: SocketAddr,
-    /// Password used by the comrade for authentication
+    pub connection: Socket,
     pub passwd: String,
 }
 
@@ -419,7 +419,8 @@ pub fn handle_status_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Re
 }
 
 pub fn handle_data_transfer_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
-    let dtr: DataTransferRequest = msg.unpack_payload()?;
+    unimplemented!();
+    let dtr: DataTransferRequest = msg.unpack_payload(&Encoding::Bincode)?;
     let mut data_pack = SimDataPack::empty();
     let mut server = server_arc.lock().unwrap();
     match dtr.transfer_type.as_str() {
@@ -427,7 +428,7 @@ pub fn handle_data_transfer_request(msg: Message, server_arc: Arc<Mutex<Worker>>
             unimplemented!();
             for (_, entity) in &server.sim_node.as_ref().unwrap().entities {
                 //entity.storage.get
-                for (var_name, var) in entity.storage.get_all_str() {
+                for (var_name, var) in entity.storage.map.iter() {
 
                     //                    let addr = Address::from_str_global(
                     //                        &format!("{}/{}/{}/{}/{}/{}", entity.type_, entity.id, )
@@ -478,7 +479,7 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
     //TODO
     //    let mut sim_model = &server.sim_model.clone();
     let mut sim_instance = &mut server.sim_node;
-    let dpr: DataPullRequest = msg.unpack_payload()?;
+    let dpr: DataPullRequest = msg.unpack_payload(&Encoding::Bincode)?;
     //TODO do all other var types
     //TODO handle errors
     for (address, string_var) in dpr.data.strings {
@@ -499,19 +500,28 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
 
 impl outcome::distr::NodeCommunication for WorkerNetwork {
     fn sig_read_central(&mut self) -> outcome::Result<Signal> {
-        let bytes = self.driver.coord.read().unwrap();
-        let sig = sig::Signal::from_bytes(&bytes).unwrap();
-        Ok(sig.inner())
+        let (addr, sig) = self.coord.as_mut().unwrap().recv_sig().unwrap();
+        Ok(sig.into_inner())
     }
 
     fn sig_send_central(&mut self, signal: Signal) -> outcome::Result<()> {
-        let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
-        self.driver.coord.send(sig_bytes).unwrap();
+        self.coord
+            .as_mut()
+            .unwrap()
+            .send_sig(sig::Signal::from(signal), None)
+            .unwrap();
         Ok(())
     }
 
     fn sig_read(&mut self) -> outcome::Result<(String, Signal)> {
-        unimplemented!()
+        for comrade in &mut self.comrades {
+            if let Ok((addr, sig)) = comrade.connection.recv_sig() {
+                return Ok((comrade.name.to_string(), sig.into_inner()));
+            }
+        }
+        Err(outcome::error::Error::Other(
+            "failed reading sig".to_string(),
+        ))
     }
 
     fn sig_read_from(&mut self, node_id: u32) -> outcome::Result<Signal> {

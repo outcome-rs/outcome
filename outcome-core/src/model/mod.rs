@@ -8,8 +8,8 @@ extern crate serde;
 // extern crate serde_yaml;
 extern crate toml;
 
-// mod dyn_deser;
 mod deser;
+//mod dyn_deser;
 
 // pub use model::dyn_deser::*;
 
@@ -21,7 +21,7 @@ use std::str::FromStr;
 
 use fnv::FnvHashMap;
 
-use crate::{arraystring, Result};
+use crate::{arraystring, CompId, EntityId, EventId, Result, VarId};
 use crate::{util, ShortString};
 use crate::{MedString, StringId};
 use crate::{Var, VarType};
@@ -30,12 +30,12 @@ use crate::{
     VERSION,
 };
 
-use crate::address::Address;
+use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::error::Error;
 //use crate::script::bridge::FILE_EXTENSION;
 
 #[cfg(feature = "machine_script")]
-use crate::machine::script::{parser, preprocessor, InstructionKind};
+use crate::machine::script::{parser, preprocessor, InstructionType};
 
 //use crate::machine::cmd::Command;
 //use crate::machine::{cmd, CommandPrototype, LocationInfo};
@@ -71,7 +71,7 @@ pub struct SimModel {
     pub scenario: Scenario,
     pub events: Vec<EventModel>,
     pub scripts: Vec<String>,
-    pub entities: Vec<EntityPrefabModel>,
+    pub entities: Vec<EntityPrefab>,
     pub components: Vec<ComponentModel>,
     pub data: Vec<DataEntry>,
     pub data_files: Vec<DataFileEntry>,
@@ -98,48 +98,69 @@ impl SimModel {
             id: ShortString::from(crate::DEFAULT_TRIGGER_EVENT).unwrap(),
         });
 
-        #[cfg(feature = "machine_script")]
-        {
-            let mut mod_init_prefab = EntityPrefabModel {
-                name: StringId::from("_mod_init").unwrap(),
-                ..EntityPrefabModel::default()
-            };
+        // iterate over scenario modules
+        for module in &scenario.modules {
+            // load from structured data
+            #[cfg(feature = "yaml")]
+            {
+                let files = util::find_files_with_extension(
+                    module.path.clone(),
+                    vec!["yaml", "yml"],
+                    true,
+                    None,
+                );
+                println!("{:?}", files);
+                for file in files {
+                    let file_struct: deser::DataFile = util::deser_struct_from_path(file)?;
+                    println!("{:?}", file_struct);
+                    model.apply_from_structured_file(file_struct)?;
+                }
+            }
 
-            model.events.push(EventModel {
-                id: ShortString::from("_scr_init").unwrap(),
-            });
+            // load from scripts
+            #[cfg(feature = "machine_script")]
+            {
+                let mut mod_init_prefab = EntityPrefab {
+                    name: StringId::from("_mod_init").unwrap(),
+                    ..EntityPrefab::default()
+                };
 
-            let scr_init_mod_template = ComponentModel {
-                name: StringId::from("_init_mod_").unwrap(),
-                start_state: StringId::from("main").unwrap(),
-                triggers: vec![StringId::from("_scr_init").unwrap()],
-                ..ComponentModel::default()
-            };
+                model.events.push(EventModel {
+                    id: ShortString::from("_scr_init").unwrap(),
+                });
 
-            // let scr_init_mod_template = ComponentModel {
-            //     name: StringId::from_unchecked("_init_mod_"),
-            //     vars: vec![],
-            //     start_state: StringId::from_unchecked("main"),
-            //     triggers: vec![StringId::from_unchecked("_scr_init")],
-            //     logic: LogicModel {
-            //         commands: Vec::new(),
-            //         states: FnvHashMap::default(),
-            //         procedures: FnvHashMap::default(),
-            //         cmd_location_map: FnvHashMap::default(),
-            //         pre_commands: FnvHashMap::default(),
-            //     },
-            //     source_files: Vec::new(),
-            //     script_files: Vec::new(),
-            //     lib_files: Vec::new(),
-            // };
-            // #[cfg(feature = "machine")]
-            use crate::machine::{cmd::Command, CommandPrototype, LocationInfo};
+                let scr_init_mod_template = ComponentModel {
+                    name: StringId::from("_init_mod_").unwrap(),
+                    triggers: vec![StringId::from("_scr_init").unwrap()],
+                    logic: LogicModel {
+                        start_state: StringId::from("main").unwrap(),
+                        ..Default::default()
+                    },
+                    ..ComponentModel::default()
+                };
 
-            // use script processor to handle scripts
-            let program_data = crate::machine::script::util::get_program_metadata();
+                // let scr_init_mod_template = ComponentModel {
+                //     name: StringId::from_unchecked("_init_mod_"),
+                //     vars: vec![],
+                //     start_state: StringId::from_unchecked("main"),
+                //     triggers: vec![StringId::from_unchecked("_scr_init")],
+                //     logic: LogicModel {
+                //         commands: Vec::new(),
+                //         states: FnvHashMap::default(),
+                //         procedures: FnvHashMap::default(),
+                //         cmd_location_map: FnvHashMap::default(),
+                //         pre_commands: FnvHashMap::default(),
+                //     },
+                //     source_files: Vec::new(),
+                //     script_files: Vec::new(),
+                //     lib_files: Vec::new(),
+                // };
+                // #[cfg(feature = "machine")]
+                use crate::machine::{cmd::Command, CommandPrototype, LocationInfo};
 
-            // iterate over scenario modules
-            for module in &scenario.modules {
+                // use script processor to handle scripts
+                let program_data = crate::machine::script::util::get_program_metadata();
+
                 // create path to entry script
                 let mod_entry_file_path = PathBuf::new()
                     .join(crate::SCENARIO_MODS_DIR_NAME)
@@ -165,8 +186,8 @@ impl SimModel {
                 let mut cmd_prototypes: Vec<CommandPrototype> = Vec::new();
                 let mut cmd_locations: Vec<LocationInfo> = Vec::new();
                 for instruction in instructions {
-                    let cmd_prototype = match instruction.kind {
-                        InstructionKind::Command(c) => c,
+                    let cmd_prototype = match instruction.type_ {
+                        InstructionType::Command(c) => c,
                         _ => continue,
                     };
                     cmd_prototypes.push(cmd_prototype);
@@ -207,8 +228,9 @@ impl SimModel {
                     .insert(StringId::from("main").unwrap(), (0, commands.len()));
                 mod_init_prefab.components.push(comp_model.name);
                 model.components.push(comp_model);
+
+                model.entities.push(mod_init_prefab);
             }
-            model.entities.push(mod_init_prefab);
         }
 
         Ok(model)
@@ -216,20 +238,38 @@ impl SimModel {
 }
 
 impl SimModel {
+    pub fn apply_from_structured_file(&mut self, file_struct: deser::DataFile) -> Result<()> {
+        for component in file_struct.components {
+            println!("{:?}", component);
+            if let Some(comp_struct) = component.1 {
+                let comp_model = ComponentModel::from_deser(&component.0, comp_struct)?;
+                self.components.push(comp_model);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get reference to entity prefab using `type_` and `id` str args.
-    pub fn get_entity(&self, name: &StringId) -> Option<&EntityPrefabModel> {
+    pub fn get_entity(&self, name: &StringId) -> Option<&EntityPrefab> {
         self.entities
             .iter()
             .find(|entity| &entity.name.as_ref() == &name.as_ref())
     }
+
     /// Get mutable reference to entity prefab using `type_` and `id` args.
-    pub fn get_entity_mut(&mut self, name: &StringId) -> Option<&mut EntityPrefabModel> {
+    pub fn get_entity_mut(&mut self, name: &StringId) -> Option<&mut EntityPrefab> {
         self.entities.iter_mut().find(|entity| &entity.name == name)
     }
+
     /// Get reference to component model using `type_` and `id` args.
-    pub fn get_component(&self, name: &StringId) -> Option<&ComponentModel> {
-        self.components.iter().find(|comp| &comp.name == name)
+    pub fn get_component(&self, name: &CompId) -> Result<&ComponentModel> {
+        self.components
+            .iter()
+            .find(|comp| &comp.name == name)
+            .ok_or(Error::NoComponentModel(*name))
     }
+
     /// Get mutable reference to component model using `type_` and `id` args.
     pub fn get_component_mut(&mut self, name: &StringId) -> Option<&mut ComponentModel> {
         self.components.iter_mut().find(|comp| &comp.name == name)
@@ -257,18 +297,16 @@ pub struct ScenarioManifest {
 }
 
 impl ScenarioManifest {
-    /// Creates new scenario manifest object from path reference to scenario
-    /// directory.
-    pub fn from_dir_at(path: PathBuf) -> Result<ScenarioManifest> {
-        let manifest_path = path.join(SCENARIO_MANIFEST_FILE);
-        let deser_manifest: deser::ScenarioManifest =
-            util::static_deser_obj_from_path(manifest_path)?;
-        // println!("{:?}", deser_manifest);
+    /// Creates new scenario manifest object from path reference.
+    pub fn from_path(path: PathBuf) -> Result<ScenarioManifest> {
+        // let manifest_path = path.join(SCENARIO_MANIFEST_FILE);
+        let manifest_path = path;
+        let deser_manifest: deser::ScenarioManifest = util::deser_struct_from_path(manifest_path)?;
         let mut mods = Vec::new();
         for module in deser_manifest.mods {
             let (name, value) = module;
 
-            // TODO
+            // TODO better errors
             mods.push(ScenarioModuleDep::from_toml_value(&name, &value).unwrap());
         }
 
@@ -380,14 +418,16 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    /// Create a scenario model from a path reference to scenario directory.
-    pub fn from_dir_at(path: PathBuf) -> Result<Scenario> {
+    /// Create a scenario model from a path reference to scenario manifest.
+    pub fn from_path(path: PathBuf) -> Result<Scenario> {
+        let dir_path = path.parent().unwrap();
+        println!("{:?}", dir_path);
         // get the scenario manifest
         // let scenario_manifest = ScenarioManifest::from_dir_at(path.clone()).expect(&format!(
         //     "failed making scenario manifest from dir path: \"{}\"",
         //     path.to_str().unwrap()
         // ));
-        let scenario_manifest = ScenarioManifest::from_dir_at(path.clone())?;
+        let scenario_manifest = ScenarioManifest::from_path(path.clone())?;
 
         // if the version requirement for the engine specified in
         // the scenario manifest is not met throw a warning
@@ -406,7 +446,7 @@ impl Scenario {
             &mods_to_load.len()
         );
         // get the path to scenario mods directory
-        let scenario_mods_path = path.join(SCENARIO_MODS_DIR_NAME);
+        let scenario_mods_path = dir_path.join(SCENARIO_MODS_DIR_NAME);
         // found matching mods will be added to this vec
         let mut matching_mods: Vec<Module> = Vec::new();
         // this vec is for storing mod_not_found messages to print
@@ -555,7 +595,7 @@ impl Scenario {
         }
 
         Ok(Scenario {
-            path,
+            path: dir_path.to_path_buf(),
             manifest: scenario_manifest,
             modules: matching_mods,
         })
@@ -576,7 +616,11 @@ pub struct ModuleManifest {
     pub engine_features: Vec<String>,
     /// List of other module dependencies for this module
     pub dependencies: HashMap<String, ModuleDep>,
+    /// List of required target addrs
     pub reqs: Vec<String>,
+
+    pub libs: Vec<ModuleLib>,
+    pub services: Vec<ModuleService>,
 
     // optional
     /// Free-form module name
@@ -596,7 +640,7 @@ impl ModuleManifest {
     pub fn from_dir_at(path: PathBuf) -> Result<ModuleManifest> {
         let manifest_path = path.join(MODULE_MANIFEST_FILE);
         let deser_manifest: deser::ModuleManifest =
-            util::static_deser_obj_from_path(manifest_path.clone())?;
+            util::deser_struct_from_path(manifest_path.clone())?;
         let mut dep_map: HashMap<String, ModuleDep> = HashMap::new();
         for (name, value) in deser_manifest.dependencies {
             // TODO
@@ -610,7 +654,7 @@ impl ModuleManifest {
         }
         let mut engine_version_req = String::new();
         let mut engine_features = Vec::new();
-        if let Some(table) = deser_manifest.mod_.engine.as_table() {
+        if let Some(table) = deser_manifest._mod.engine.as_table() {
             for (name, value) in table {
                 match name.as_str() {
                     "version" => engine_version_req = value.as_str().unwrap().to_string(),
@@ -626,31 +670,81 @@ impl ModuleManifest {
                 }
             }
         }
+        let mut libs = Vec::new();
+        for (lib_name, lib_value) in deser_manifest.libs {
+            let mut library_path = None;
+            let mut project_path = None;
+            if let Some(table) = lib_value.as_table() {
+                for (name, value) in table {
+                    match name.as_str() {
+                        "path" | "library" => library_path = Some(value.to_string()),
+                        "project" => project_path = Some(value.to_string()),
+                        _ => (),
+                    }
+                }
+            } else if let Some(s) = lib_value.as_str() {
+                library_path = Some(s.to_string());
+            }
+            let lib = ModuleLib {
+                path: library_path,
+                project: project_path,
+            };
+            libs.push(lib);
+        }
+
+        let mut services = Vec::new();
+        for (service_name, service_value) in deser_manifest.services {
+            let mut executable_path = None;
+            let mut project_path = None;
+            let mut managed = true;
+            let mut args_string = None;
+
+            if let Some(table) = service_value.as_table() {
+                for (name, value) in table {
+                    match name.as_str() {
+                        "executable" | "path" => executable_path = Some(value.to_string()),
+                        "project" => project_path = Some(value.to_string()),
+                        _ => (),
+                    }
+                }
+            } else if let Some(s) = service_value.as_str() {
+                executable_path = Some(s.to_string());
+            }
+            let service = ModuleService {
+                executable: executable_path,
+                project: project_path,
+                managed,
+                args: args_string,
+            };
+            services.push(service);
+        }
 
         Ok(ModuleManifest {
-            name: deser_manifest.mod_.name,
+            name: deser_manifest._mod.name,
             engine_version_req,
             engine_features,
-            version: deser_manifest.mod_.version,
+            version: deser_manifest._mod.version,
             dependencies: dep_map,
             reqs: req_vec,
-            title: match deser_manifest.mod_.title.as_str() {
+            libs,
+            services,
+            title: match deser_manifest._mod.title.as_str() {
                 "" => None,
                 s => Some(s.to_owned()),
             },
-            desc: match deser_manifest.mod_.desc.as_str() {
+            desc: match deser_manifest._mod.desc.as_str() {
                 "" => None,
                 s => Some(s.to_owned()),
             },
-            desc_long: match deser_manifest.mod_.desc_long.as_str() {
+            desc_long: match deser_manifest._mod.desc_long.as_str() {
                 "" => None,
                 s => Some(s.to_owned()),
             },
-            author: match deser_manifest.mod_.author.as_str() {
+            author: match deser_manifest._mod.author.as_str() {
                 "" => None,
                 s => Some(s.to_owned()),
             },
-            website: match deser_manifest.mod_.website.as_str() {
+            website: match deser_manifest._mod.website.as_str() {
                 "" => None,
                 s => Some(s.to_owned()),
             },
@@ -666,10 +760,33 @@ pub struct ModuleDep {
     pub git_address: Option<String>,
 }
 
+/// Library declared by a module.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleLib {
+    /// Path to dynamic library file relative to module root
+    path: Option<String>,
+    /// Path to buildable project
+    project: Option<String>,
+}
+
+/// Service declared by a module.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleService {
+    /// Path to executable relative to module root
+    executable: Option<String>,
+    /// Path to buildable project
+    project: Option<String>,
+    /// Defines the nature of the service
+    managed: bool,
+    /// Arguments string passed to the executable
+    args: Option<String>,
+}
+
 /// Module model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Module {
     pub manifest: ModuleManifest,
+    pub path: PathBuf,
 }
 
 impl Module {
@@ -678,6 +795,7 @@ impl Module {
 
         Ok(Module {
             manifest: module_manifest,
+            path,
         })
     }
 }
@@ -685,14 +803,14 @@ impl Module {
 /// Trigger event model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventModel {
-    pub id: ShortString,
+    pub id: EventId,
 }
 
 /// Entity prefab model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct EntityPrefabModel {
-    pub name: StringId,
-    pub components: Vec<StringId>,
+pub struct EntityPrefab {
+    pub name: EntityId,
+    pub components: Vec<CompId>,
 }
 
 // cfg_if! {
@@ -722,23 +840,39 @@ pub struct EntityPrefabModel {
 /// Component model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComponentModel {
-    pub name: StringId,
+    pub name: CompId,
     pub vars: Vec<VarModel>,
-    pub start_state: StringId,
     pub triggers: Vec<StringId>,
 
     #[cfg(feature = "machine")]
     pub logic: LogicModel,
+    //pub source_files: Vec<PathBuf>,
+    //pub script_files: Vec<PathBuf>,
+    //pub lib_files: Vec<PathBuf>,
+}
 
-    pub source_files: Vec<PathBuf>,
-    pub script_files: Vec<PathBuf>,
-    pub lib_files: Vec<PathBuf>,
+impl ComponentModel {
+    pub fn from_deser(key: &String, val: deser::ComponentEntry) -> Result<Self> {
+        Ok(ComponentModel {
+            name: arraystring::new_truncate(key),
+            vars: val
+                .vars
+                .into_iter()
+                .filter(|(k, v)| v.is_some())
+                .map(|(k, v)| VarModel::from_deser(&k, v).unwrap())
+                .collect(),
+            triggers: Vec::new(),
+            ..Default::default()
+        })
+    }
 }
 
 /// Component-bound state machine logic model.
 #[cfg(feature = "machine")]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogicModel {
+    /// Starting state
+    pub start_state: StringId,
     /// List of loc phase commands
     pub commands: Vec<crate::machine::cmd::Command>,
     /// List of pre phase commands
@@ -755,6 +889,7 @@ pub struct LogicModel {
 impl LogicModel {
     pub fn empty() -> LogicModel {
         LogicModel {
+            start_state: StringId::from("start").unwrap(),
             commands: Vec::new(),
             states: FnvHashMap::default(),
             procedures: FnvHashMap::default(),
@@ -765,8 +900,8 @@ impl LogicModel {
 
     pub fn get_subset(&self, start_line: usize, last_line: usize) -> LogicModel {
         let mut new_logic = LogicModel::empty();
-        new_logic.commands = self.commands[start_line - 1..last_line - 1].to_vec();
-        new_logic.cmd_location_map = self.cmd_location_map[start_line - 1..last_line - 1].to_vec();
+        new_logic.commands = self.commands[start_line..last_line].to_vec();
+        new_logic.cmd_location_map = self.cmd_location_map[start_line..last_line].to_vec();
         new_logic
     }
 }
@@ -774,9 +909,21 @@ impl LogicModel {
 /// Variable model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VarModel {
-    pub id: String,
+    pub id: VarId,
     pub type_: VarType,
     pub default: Option<Var>,
+}
+
+impl VarModel {
+    pub fn from_deser(key: &str, val: Option<deser::VarEntry>) -> Result<VarModel> {
+        let addr = ShortLocalAddress::from_str(key)?;
+
+        Ok(VarModel {
+            id: arraystring::new_truncate(&addr.var_id),
+            type_: addr.var_type,
+            default: val.map(|v| Var::from(v)),
+        })
+    }
 }
 
 /// Data entry model.

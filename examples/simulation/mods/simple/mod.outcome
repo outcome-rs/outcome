@@ -15,27 +15,30 @@ print "hello world from simple mod"
 
 component health
     print "inside health component"
-#    var int:max
-#    var float:current
-
-
-#    state decrease
-##        eval float:current - 1
-##        set float:current 1
-#        print "state decrease"
-#    end
+	#var int:max
+	var float:current
+	trigger init
+	#start 
+	
+	state here --first
+		print "im here"
+#        eval float:current - 1
+#        set float:current 1
+		print "state decrease"
+		#invoke init
+	end
 end
 
 prefab monster health
 
 spawn monster monster1
 spawn monster monster2
-set int:hund 10000
+set int:hund 10
 for int:some in int:hund
 #    print "inside loop"
 	spawn monster
 end
 
-#invoke init
+invoke init
 
 #print "hello world"

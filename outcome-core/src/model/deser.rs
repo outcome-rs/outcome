@@ -20,16 +20,27 @@ use self::linked_hash_map::LinkedHashMap;
 
 // use self::serde_yaml::Value;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleLib {
+    path: String,
+    build: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleManifest {
     #[serde(rename = "mod")]
-    pub mod_: ModuleManifestMod,
+    pub _mod: ModuleManifestMod,
     #[serde(default)]
     pub dependencies: HashMap<String, toml::Value>,
     #[serde(default)]
     pub reqs: Vec<String>,
+    #[serde(default)]
+    pub libs: HashMap<String, toml::Value>,
+    #[serde(default)]
+    pub services: HashMap<String, toml::Value>,
 }
-#[derive(Debug, Serialize, Deserialize, Clone)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleManifestMod {
     // required
     pub name: String,
@@ -59,7 +70,7 @@ pub struct ScenarioManifest {
     #[serde(default)]
     pub services: HashMap<String, toml::Value>,
 }
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioManifestScenario {
     // required
     pub name: String,
@@ -79,7 +90,7 @@ pub struct ScenarioManifestScenario {
 }
 
 // TODO
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofManifest {
     // required
     name: String,
@@ -97,4 +108,45 @@ pub struct ProofManifest {
     author: String,
     #[serde(default)]
     website: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataFile {
+    #[serde(default)]
+    pub components: HashMap<String, Option<ComponentEntry>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComponentEntry {
+    #[serde(default)]
+    pub vars: HashMap<String, Option<VarEntry>>,
+    #[serde(default)]
+    pub states: HashMap<String, Option<VarEntry>>,
+    #[serde(default)]
+    pub start_state: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum VarEntry {
+    String(String),
+    Float(f64),
+    Int(i64),
+    Bool(bool),
+    IntList(Vec<i64>),
+}
+
+use crate::Var;
+impl From<VarEntry> for Var {
+    fn from(var_entry: VarEntry) -> Self {
+        let var = match var_entry {
+            VarEntry::String(v) => Var::Str(v),
+            VarEntry::Float(v) => Var::Float(v),
+            VarEntry::Int(v) => Var::Int(v),
+            VarEntry::Bool(v) => Var::Bool(v),
+            VarEntry::IntList(v) => Var::IntList(v),
+            _ => unimplemented!(),
+        };
+        var
+    }
 }

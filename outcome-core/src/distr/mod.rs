@@ -33,9 +33,6 @@ use crate::machine::{
     cmd::CentralRemoteCommand, cmd::Command, cmd::CommandResult, cmd::ExtCommand, ExecutionContext,
 };
 
-//TODO
-// investigate separate signal structures for communication between two nodes
-// and between node and central
 /// Definition encompassing all possible messages available for communication
 /// between two nodes and between node and central.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +62,6 @@ pub enum Signal {
     DataRequestAll,
     /// Request selected data from the node
     DataRequestSelect(Vec<Address>),
-    //TODO investigate responses with typed data packs
     /// Response containing the requested data
     DataResponse(Vec<(Address, Var)>),
 
@@ -81,23 +77,23 @@ pub enum Signal {
 }
 
 /// Trait representing central coordinator's ability to send and receive
-/// messages over the wire.
+/// data over the network.
 pub trait CentralCommunication {
     /// Reads a single incoming signal.
-    fn sig_read(&self) -> Result<(String, Signal)>;
+    fn sig_read(&mut self) -> Result<(u32, Signal)>;
     /// Reads incoming signal from a specific node.
-    fn sig_read_from(&self, node_id: u32) -> Result<Signal>;
+    fn sig_read_from(&mut self, node_id: u32) -> Result<Signal>;
 
     /// Sends a signal to node.
-    fn sig_send_to_node(&self, node_id: u32, signal: Signal) -> Result<()>;
+    fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
     /// Sends a signal to node where the specified entity lives.
-    fn sig_send_to_entity(&self, entity_uid: EntityUid) -> Result<()>;
+    fn sig_send_to_entity(&mut self, entity_uid: EntityUid) -> Result<()>;
 
     /// Sends a signal to all the nodes.
-    fn sig_broadcast(&self, signal: Signal) -> Result<()>;
+    fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;
 }
 
-/// Trait representing node's ability to send and receive messages over the
+/// Trait representing node's ability to send and receive data over the
 /// network.
 pub trait NodeCommunication {
     /// Reads a single signal coming from central orchestrator.
@@ -153,8 +149,8 @@ pub enum DistributionPolicy {
     ///
     /// # Details
     ///
-    /// Based on a standard `position` component containing floats for
-    /// x, y and z coordinates.
+    /// Pulls into the model a built-in `position` component containing floats
+    /// for x, y and z coordinates.
     ///
     /// Three-dimensional bounding box is defined for each node. Entities are
     /// distributed based on which box they are currently in.

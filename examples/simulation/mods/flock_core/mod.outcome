@@ -1,0 +1,26 @@
+print "[flock_core] registering components"
+
+component velocity
+	var float:x
+	var float:y
+end
+
+component flock_member
+	var bool:nothing
+end
+
+component flock_member_params 
+	var float:max_speed 200
+	var float:max_accel 30
+	var float:safe_radius 50
+end
+
+component children
+	var int_list:id
+end
+
+
+prefab bird children flock_member flock_member_params velocity
+set int:0 1
+spawn bird -o int:0
+

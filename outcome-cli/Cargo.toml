@@ -15,17 +15,18 @@ name = "outcome"
 path = "src/main.rs"
 
 [features]
-default = ["outcome-core/machine_sandbox", "outcome-core/load_img", "psutils", "img_print", "transport_zmq", "grids"]
+default = ["outcome-core/machine_sandbox", "outcome-core/load_img", "psutils", "img_print", "zmq", "grids"]
 #default = ["outcome-core/machine_sandbox", "outcome-core/load_img", "psutils", "img_print", "transport_nng", "grids"]
 complete = ["outcome-core/machine_complete", "outcome-core/load_img", "psutils", "img_print", "grids"]
 
-transport_nng = ["outcome-net/transport_nng"]
-transport_zmq = ["outcome-net/transport_zmq"]
+nng = ["outcome-net/nng_transport"]
+zmq = ["outcome-net/zmq_transport"]
 
 grids = ["outcome-core/grids", "outcome-net/grids"]
 
 psutils = ["psutil"]
 img_print = ["image"]
+watcher = ["notify"]
 
 
 [dependencies]
@@ -42,5 +43,6 @@ ansi_term = "0.12.1"
 log = "0.4.11"
 simplelog = "0.8.0"
 
+notify = { version = "5.0.0-pre.4", optional = true }
 psutil = { version = "3.2.0", optional = true, default-features = false, features = ["process"] }
 image = { version = "0.23.11", default-features = false, features = ["png"], optional = true }

@@ -1,0 +1,5 @@
+[mod]
+name = "hello_world"
+description = "Barebones hello world module."
+version = "0.1.0"
+engine = "*"

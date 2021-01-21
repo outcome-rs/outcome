@@ -1,8 +1,6 @@
-//! # Internal API
-//!
 //! Protocol used by cluster coordinator and workers.
 //!
-//! ## Protocol overview
+//! # Overview
 //!
 //! On cluster initialization, coordinator connects to listed worker
 //! addresses and sends introductory messages. Each worker creates
@@ -15,24 +13,27 @@
 //! Necessary data (sim model) is sent over the network to each of the
 //! workers.
 //!
-//! Tick processing consists of two phases: `loc`, `ext`.
-//! Each phase is signalled to workers by the coordinator.
+//! ## Non-machine processing
 //!
-//! `loc` (local) phase is performed in isolation by each of the workers.
-//! During `loc` phase `ext` commands are collected for processing during
-//! `ext` phase.
+//! Processing a step requires handling incoming client chatter, which is
+//! mostly event invokes and step process requests (client blocking mechanism).
 //!
-//! During the `ext` phase each worker sends messages to other workers based
-//! on the collected `ext` commands. Messages are sent to proper peer nodes,
-//! since each `ext` command is addressed to a single entity, and worker
-//! keeps a map of entities and nodes owning them. It also has a map of
-//! nodes with I/O sockets, 2 sockets for each node.
+//! ## Machine processing
 //!
+//! Runtime-level machine step processing consists of two phases: local and
+//! external.
+//!
+//! Local phase is performed in isolation by each of the workers.
+//! During this phase any external commands that were invoked are collected
+//! and stored.
+//!
+//! During the external phase each worker sends messages to other workers based
+//! on what has been collected in the previous phase. Messages are sent to
+//! proper peer nodes, since each external command is addressed to a specific
+//! entity, and worker keeps a map of entities and nodes owning them. It also
+//! has a map of nodes with I/O sockets, 2 sockets for each node.
 
 #![allow(unused)]
-
-extern crate rmp_serde;
-extern crate serde;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -40,8 +41,10 @@ use std::net::TcpStream;
 
 pub use crate::msg::{Message, Payload};
 
-use self::rmp_serde::{Deserializer, Serializer};
-use self::serde::{Deserialize, Serialize};
+use crate::msg::MessageType;
+use serde::{Deserialize, Serialize};
+
+pub enum SignalType {}
 
 // universal
 pub const PING_REQUEST: &str = "PingRequest";
@@ -73,10 +76,10 @@ pub struct IntroduceWorkerToCoordRequest {
     pub worker_addr: String,
     pub worker_passwd: String,
 }
-pub(crate) const INTRODUCE_WORKER_TO_COORD_REQUEST: &str = "IntroduceWorkerToCoordRequest";
+
 impl Payload for IntroduceWorkerToCoordRequest {
-    fn kind_str(&self) -> &str {
-        INTRODUCE_WORKER_TO_COORD_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::IntroduceWorkerToCoordRequest
     }
 }
 
@@ -84,10 +87,10 @@ impl Payload for IntroduceWorkerToCoordRequest {
 pub struct IntroduceWorkerToCoordResponse {
     pub error: String,
 }
-pub(crate) const INTRODUCE_WORKER_TO_COORD_RESPONSE: &str = "IntroduceWorkerToCoordResponse";
+
 impl Payload for IntroduceWorkerToCoordResponse {
-    fn kind_str(&self) -> &str {
-        INTRODUCE_WORKER_TO_COORD_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::IntroduceWorkerToCoordResponse
     }
 }
 
@@ -96,19 +99,22 @@ pub struct IntroduceCoordRequest {
     pub ip_addr: String,
     pub passwd: String,
 }
+
 impl Payload for IntroduceCoordRequest {
-    fn kind_str(&self) -> &str {
-        "RegisterCoordRequest"
+    fn type_(&self) -> MessageType {
+        MessageType::IntroduceCoordRequest
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct IntroduceCoordResponse {
     //    pub clients: Vec<String>,
+    pub laminar_socket: String,
     pub error: String,
 }
+
 impl Payload for IntroduceCoordResponse {
-    fn kind_str(&self) -> &str {
-        "RegisterCoordResponse"
+    fn type_(&self) -> MessageType {
+        MessageType::IntroduceCoordResponse
     }
 }

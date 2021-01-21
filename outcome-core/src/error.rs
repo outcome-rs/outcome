@@ -2,13 +2,22 @@
 
 use std::fmt::Display;
 use std::io;
+use std::num::{ParseFloatError, ParseIntError};
+use std::str::ParseBoolError;
 
 use crate::address::Address;
 
 #[cfg(feature = "machine")]
 use crate::machine;
+use crate::{CompId, EntityId};
 
 pub type Result<T> = core::result::Result<T, Error>;
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Self::IoError(e.to_string())
+    }
+}
 
 /// Crate-wide error type.
 #[derive(thiserror::Error, Debug)]
@@ -16,13 +25,15 @@ pub enum Error {
     #[error("would block")]
     WouldBlock,
 
-    #[error("io error")]
-    IoError(#[from] io::Error),
+    // IoError(#[from] io::Error),
+    #[error("io error: {0}")]
+    IoError(String),
 
+    #[cfg(feature = "yaml")]
+    #[error("yaml deserialization error")]
+    YamlDeserError(#[from] serde_yaml::Error),
     #[error("toml deserialization error: {0}")]
     TomlDeserError(#[from] toml::de::Error),
-    // #[error("yaml deserialization error")]
-    // YamlDeserError(#[from] serde_yaml::Error),
     #[error("semver req parse error")]
     SemverReqParseError(#[from] semver::ReqParseError),
     #[error("semver error")]
@@ -30,6 +41,19 @@ pub enum Error {
 
     #[error("parsing error: {0}")]
     ParsingError(String),
+    #[error("failed parsing int: {0}")]
+    ParseIntError(#[from] ParseIntError),
+    #[error("failed parsing float: {0}")]
+    ParseFloatError(#[from] ParseFloatError),
+    #[error("failed parsing bool: {0}")]
+    ParseBoolError(#[from] ParseBoolError),
+
+    #[error("invalid var type: {0}")]
+    InvalidVarType(String),
+    #[error("invalid local address: {0}")]
+    InvalidAddress(String),
+    #[error("invalid local address: {0}")]
+    InvalidLocalAddress(String),
 
     #[error("failed reading snapshot: {0}")]
     FailedReadingSnapshot(String),
@@ -40,12 +64,14 @@ pub enum Error {
     ScenarioMissingModules,
 
     #[error("model: no entity prefab named: {0}")]
-    NoEntityPrefab(String),
+    NoEntityPrefab(EntityId),
     #[error("model: no component named: {0}")]
-    NoComponentModel(String),
+    NoComponentModel(CompId),
 
     #[error("no entity found: {0}")]
     NoEntity(u32),
+    #[error("no entity found: {0}")]
+    NoEntityIndexed(String),
     #[error("failed getting variable: {0}")]
     FailedGettingVariable(String),
 

@@ -1,20 +1,59 @@
-use crate::msg::{
-    DataTransferRequest, DataTransferResponse, Heartbeat, Message, PingRequest,
-    RegisterClientRequest, RegisterClientResponse, SimDataPack, StatusRequest, StatusResponse,
-    TurnAdvanceRequest,
-};
-use crate::transport::{ClientDriverInterface, SocketInterface};
-use crate::ClientDriver;
-use crate::{error::Error, Result};
-
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-/// Connects to a server.
+use crate::msg::{
+    DataTransferRequest, DataTransferResponse, Heartbeat, Message, PingRequest,
+    RegisterClientRequest, RegisterClientResponse, SimDataPack, StatusRequest, StatusResponse,
+    TurnAdvanceRequest,
+};
+use crate::socket::{Encoding, Socket, SocketConfig, SocketType, Transport};
+use crate::{error::Error, Result};
+
+pub enum CompressionPolicy {
+    /// Compress all outgoing traffic
+    Everything,
+    /// Only compress messages larger than given size in bytes
+    LargerThan(usize),
+    /// Only compress data-heavy messages
+    OnlyDataTransfers,
+    /// Don't use compression
+    Nothing,
+}
+
+pub struct ClientConfig {
+    /// Self-assigned name
+    pub name: String,
+    /// Heartbeat frequency
+    pub heartbeat: Option<Duration>,
+    /// Blocking client requires server to wait for it's explicit step advance
+    pub is_blocking: bool,
+    /// Compression policy for outgoing messages
+    pub compress: CompressionPolicy,
+    /// Supported encodings, first is most preferred
+    pub encodings: Vec<Encoding>,
+    /// Supported transports
+    pub transports: Vec<Transport>,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            name: "default_client".to_string(),
+            heartbeat: Some(Duration::from_secs(1)),
+            is_blocking: false,
+            compress: CompressionPolicy::OnlyDataTransfers,
+            encodings: vec![Encoding::Bincode],
+            transports: vec![Transport::Tcp],
+        }
+    }
+}
+
+/// Represents a connection to the server.
 ///
-/// ## Blocking
+/// # Blocking client
 ///
 /// A blocking client is one that has to explicitly signal it's ready to
 /// proceed to next.
@@ -24,82 +63,102 @@ use std::time::Duration;
 /// of the coordinator, which has the ultimate authority when it comes to
 /// advancing the simulation clock.
 pub struct Client {
-    /// Self-assigned name
-    name: String,
-    /// Networking context struct
-    driver: Arc<Mutex<ClientDriver>>,
+    /// Configuration struct
+    config: ClientConfig,
+    /// Connection to server
+    connection: Socket,
     /// Current connection status
     connected: bool,
-    /// Blocking client requires server to wait for it's explicit step advance
-    blocking: bool,
-    /// Default compression setting
-    compressing: bool,
     /// Public ip address of the client, `None` if behind a firewall
     public_addr: Option<String>,
-    /// Frequency (millis) setting for heartbeat messages, `None` for no heartbeat
-    heartbeat: Option<usize>,
 }
 
 impl Client {
-    pub fn new(
-        name: &str,
-        blocking: bool,
-        compressing: bool,
-        public_addr: Option<String>,
-        heartbeat: Option<usize>,
-    ) -> Result<Client> {
-        let client = Client {
-            name: name.to_string(),
-            driver: Arc::new(Mutex::new(ClientDriver::new()?)),
+    pub fn new() -> Result<Self> {
+        Self::new_with_config(None, ClientConfig::default())
+    }
+
+    pub fn new_with_config(addr: Option<String>, config: ClientConfig) -> Result<Self> {
+        let transport = config
+            .transports
+            .first()
+            .ok_or(Error::Other(
+                "client config has to provide at least one transport option".to_string(),
+            ))?
+            .clone();
+        let encoding = config
+            .encodings
+            .first()
+            .ok_or(Error::Other(
+                "client config has to provide at least one encoding option".to_string(),
+            ))?
+            .clone();
+        let socket_config = SocketConfig {
+            type_: SocketType::Pair,
+            encoding,
+            ..Default::default()
+        };
+        let connection = match addr {
+            Some(a) => Socket::bind_with_config(&a, transport, socket_config)?,
+            None => Socket::bind_any_with_config(transport, socket_config)?,
+        };
+        let client = Self {
+            config,
+            connection,
             connected: false,
-            blocking,
-            compressing,
-            public_addr,
-            heartbeat,
+            public_addr: None,
         };
         Ok(client)
     }
-    pub fn is_blocking(&self) -> bool {
-        self.blocking
-    }
-    pub fn is_compressing(&self) -> bool {
-        self.compressing
-    }
-    pub fn is_connected(&self) -> bool {
-        self.connected
-    }
+
     /// Connects to server at the given address.
-    ///
-    /// Registration
     pub fn connect(&mut self, addr: String, password: Option<String>) -> Result<()> {
-        // let my_addr = self.driver.my_addr();
         println!("public_addr: {:?}", self.public_addr);
-        let msg = Message::from_payload(
+        println!("attempting to dial server at: {}", addr);
+
+        self.connection.connect(&addr)?;
+
+        self.connection.pack_send_msg_payload(
             RegisterClientRequest {
-                name: self.name.clone(),
+                name: self.config.name.clone(),
                 addr: self.public_addr.clone(),
-                is_blocking: self.blocking,
+                is_blocking: self.config.is_blocking,
                 passwd: password,
             },
-            false,
+            None,
         )?;
-        println!("attempting to dial server at: {}", addr);
-        // self.driver.dial_server(addr, msg)?;
-        let temp_client = self.driver.lock().unwrap().req_socket()?;
-        //thread::sleep(Duration::from_millis(100));
-        temp_client.connect(&crate::util::tcp_endpoint(&addr));
-        temp_client.send_msg(msg)?;
         println!("dialed server at: {}", addr);
 
-        let resp: RegisterClientResponse = temp_client.read_msg()?.unpack_payload()?;
-        temp_client.disconnect("")?;
+        let resp: RegisterClientResponse = self
+            .connection
+            .recv_msg()?
+            .1
+            .unpack_payload(self.connection.encoding())?;
+
+        println!("{:?}", resp);
+
+        self.connection.disconnect(None)?;
+
+        //let mut temp_client = Socket::bind("127.0.0.1:8819", Transport::SimpleTcp)?;
+        //temp_client.connect(&addr);
+        //temp_client.pack_send_msg_payload(RegisterClientRequest {
+        //name: self.config.name.clone(),
+        //addr: self.public_addr.clone(),
+        //is_blocking: self.config.is_blocking,
+        //passwd: password,
+        //})?;
+        //println!("dialed server at: {}", addr);
+
+        //let resp: RegisterClientResponse = temp_client
+        //.recv_msg()?
+        //.unpack_payload(&temp_client.config.encoding)?;
+
+        //println!("{:?}", resp);
+
+        //temp_client.disconnect("")?;
         match resp.redirect.as_str() {
             "" => (),
-            _ => self
-                .driver
-                .lock()
-                .unwrap()
-                .connect_to_server(&resp.redirect, None)?,
+            _ => self.connection.connect(&resp.redirect)?,
         }
         match resp.error.as_str() {
             "" => (),
@@ -107,45 +166,35 @@ impl Client {
         };
         self.connected = true;
 
-        if let Some(heartbeat) = self.heartbeat {
-            let driver_clone = self.driver.clone();
-            thread::spawn(move || loop {
-                thread::sleep(Duration::from_millis(heartbeat as u64));
-                let msg = Message::from_payload(Heartbeat {}, false).unwrap();
-                driver_clone.lock().unwrap().send(msg).unwrap();
-            });
-        }
-
         Ok(())
     }
 
     pub fn disconnect(&mut self) -> Result<()> {
         self.connected = false;
-        self.driver.lock().unwrap().disconnect()
+        self.connection.disconnect(None)
     }
 
-    pub fn server_status(&self) -> Result<HashMap<String, String>> {
-        let req_msg = Message::from_payload(
+    pub fn server_status(&mut self) -> Result<HashMap<String, String>> {
+        self.connection.pack_send_msg_payload(
             StatusRequest {
                 format: "".to_string(),
             },
-            false,
+            None,
         )?;
-        self.driver.lock().unwrap().send(req_msg)?;
         debug!("sent server status request to server");
-        let msg = self.driver.lock().unwrap().read()?;
-        let resp: StatusResponse = msg.unpack_payload()?;
+        let (_, msg) = self.connection.recv_msg()?;
+        let resp: StatusResponse = msg.unpack_payload(self.connection.encoding())?;
         let mut out_map = HashMap::new();
         out_map.insert("uptime".to_string(), format!("{}", resp.uptime));
         out_map.insert("current_tick".to_string(), format!("{}", resp.current_tick));
         Ok(out_map)
     }
-    pub fn server_step_request(&self, steps: u32) -> Result<()> {
-        let msg = Message::from_payload(TurnAdvanceRequest { tick_count: steps }, false)?;
-        self.driver.lock().unwrap().send(msg)?;
-        self.driver.lock().unwrap().read()?;
+
+    pub fn server_step_request(&mut self, steps: u32) -> Result<()> {
+        self.connection
+            .pack_send_msg_payload(TurnAdvanceRequest { tick_count: steps }, None)?;
+        self.connection.recv()?;
         Ok(())
-        // unimplemented!();
     }
 
     // data querying
@@ -156,16 +205,19 @@ impl Client {
         unimplemented!();
     }
 
-    pub fn get_vars(&self) -> Result<SimDataPack> {
-        let msg = Message::from_payload(
+    pub fn get_vars(&mut self) -> Result<SimDataPack> {
+        self.connection.pack_send_msg_payload(
             DataTransferRequest {
                 transfer_type: "Full".to_string(),
                 selection: vec![],
             },
-            false,
+            None,
         )?;
-        self.driver.lock().unwrap().send(msg)?;
-        let resp: DataTransferResponse = self.driver.lock().unwrap().read()?.unpack_payload()?;
+        let resp: DataTransferResponse = self
+            .connection
+            .recv_msg()?
+            .1
+            .unpack_payload(self.connection.encoding())?;
         if let Some(data_pack) = resp.data {
             return Ok(data_pack);
         }

@@ -5,7 +5,7 @@ use std::str::FromStr;
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::SimModel;
-use crate::{model, Var};
+use crate::{model, EntityUid, Var};
 use crate::{EntityId, Sim, StringId, VarType};
 
 use super::{Command, CommandResult, ExtCommand};
@@ -21,6 +21,7 @@ pub struct Get {
     pub target: Address,
     pub source: Address,
 }
+
 impl Get {
     // pub fn from_str(args_str: &str) -> MachineResult<Self> {
     //     let split: Vec<&str> = args_str.split(" ").collect();
@@ -61,15 +62,15 @@ impl Get {
     }
     //    //TODO it could maybe be faster to not deal with `Var`
     // enum here?
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
         // println!("{:?}, {:?}", self.source.get_ent_type,
         // self.source.get_ent_id)
         let ext_ent = match sim.get_entity_str(&self.source.entity)
             // .entities
             // .get(&(self.source.get_ent_type(), self.source.get_ent_id()))
         {
-            Some(e) => e,
-            None => {
+            Ok(e) => e,
+            Err(_) => {
                 debug!(
                     "executing pre query failed: entity not found: {}",
                     self.source.to_string()
@@ -79,17 +80,20 @@ impl Get {
         };
         let ext_var = ext_ent
             .storage
-            .get_var_from_addr(&self.source, None)
+            .get_var(&self.source.storage_index())
             .unwrap()
             .clone();
-        let loc_ent = match sim.get_entity_str_mut(&ent_uid) {
-            Some(e) => e,
-            None => {
+        let loc_ent = match sim.get_entity_mut(&ent_uid) {
+            Ok(e) => e,
+            Err(_) => {
                 debug!("failed");
                 return Ok(());
             }
         };
-        loc_ent.storage.set_from_var(&self.target, None, &ext_var);
+        *loc_ent
+            .storage
+            .get_var_mut(&self.target.storage_index())
+            .unwrap() = ext_var;
         return Ok(());
     }
 }
@@ -147,7 +151,7 @@ pub struct ExtSetVar {
     pub source: Var,
 }
 impl ExtSetVar {
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
         unimplemented!();
         // let ext_ent = match sim
         //.entities
@@ -175,21 +179,21 @@ pub struct ExtSet {
     pub source: Address,
 }
 impl ExtSet {
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
-        let loc_ent = match sim.get_entity_str(&ent_uid) {
-            Some(e) => e,
-            None => {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
+        let loc_ent = match sim.get_entity(ent_uid) {
+            Ok(e) => e,
+            Err(_) => {
                 debug!("");
                 return Ok(());
             }
         };
         let loc_var = loc_ent
             .storage
-            .get_var_from_addr(&self.source, None)
+            .get_var(&self.source.storage_index())
             .unwrap();
         let ext_ent = match sim.get_entity_str_mut(&(self.target.entity)) {
-            Some(e) => e,
-            None => {
+            Ok(e) => e,
+            Err(_) => {
                 debug!(
                     "execute ext failed: entity not found: {}",
                     self.target.to_string()

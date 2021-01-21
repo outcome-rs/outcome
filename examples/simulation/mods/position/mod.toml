@@ -1,0 +1,5 @@
+[mod]
+name = "position"
+description = "Provides a position component with xyz coordinate floats."
+version = "0.1.0"
+engine = "*"

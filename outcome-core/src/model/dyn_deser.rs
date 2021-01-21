@@ -136,6 +136,7 @@ impl EntityModel {
 impl ComponentModel {
     /// Create component model from a serde value representation.
     pub fn from_serde_value(
+        key: String,
         val: &Value,
         component_types: Vec<ComponentTypeModel>,
         module_path: &PathBuf,
@@ -624,7 +625,7 @@ impl StateModel {
 }
 
 impl ModuleDep {
-    /// Create module dependency object from a serde value representation.
+    /// Creates module dependency object from a serde value representation.
     pub fn from_serde_value(name: &String, value: &Value) -> ModuleDep {
         // str field names
         let version_field = "version";
@@ -675,7 +676,7 @@ impl ModuleDep {
 }
 
 impl ScenarioModuleDep {
-    /// Create scenario module dependency object from a serde value representation.
+    /// Creates scenario module dependency object from a serde value representation.
     pub fn from_serde_value(scenario_name: &String, value: &Value) -> Option<ScenarioModuleDep> {
         // str field names
         let version_field = "version";

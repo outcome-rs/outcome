@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use outcome_core::model::EntityPrefabModel;
+use outcome_core::model::EntityPrefab;
 use outcome_core::{ShortString, Sim, SimModel, StringId};
 
 const SCENARIO_PATH: &'static str = "../scenarios/barebones";
@@ -9,7 +9,7 @@ criterion_main!(barebones);
 
 fn add_entity(c: &mut Criterion) {
     let mut sim = Sim::from_scenario_at(SCENARIO_PATH).unwrap();
-    sim.model.entities.push(EntityPrefabModel {
+    sim.model.entities.push(EntityPrefab {
         name: ShortString::from_truncate("bench_ent"),
         components: vec![],
     });

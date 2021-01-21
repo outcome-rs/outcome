@@ -261,7 +261,7 @@ impl ClientDriverInterface for ClientDriver {
 pub struct ServerDriver {
     /// Public-facing greeter will listen to incoming clients and point them
     /// to dedicated client sockets
-    pub greeter: RepSocket,
+    pub greeter: Socket,
     // /// Map of clients by id to their respective connection points
     // pub(crate) clients: HashMap<u32, Socket>,
     /// Counter used for assigning client ids

@@ -123,25 +123,27 @@ impl LibCall {
                         };
                     func();
                 }
-                LibCallSign::VoidArg(arg_vt) => {
-                    match arg_vt {
-                        VarType::IntGrid => {
-                            unimplemented!();
-                            //                            let func: libloading::Symbol<unsafe extern fn(&mut Vec<Vec<i32>>)> = match lib.get(self.func_name.as_bytes()) {
-                            //                                Ok(f) => f,
-                            //                                Err(e) => panic!("{}", e),
-                            //                            };
-                            //                            let uid = es.get_ref("map/regions/int_grid/main").expect("failed getting ref").uid;
-                            //                            let mut grid = es.int_grid.get_mut(&uid);
-                            //                            if !grid.is_some() {
-                            //                                return CommandResult::Ok;
-                            //                            }
-                            //                            func(&mut grid.unwrap());
-                            ////                            println!("called func VoidArg")
-                        }
-                        _ => (),
+                LibCallSign::VoidArg(arg_vt) => match arg_vt {
+                    VarType::IntGrid => {
+                        unimplemented!();
+                        // let func: libloading::Symbol<unsafe extern "C" fn(&mut Vec<Vec<i32>>)> =
+                        //     match lib.get(self.func_name.as_bytes()) {
+                        //         Ok(f) => f,
+                        //         Err(e) => panic!("{}", e),
+                        //     };
+                        // let uid = es
+                        //     .get_ref("map/regions/int_grid/main")
+                        //     .expect("failed getting ref")
+                        //     .uid;
+                        // let mut grid = es.int_grid.get_mut(&uid);
+                        // if !grid.is_some() {
+                        //     return CommandResult::Ok;
+                        // }
+                        // func(&mut grid.unwrap());
+                        // println!("called func VoidArg")
                     }
-                }
+                    _ => (),
+                },
                 LibCallSign::Ret(ret_vt) => {
                     match ret_vt {
                         VarType::Int => {
@@ -153,7 +155,7 @@ impl LibCall {
                             let int: i32 = func();
                             //                            let ref_ =
                             // comp.loc_vars.get(self.pipe_out.unwrap()).unwrap();
-                            *es.get_int_mut(&self.pipe_out.unwrap().get_storage_index())
+                            *es.get_int_mut(&self.pipe_out.unwrap().storage_index())
                                 .unwrap() = int;
                         }
                         _ => (),

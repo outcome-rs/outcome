@@ -1,0 +1,5 @@
+[mod]
+name = "flock_core"
+description = "Basic data components for flocking example."
+version = "0.1.0"
+engine = "*"

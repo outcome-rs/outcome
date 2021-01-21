@@ -31,10 +31,10 @@ use smallvec::SmallVec;
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
 
-use crate::{arraystring, model, util, CompId, ShortString};
+use crate::{arraystring, model, util, CompId, EntityUid, ShortString};
 use crate::{EntityId, MedString, Sim, StringId, VarType};
 
-use crate::address::Address;
+use crate::address::{Address, ShortLocalAddress};
 use crate::entity::{Entity, EntityNonSer, Storage};
 // use crate::error::Error;
 use crate::model::SimModel;
@@ -63,14 +63,13 @@ use self::get_set::*;
 // use self::lib::*;
 // use self::lua::*;
 
-use super::{CommandPrototype, CommandResultVec, LocationInfo};
 use crate::distr::DistributionPolicy;
 use crate::distr::{CentralCommunication, SimCentral};
-use crate::machine;
+use crate::machine::cmd::CommandResult::JumpToLine;
 use crate::machine::error::{Error, ErrorKind, Result};
-// use std::ops::Try;
+use crate::machine::{CommandPrototype, CommandResultVec, LocationInfo};
 
-// pub type CmdResult = std::result::Result<CommandResult, Error>;
+// pub type CommandResult = std::result::Result<CommandOutcome, Error>;
 
 /// Used for controlling the flow of execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,8 +87,9 @@ pub enum CommandResult {
     /// Execute command that needs access to central authority
     ExecCentralExt(CentralRemoteCommand),
     /// Signalize that an error has occurred during execution of command
-    Err(machine::Error),
+    Err(Error),
 }
+
 impl CommandResult {
     pub fn from_str(s: &str) -> Option<CommandResult> {
         if s.starts_with("jump.") {
@@ -161,6 +161,8 @@ pub enum Command {
     End(flow::end::End),
     Call(flow::call::Call),
     ForIn(flow::forin::ForIn),
+    Loop(flow::_loop::Loop),
+    Break(flow::_loop::Break),
     Procedure(flow::procedure::Procedure),
 
     Range(range::Range),
@@ -201,13 +203,18 @@ impl Command {
                 args, location,
             )?)),
 
+            "component" | "comp" => {
+                Ok(register::RegisterComponent::new(args, location, &commands)?)
+            }
+
             // register blocks
-            "component" | "comp" => Ok(flow::component::ComponentBlock::new(
-                args, location, &commands,
-            )?),
+            // "component" | "comp" => Ok(flow::component::ComponentBlock::new(
+            //     args, location, &commands,
+            // )?),
             "state" => Ok(flow::state::State::new(args, location, &commands)?),
 
             // flow control
+            "jump" => Ok(Command::Jump(Jump::new(args)?)),
             "if" => Ok(Command::If(flow::ifelse::If::new(
                 args, location, &commands,
             )?)),
@@ -222,6 +229,10 @@ impl Command {
             "for" => Ok(Command::ForIn(flow::forin::ForIn::new(
                 args, location, commands,
             )?)),
+            "loop" | "while" => Ok(Command::Loop(flow::_loop::Loop::new(
+                args, location, commands,
+            )?)),
+            "break" => Ok(Command::Break(flow::_loop::Break {})),
 
             "range" => Ok(Command::Range(range::Range::new(args)?)),
 
@@ -242,7 +253,7 @@ impl Command {
         call_stack: &mut super::CallStackVec,
         registry: &mut super::Registry,
         comp_uid: &CompId,
-        ent_name: &EntityId,
+        ent_uid: &EntityUid,
         sim_model: &SimModel,
         location: &LocationInfo,
     ) -> CommandResultVec {
@@ -257,13 +268,15 @@ impl Command {
                 out_res.push(cmd.execute_loc(ent_storage, comp_state, comp_uid, location))
             }
             Command::Set(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, ent_name, comp_state, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, ent_uid, comp_state, comp_uid, location))
             }
             Command::SetIntIntAddr(cmd) => {
                 out_res.push(cmd.execute_loc(ent_storage, comp_uid, location))
             }
 
-            Command::Eval(cmd) => out_res.push(cmd.execute_loc(comp_uid, ent_storage, registry)),
+            Command::Eval(cmd) => {
+                out_res.push(cmd.execute_loc(ent_storage, comp_uid, registry, location))
+            }
             // Command::EvalReg(cmd) => out_res.push(cmd.execute_loc(registry)),
 
             //Command::Eval(cmd) => out_res.push(cmd.execute_loc(ent_storage)),
@@ -291,21 +304,25 @@ impl Command {
                 out_res.push(cmd.execute_loc(call_stack, line, sim_model, comp_uid, location))
             }
 
+            Command::Jump(cmd) => out_res.push(cmd.execute_loc()),
             Command::If(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
             Command::Else(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
             Command::ForIn(cmd) => {
                 out_res.push(cmd.execute_loc(call_stack, registry, comp_uid, ent_storage, location))
             }
+            Command::Loop(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
+            Command::Break(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
+
             Command::End(cmd) => {
                 out_res.push(cmd.execute_loc(call_stack, comp_uid, ent_storage, location))
             }
             Command::Procedure(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
 
             Command::State(cmd) => {
-                out_res.extend(cmd.execute_loc(call_stack, ent_name, comp_uid, line))
+                out_res.extend(cmd.execute_loc(call_stack, ent_uid, comp_uid, line))
             }
             Command::Component(cmd) => {
-                out_res.extend(cmd.execute_loc(call_stack, ent_name, comp_uid, line))
+                out_res.extend(cmd.execute_loc(call_stack, ent_uid, comp_uid, line))
             }
 
             Command::Extend(cmd) => out_res.push(cmd.execute_loc()),
@@ -352,7 +369,7 @@ pub enum CentralRemoteCommand {
 impl CentralRemoteCommand {
     /// Executes the command locally, using a reference to the monolithic `Sim`
     /// struct.
-    pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityId, comp_uid: &CompId) -> Result<()> {
+    pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityUid, comp_uid: &CompId) -> Result<()> {
         match self {
             CentralRemoteCommand::Sim(cmd) => return cmd.execute_ext(sim),
 
@@ -370,7 +387,7 @@ impl CentralRemoteCommand {
 
             CentralRemoteCommand::Extend(cmd) => return cmd.execute_ext(sim, ent_uid),
             CentralRemoteCommand::Invoke(cmd) => return cmd.execute_ext(sim),
-            CentralRemoteCommand::Spawn(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::Spawn(cmd) => return cmd.execute_ext(sim, ent_uid),
             // CentralRemoteCommand::Prefab(cmd) => return cmd.execute_ext(sim),
             CentralRemoteCommand::State(cmd) => return cmd.execute_ext(sim),
             CentralRemoteCommand::Component(cmd) => return cmd.execute_ext(sim),
@@ -382,16 +399,13 @@ impl CentralRemoteCommand {
         &self,
         mut central: &mut SimCentral,
         net: &mut N,
-        ent_name: &EntityId,
+        ent_uid: &EntityUid,
         comp_name: &CompId,
     ) -> Result<()> {
         match self {
             CentralRemoteCommand::Spawn(cmd) => cmd.execute_ext_distr(central).unwrap(),
-            CentralRemoteCommand::RegisterEntityPrefab(cmd) => {
-                unimplemented!()
-                // cmd.execute_ext_distr(central, ent_name, comp_name).unwrap()
-            }
-            _ => (),
+            CentralRemoteCommand::RegisterEntityPrefab(cmd) => cmd.execute_ext_distr(central)?,
+            _ => println!("unimplemented: {:?}", self),
         }
         Ok(())
     }
@@ -412,7 +426,7 @@ pub enum ExtCommand {
     // CentralizedExec(CentralExtCommand),
 }
 impl ExtCommand {
-    pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityId, comp_uid: &CompId) -> Result<()> {
+    pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityUid, comp_uid: &CompId) -> Result<()> {
         match self {
             ExtCommand::Get(cmd) => return cmd.execute_ext(sim, ent_uid),
             ExtCommand::Set(cmd) => return cmd.execute_ext(sim, ent_uid),
@@ -537,19 +551,39 @@ impl Goto {
     }
 }
 
-/// Jump
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Jump {
-    pub target_cmd: u16,
+    pub target: JumpTarget,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum JumpTarget {
+    Line(u16),
+    Tag(StringId),
+}
+
 impl Jump {
-    fn from_str(args_str: &str) -> Result<Self> {
-        Ok(Jump {
-            target_cmd: args_str.parse::<u16>().unwrap(),
-        })
+    fn new(args: Vec<String>) -> Result<Self> {
+        if let Ok(num) = args[0].parse::<u16>() {
+            Ok(Jump {
+                target: JumpTarget::Line(num),
+            })
+        } else {
+            let tag = if args[0].starts_with('@') {
+                arraystring::new_truncate(&args[0][1..])
+            } else {
+                arraystring::new_truncate(&args[0])
+            };
+            Ok(Jump {
+                target: JumpTarget::Tag(tag),
+            })
+        }
     }
     pub fn execute_loc(&self) -> CommandResult {
-        CommandResult::JumpToLine(self.target_cmd as usize)
+        match &self.target {
+            JumpTarget::Line(line) => CommandResult::JumpToLine(*line as usize),
+            JumpTarget::Tag(tag) => CommandResult::JumpToTag(*tag),
+        }
     }
 }
 
@@ -590,30 +624,42 @@ impl Invoke {
 pub struct Spawn {
     pub prefab: Option<StringId>,
     pub spawn_id: Option<StringId>,
+    pub out: Option<ShortLocalAddress>,
 }
 impl Spawn {
     fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
-        if args.len() == 0 {
+        let matches = getopts::Options::new()
+            .optopt("o", "out", "", "")
+            .parse(&args)
+            .map_err(|e| Error::new(*location, ErrorKind::ParseError(e.to_string())))?;
+
+        let out = matches
+            .opt_str("out")
+            .map(|s| ShortLocalAddress::from_str(&s))
+            .transpose()?;
+
+        if matches.free.len() == 0 {
             Ok(Self {
                 prefab: None,
                 spawn_id: None,
+                out,
             })
-        } else if args.len() == 1 {
+        } else if matches.free.len() == 1 {
             Ok(Self {
                 prefab: Some(arraystring::new_truncate(&args[0])),
                 spawn_id: None,
+                out,
             })
-        } else if args.len() == 2 {
+        } else if matches.free.len() == 2 {
             Ok(Self {
                 prefab: Some(arraystring::new_truncate(&args[0])),
                 spawn_id: Some(arraystring::new_truncate(&args[1])),
+                out,
             })
         } else {
             return Err(Error::new(
                 *location,
-                ErrorKind::InvalidCommandBody(
-                    "`spawn` can't accept more than 2 arguments".to_string(),
-                ),
+                ErrorKind::InvalidCommandBody("can't accept more than 2 arguments".to_string()),
             ));
         }
     }
@@ -638,7 +684,7 @@ impl Spawn {
     pub fn execute_loc(&self) -> CommandResult {
         CommandResult::ExecCentralExt(CentralRemoteCommand::Spawn(*self))
     }
-    pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
         // let model = &sim.model;
         // let my_model_n = model
         //.entities

@@ -1,5 +1,5 @@
 use crate::entity::Storage;
-use crate::{Address, CompId, StringId};
+use crate::{Address, CompId, StringId, Var};
 
 use super::super::{error::Error, LocationInfo};
 use super::CommandResult;
@@ -28,7 +28,7 @@ impl Range {
     pub fn execute_loc(
         &self,
         storage: &mut Storage,
-        comp_uid: &CompId,
+        comp_name: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {
         // println!("{:?}", self);
@@ -42,15 +42,12 @@ impl Range {
             pointer = pointer + 1;
         }
         // println!("{:?}", list);
-        if !storage
-            .get_int_list(&(*comp_uid, self.output.var_id))
-            .is_some()
-        {
-            storage.insert_int_list(&(*comp_uid, self.output.var_id), Vec::new());
+        if !storage.get_var(&(*comp_name, self.output.var_id)).is_ok() {
+            storage.insert((*comp_name, self.output.var_id), Var::IntList(Vec::new()));
         }
-        match storage.get_int_list_mut(&(*comp_uid, self.output.var_id)) {
-            Some(il) => *il = list,
-            None => return CommandResult::Err(Error::new(*location, ErrorKind::Panic)),
+        match storage.get_var_mut(&(*comp_name, self.output.var_id)) {
+            Ok(il) => *il = Var::IntList(list),
+            Err(_) => return CommandResult::Err(Error::new(*location, ErrorKind::Panic)),
         }
         //list;
         // println!("done");

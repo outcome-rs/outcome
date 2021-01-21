@@ -1,5 +1,10 @@
-!print "simple2 mod"
-print "hello world from simple2 mod"
+print "[position mod] registering position component"
+
+component position
+	var float:x
+	var float:y
+	var float:z
+end
 
 #for int:some in int_list:main
 #    print "hello world"

@@ -1,0 +1,16 @@
+[mod]
+name = "flock_rust"
+description = ""
+version = "0.1.0"
+engine = "*"
+
+[libs]
+#flock_dynlib = { build = true, path = "./flock_dynlib" }
+flock = { path = "./flock_dynlib/target/release/libflock_dynlib.so" }
+
+[services.flock_service]
+path = "./flock_service/target/release/flock_service"
+instancing = "one_per_worker"
+#instancing = "one_globally"
+managed = true
+args = "--managed"

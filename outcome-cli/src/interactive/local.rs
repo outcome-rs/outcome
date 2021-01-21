@@ -32,9 +32,9 @@ pub fn create_prompt(sim: &Sim, cfg: &Config) -> String {
                 return create_prompt_default(sim);
             }
         };
-        let var_res = match sim.get_str(&addr) {
-            Some(i) => i.clone(),
-            None => {
+        let var_res = match sim.get_var(&addr).unwrap().as_str() {
+            Ok(i) => i.clone(),
+            Err(_) => {
                 return create_prompt_default(sim);
             }
         };

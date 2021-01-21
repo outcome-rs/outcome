@@ -1,19 +1,21 @@
+use std::iter::FromIterator;
+
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, LogicModel, SimModel, VarModel};
-use crate::{arraystring, CompId, EntityId, LongString, ShortString, Sim, StringId, VarType};
-use std::iter::FromIterator;
+use crate::{
+    arraystring, CompId, EntityId, EntityUid, LongString, ShortString, Sim, StringId, VarType,
+};
 
 use crate::machine::cmd::register::{RegisterComponent, RegisterEntityPrefab};
 use crate::machine::cmd::{
     CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo,
 };
-use crate::machine::error::ErrorKind;
+use crate::machine::error::{Error, ErrorKind, Result};
 use crate::machine::script::parse_script_at;
 use crate::machine::ComponentCallInfo;
 use crate::machine::{
-    error::Error, CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo,
-    Registry,
+    CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo, Registry,
 };
 
 pub const COMMAND_NAMES: [&'static str; 1] = ["component"];
@@ -33,7 +35,7 @@ impl ComponentBlock {
         args: Vec<String>,
         location: &LocationInfo,
         commands: &Vec<CommandPrototype>,
-    ) -> Result<Command, Error> {
+    ) -> Result<Command> {
         trace!("making new comp block");
 
         let line = location.line.unwrap();
@@ -98,7 +100,7 @@ impl ComponentBlock {
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
-        ent_name: &EntityId,
+        ent_uid: &EntityUid,
         comp_name: &CompId,
         line: usize,
     ) -> Vec<CommandResult> {
@@ -108,33 +110,35 @@ impl ComponentBlock {
 
         call_stack.push(CallInfo::Component(ComponentCallInfo {
             name: new_self.name,
+            start_line: new_self.start_line,
+            end_line: new_self.end_line,
         }));
 
         let mut out_vec = Vec::new();
-        // out_vec.push(CommandResult::ExecCentralExt(CentralExtCommand::Component(
-        //     new_self,
-        // )));
         out_vec.push(CommandResult::ExecCentralExt(
-            CentralRemoteCommand::RegisterComponent(RegisterComponent {
-                name: arraystring::new_truncate(&new_self.name),
-                trigger_events: vec![],
-                source_comp: self.source_comp,
-                start_line: self.start_line,
-                end_line: self.end_line,
-            }),
+            CentralRemoteCommand::Component(new_self),
         ));
+        // out_vec.push(CommandResult::ExecCentralExt(
+        //     CentralRemoteCommand::Component(RegisterComponent {
+        //         name: arraystring::new_truncate(&new_self.name),
+        //         trigger_events: vec![],
+        //         source_comp: self.source_comp,
+        //         start_line: self.start_line,
+        //         end_line: self.end_line,
+        //     }),
+        // ));
         out_vec.push(CommandResult::Continue);
         // out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
         out_vec
     }
-    pub fn execute_ext(&self, sim: &mut Sim) -> Result<(), Error> {
+    pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
         trace!("registering component");
 
         let comp_model = sim.model.get_component(&self.source_comp).unwrap();
 
         let component = ComponentModel {
             name: self.name.into(),
-            start_state: arraystring::new_unchecked("start"),
+            //start_state: arraystring::new_unchecked("start"),
             // triggers: vec![StringId::from_unchecked("step")],
             // logic: LogicModel {
             //     commands: comp_model.logic.commands.clone(),
@@ -147,6 +151,7 @@ impl ComponentBlock {
 
         sim.model.components.push(component);
         debug!("added new component to model: {:?}", self.name);
+        // trace!("{:?}", self);
         Ok(())
     }
 }

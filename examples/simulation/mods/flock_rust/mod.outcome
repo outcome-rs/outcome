@@ -1,0 +1,44 @@
+print "[flock_rust]"
+
+#component flock_member --extend
+	#start main
+	#trigger step
+
+	#state main
+		##stopwatch start --millis
+		#lib_call flock calculate_entity
+		##stopwatch stop -o int:0
+		##print --trace "{}" int:0
+	#end
+#end
+
+#prefab bird children flock_member flock_member_params velocity
+#spawn bird
+
+#set float:count 12
+#set bool:b true
+##eval "x + 20" x=int:count -o int:count 
+	##print "inside loop: {}" int:count
+#@loopy\
+#loop
+	#call do_work
+	##eval "x == 11" x=float:count -o bool:b
+	#print "bool value: {}" bool:b
+	##eval "cos(2 + 1 ^ x + 4)" x=float:count -o float:count
+	##print "inside loop: {}" float:count
+	
+	##if true
+		#break
+	##end
+#end
+
+
+#jump @loopy
+
+#proc do_work 
+	#print "doing work"
+#end
+
+
+#print "Spawned bird entity id: {}" [spawn bird]
+

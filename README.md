@@ -33,13 +33,13 @@
 [`outcome`](https://github.com/outcome-rs/outcome) is an easy to use
 distributed simulation engine for the modern age.
 
-Assembling, running and interacting with complex simulations, whether it's
-multiplayer game worlds, organic city simulations, or scientific calculations,
-is still not an easy task. Especially when it comes to distributing them across
-multiple machines in a dynamic way. Aside from a few existing
-[commercial](https://hadean.com/) [solutions](https://improbable.io/),
-scalable user-friendly distributed simulation is still unexplored territory.
-This project is an attempt to change that.
+Assembling, running and interacting with complex discrete event simulations,
+whether it's multiplayer game worlds, organic city simulations, or scientific
+calculations, is still not an easy task. Especially when it comes to
+distributing them across multiple machines in a dynamic way. Aside from a few
+existing [commercial](https://hadean.com/) [solutions](https://improbable.io/),
+scalable user-friendly distributed simulation still remains a mostly unexplored
+territory. This project is an attempt to change that.
 
 *NOTE: Currently in an early stage of development.
 Approach with caution.*
@@ -49,7 +49,7 @@ Approach with caution.*
 
 * **Fast Prototyping** - small changes to the model don't require recompiling
 the whole system
-* **Dynamically Scalable** - run locally or on multiple machines, scale
+* **Dynamic Scalability** - run locally or on multiple machines, scale
 dynamically at runtime
 * **Data Interoperability** - the engine deals with widely supported primitive
 data types
@@ -57,25 +57,43 @@ data types
 exchanging messages
 * **Low Barrier to Entry** - runtime-level logic processor opens the modelling
 process to non-programmers
-* **Modular Model Structure** - models can be divided into smaller,
+* **Modularity** - models can be divided into smaller,
 self-contained packages, making model development faster and model reuse less
 cumbersome
 
 
+## What can it do?
+
+`outcome` provides a generic interface for quickly assembling dynamically
+scalable simulations. As such it has potential uses in many different domains.
+
+It has the ability to connect together many separate programs, each tasked with
+simulating a different part of the system, and make them co-create a single
+unsharded world. This means that new models can be assembled from already existing,
+battle-tested modules.
+
+
+One crucial aspect of this project is it's focus on the ease of use. 
+
+
+
 ## How does it work?
 
-Most importantly, `outcome` provides a unified conceptual framework in form of
-a custom entity-component architecture. This architecture serves as the glue
-for connecting together many machines running many different programs, such
-as game engines or physics solvers, in coordination, allowing them to query and
-interact with a single, albeit distributed, *database*.
+`outcome` is based around the idea of bringing together different programs
+and making them communicate in a coherent way. To make this happen, the engine
+provides a unifying conceptual framework in the form of an entity-component
+architecture.
 
-It's not just any database - it's one that's tasked with storing
-*entities*. In contrast to a classic ECS, entities here are represented as
-actual data structures containing variables assigned to them by currently
-attached components. This arrangement doesn't allow for cache optimizations
-possible with classic ECS. Instead, it focuses on optimizing for quickly
-sending entities between threads and between machines.
+Multiple different game engines, physics solvers and agent-based AI models,
+can simulate a single large world without having to keep track of entities
+distributed around a collection of machines.
+
+Engine runtime does dynamic optimisation of the system by monitoring current
+load and network traffic and transferring entities across machines accordingly.
+
+:
+
+
 
 This entity-focused approach makes it possible to quickly restructure the whole
 system at runtime. We can leverage this by constantly re-arranging entities

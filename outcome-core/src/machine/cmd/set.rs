@@ -1,8 +1,8 @@
 use super::{Command, CommandResult};
-use crate::address::{Address, LocalAddress};
+use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage};
 use crate::var::{Var, VarType};
-use crate::{CompId, EntityId, MedString, StringId};
+use crate::{CompId, EntityId, EntityUid, MedString, StringId};
 
 use super::super::LocationInfo;
 use crate::machine::{Error, ErrorKind, Result};
@@ -19,7 +19,11 @@ impl SetIntIntAddr {
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {
-        *storage.get_int_mut(&self.target).unwrap() = *storage.get_int(&self.source).unwrap();
+        *storage
+            .get_var_mut(&self.target)
+            .unwrap()
+            .as_int_mut()
+            .unwrap() = *storage.get_var(&self.source).unwrap().as_int().unwrap();
         CommandResult::Continue
     }
 }
@@ -27,18 +31,18 @@ impl SetIntIntAddr {
 /// Generic `set` command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Set {
-    target: LocalAddress,
+    target: ShortLocalAddress,
     source: SetSource,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SetSource {
-    Address(LocalAddress),
+    Address(ShortLocalAddress),
     Value(Var),
     None,
 }
 impl Set {
     pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Command> {
-        let target = match LocalAddress::from_str(&args[0]) {
+        let target = match ShortLocalAddress::from_str(&args[0]) {
             Ok(addr) => addr,
             Err(e) => {
                 return Err(Error::new(
@@ -60,7 +64,7 @@ impl Set {
                 source_str = &args[1];
             }
             if source_str.starts_with("$") {
-                let address = match LocalAddress::from_str(&source_str[1..]) {
+                let address = match ShortLocalAddress::from_str(&source_str[1..]) {
                     Ok(addr) => addr,
                     Err(e) => {
                         return Err(Error::new(
@@ -75,13 +79,14 @@ impl Set {
                 source = SetSource::Address(address);
             } else {
                 let var = match Var::from_str(source_str, Some(target.var_type)) {
-                    Some(v) => v,
-                    None => {
+                    Ok(v) => v,
+                    Err(e) => {
                         return Err(Error::new(
                             *location,
-                            ErrorKind::InvalidCommandBody(
-                                "can't parse from source into target type".to_string(),
-                            ),
+                            ErrorKind::InvalidCommandBody(format!(
+                                "can't parse from source into target type: {}",
+                                e
+                            )),
                         ))
                     }
                 };
@@ -89,19 +94,19 @@ impl Set {
             }
         }
 
-        // try translating to lower level struct
-        if target.var_type == VarType::Int {
-            //&& source.var_type.unwrap() == VarType::Int {
-            if let SetSource::Address(saddr) = source {
-                if saddr.var_type == VarType::Int {
-                    let cmd = SetIntIntAddr {
-                        target: target.storage_index().unwrap(),
-                        source: target.storage_index().unwrap(),
-                    };
-                    return Ok(Command::SetIntIntAddr(cmd));
-                }
-            }
-        }
+        // // try translating to lower level struct
+        // if target.var_type == VarType::Int {
+        //     //&& source.var_type.unwrap() == VarType::Int {
+        //     if let SetSource::Address(saddr) = source {
+        //         if saddr.var_type == VarType::Int {
+        //             let cmd = SetIntIntAddr {
+        //                 target: target.storage_index(),
+        //                 source: target.storage_index(),
+        //             };
+        //             return Ok(Command::SetIntIntAddr(cmd));
+        //         }
+        //     }
+        // }
 
         //let source = SetSource::Address(Address::from_str(&args[1]).unwrap());
         Ok(Command::Set(Set { target, source }))
@@ -109,36 +114,34 @@ impl Set {
     pub fn execute_loc(
         &self,
         entity_db: &mut Storage,
-        ent_name: &EntityId,
+        ent_uid: &EntityUid,
         comp_state: &mut StringId,
         comp_uid: &CompId,
         location: &LocationInfo,
     ) -> CommandResult {
         let var_type = &self.target.var_type;
         let target_addr = Address {
-            entity: *ent_name,
+            entity: crate::arraystring::new_truncate(&ent_uid.to_string()),
             component: self.target.comp.unwrap_or(*comp_uid),
+            // component: self.target.comp,
             var_type: self.target.var_type,
             var_id: self.target.var_id,
         };
         match &self.source {
             SetSource::Address(addr) => {
                 // entity_db.set_from_addr(&self.target, &addr)
-                entity_db.set_from_local_addr(&self.target, addr);
+                *entity_db
+                    .get_var_mut(&self.target.storage_index_using(*comp_uid))
+                    .unwrap() = entity_db
+                    .get_var(&addr.storage_index_using(*comp_uid))
+                    .unwrap()
+                    .clone();
             }
             SetSource::Value(val) => {
-                if entity_db
-                    .get_var_from_addr(&target_addr, Some(comp_uid))
-                    .is_ok()
-                {
-                    entity_db.set_from_var(&target_addr, Some(comp_uid), val);
+                if let Ok(target_var) = entity_db.get_var_mut(&target_addr.storage_index()) {
+                    *target_var = val.clone();
                 } else {
-                    // find out which comp_uid to use
-                    let comp_uid = self.target.comp.unwrap_or(*comp_uid);
-                    let var_id = self.target.var_id;
-                    entity_db.insert(&comp_uid, &var_id, var_type, Some(val.clone()));
-                    // return CommandResult::Error(
-                    //     Error::FailedGettingFromStorage(self.target, location.clone())
+                    entity_db.insert(self.target.storage_index_using(*comp_uid), val.clone());
                 }
             }
             //TODO return value

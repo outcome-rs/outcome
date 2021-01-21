@@ -48,8 +48,10 @@ impl End {
                                 ent_storage,
                             );
                         } else {
-                            if let Some(int_var) =
-                                ent_storage.get_int_mut(&target.storage_index().unwrap())
+                            if let Ok(int_var) = ent_storage
+                                .get_var_mut(&target.storage_index())
+                                .unwrap()
+                                .as_int_mut()
                             {
                                 *int_var = fici.iteration as i64;
                             }
@@ -63,6 +65,7 @@ impl End {
                 }
             }
             CallInfo::IfElse(ieci) => {}
+            CallInfo::Loop(ci) => return CommandResult::JumpToLine(ci.start + 1),
             _ => do_pop = true,
         };
 

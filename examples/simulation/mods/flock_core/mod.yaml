@@ -1,0 +1,22 @@
+components:
+
+  velocity:
+    vars:
+      float:x: 
+      float:y:
+  flock_member:
+    vars:
+      float:x:
+  flock_member_params:
+    vars:
+      float:max_speed: 200
+      float:max_accel: 30
+      float:safe_radius: 50
+  children:
+    vars:
+      int_list:id:
+prefabs:
+  bird: [children, flock_member, flock_member_params, velocity]
+  
+
+

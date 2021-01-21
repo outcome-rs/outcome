@@ -94,8 +94,11 @@ pub(crate) fn step_entity_local(
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
     central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>>,
 ) -> Result<(), Error> {
+    trace!(
+        "step_entity_local(): entity.comp_queue: {:?}",
+        entity.comp_queue
+    );
     for event in event_queue {
-        debug!("entity.comp_queue: {:?}", entity.comp_queue);
         if let Some(event_queue) = entity.comp_queue.get(event) {
             // debug!("event_queue: {:?}", event_queue);
             for comp_uid in event_queue {
@@ -105,18 +108,20 @@ pub(crate) fn step_entity_local(
                     if comp_state.as_ref() == "idle" {
                         continue;
                     }
-                    if let Some(comp_model) = model.get_component(comp_uid) {
+                    if let Ok(comp_model) = model.get_component(comp_uid) {
+                        trace!("comp_model: {:?}", comp_model);
                         let (start, end) = match comp_model.logic.states.get(comp_state) {
                             Some((s, e)) => (Some(*s), Some(*e)),
                             None => continue,
                         };
                         crate::machine::exec::execute_loc(
                             &comp_model.logic.commands,
+                            &comp_model.logic.cmd_location_map,
                             &mut entity.storage,
                             &mut entity.insta,
                             comp_state,
                             //TODO
-                            &EntityId::new(),
+                            ent_uid,
                             &comp_uid,
                             &model,
                             &ext_cmds,

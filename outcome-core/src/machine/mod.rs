@@ -12,19 +12,21 @@ use smallvec::SmallVec;
 
 use crate::address::LocalAddress;
 use crate::entity::StorageIndex;
-use crate::{CompId, EntityId, LongString, ShortString, StringId, VarType};
+use crate::{CompId, EntityId, EntityUid, LongString, MedString, ShortString, StringId, VarType};
 
 /// Holds instruction location information.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub struct LocationInfo {
-    /// Path to the source file, relative to scenario root
+    /// Path to project root
+    pub root: Option<LongString>,
+    /// Path to the source file, relative to project root
     pub source: Option<LongString>,
     /// Line number as seen in source file
     pub source_line: Option<usize>,
     /// Line number after trimming empty lines, more like an command index
     pub line: Option<usize>,
     /// Unique tag for this location
-    pub tag: Option<ShortString>,
+    pub tag: Option<StringId>,
 
     pub comp_name: Option<StringId>,
 }
@@ -40,6 +42,7 @@ impl LocationInfo {
     }
     pub fn empty() -> LocationInfo {
         LocationInfo {
+            root: None,
             source: None,
             source_line: None,
             line: None,
@@ -48,7 +51,8 @@ impl LocationInfo {
         }
     }
 
-    pub fn with_source(mut self, source: &str) -> Self {
+    pub fn with_source(mut self, root: &str, source: &str) -> Self {
+        self.root = Some(crate::arraystring::new_truncate(root));
         self.source = Some(crate::arraystring::new_truncate(source));
         self
     }
@@ -77,7 +81,7 @@ pub(crate) type CommandResultVec = SmallVec<[cmd::CommandResult; 2]>;
 /// taking place.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ExecutionContext {
-    pub ent: EntityId,
+    pub ent: EntityUid,
     pub comp: CompId,
     pub location: LocationInfo,
 }
@@ -114,6 +118,7 @@ pub enum RegistryTarget {
 pub enum CallInfo {
     Procedure(ProcedureCallInfo),
     ForIn(ForInCallInfo),
+    Loop(LoopCallInfo),
     IfElse(IfElseCallInfo),
 
     Component(ComponentCallInfo),
@@ -144,6 +149,12 @@ pub struct ForInCallInfo {
     pub end: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct LoopCallInfo {
+    start: usize,
+    end: usize,
+}
+
 /// Contains information about a single ifelse call.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct IfElseCallInfo {
@@ -163,6 +174,8 @@ pub struct IfElseMetaData {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ComponentCallInfo {
     pub name: CompId,
+    pub start_line: usize,
+    pub end_line: usize,
     // pub current: usize,
     // pub passed: bool,
     // pub else_line_index: usize,

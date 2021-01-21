@@ -76,7 +76,7 @@ impl SimNode {
         target_id: Option<EntityId>,
     ) -> Result<()> {
         let entity = match &prefab_id {
-            Some(p) => Entity::from_prefab(p, &self.model)?,
+            Some(p) => Entity::from_prefab_name(p, &self.model)?,
             None => Entity::empty(),
         };
 
@@ -116,12 +116,12 @@ impl SimNode {
     }
 
     #[cfg(not(feature = "machine"))]
-    pub fn step<C: NodeCommunication>(
+    pub fn step<N: NodeCommunication>(
         &mut self,
-        entity_node_map: &HashMap<EntityId, String>,
-        mut addr_book: &mut HashMap<String, C>,
-    ) {
-        unimplemented!();
+        mut network: &mut N,
+        event_queue: &Vec<StringId>,
+    ) -> Result<()> {
+        Ok(())
     }
 
     /// Process single step.

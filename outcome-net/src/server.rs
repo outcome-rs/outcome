@@ -1,6 +1,4 @@
 extern crate outcome_core as outcome;
-extern crate rmp_serde as rmps;
-extern crate serde;
 
 use std::collections::HashMap;
 use std::io::{ErrorKind, Write};
@@ -10,16 +8,13 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
-use self::rmps::{Deserializer, Serializer};
-use self::serde::{Deserialize, Serialize};
-
 use outcome::{Address, Sim, SimModel, VarType};
 
 use crate::msg::*;
-use crate::transport::{ServerDriverInterface, SocketInterface};
-use crate::{Coord, PairSocket, ServerDriver, Worker};
+use crate::{Coord, Worker};
 
 use crate::coord::CoordNetwork;
+use crate::socket::{Encoding, Socket, SocketEvent, Transport};
 use crate::{error::Error, Result};
 use outcome_core::{arraystring, StringId};
 use std::convert::TryInto;
@@ -71,7 +66,9 @@ impl ServerSettings {
             description: self.description,
             address: self.address.split(":").collect::<Vec<&str>>()[0].to_string(),
             clients: HashMap::new(),
-            driver: ServerDriver::new(&self.address)?,
+            // driver: ServerDriver::new(&self.address)?,
+            greeter: Socket::bind(&self.address, Transport::Tcp)?,
+            port_count: 2992,
             default_client_keepalive_millis: self.keepalive_millis,
             use_auth: false,
             passwd_list: vec![],
@@ -108,16 +105,21 @@ impl ServerSettings {
 /// client should connect to.
 pub struct Server {
     /// Name of the server
-    pub(crate) name: String,
+    pub name: String,
     /// Description of the server
-    pub(crate) description: String,
+    pub description: String,
     /// IP address of the server
-    pub(crate) address: String,
+    pub address: String,
 
     /// List of clients
-    pub(crate) clients: HashMap<ClientId, Client>,
-    /// Network driver
-    driver: ServerDriver,
+    pub clients: HashMap<ClientId, Client>,
+
+    // /// Network driver
+    // driver: ServerDriver,
+    /// Outward facing socket
+    pub greeter: Socket,
+    /// Counter used for assigning client ids
+    pub port_count: u32,
 
     /// Time until client connection is terminated since last message
     pub(crate) default_client_keepalive_millis: usize,
@@ -157,86 +159,54 @@ impl Server {
                 break;
             }
 
-            if accept_timer >= 400 {
+            if accept_timer >= 100 {
+                // warn!("accept timer >= 100");
                 accept_timer = 0;
-                self.try_accept_client(true);
+                if let Err(e) = self.try_accept_client(true) {
+                    match e {
+                        Error::WouldBlock => (),
+                        //Error::WouldBlock => warn!("would block"),
+                        _ => error!("{:?}", e),
+                    }
+                }
             }
 
             let client_ids: Vec<u32> = self.clients.keys().cloned().collect();
             for client_id in client_ids {
-                if let Err(e) = self.try_handle_client(
-                    &client_id,
-                    // None,
-                ) {
-                    match e {
-                        Error::WouldBlock => (),
-                        _ => warn!("try_handle_client failed: {}", e),
-                    }
-                }
+                // for (client_id, client) in &self.clients {
+                let (addr, event) = match self
+                    .clients
+                    .get_mut(&client_id)
+                    .unwrap()
+                    .connection
+                    .try_recv()
+                {
+                    Ok(e) => e,
+                    Err(e) => match e {
+                        Error::WouldBlock => continue,
+                        _ => {
+                            warn!("try_handle_client failed: {:?}", e);
+                            continue;
+                        }
+                    },
+                };
+                self.handle_event(event, &client_id)?;
             }
         }
         Ok(())
     }
-    fn prune_clients(&mut self) {
-        let mut buf = [0; 1024];
-        let mut bad: Vec<ClientId> = Vec::new();
-        for (client_id, client) in self.clients.iter() {
-            // TODO
-            // if client.stream.is_none() {
-            //     println!("client stream is none");
-            //     bad.push(client_id.clone());
-            //     continue;
-            // }
-            // match client.stream.as_ref().unwrap().peek(&mut buf) {
-            //     Ok(0) => {
-            //         println!(
-            //             "connection with client was lost: {}",
-            //             client.addr.to_string()
-            //         );
-            //         bad.push(client_id.clone());
-            //     }
-            //     Ok(_) => {
-            //         //
-            //     }
-            //     Err(e) => {
-            //         //
-            //     }
-            // }
-        }
-        for b in bad {
-            self.clients.remove(&b);
-        }
-        println!("remaining clients: {}", self.clients.len());
-        //        let mut good: HashMap<u32, Client> = HashMap::new();
-        //        for n in 0..self.clients.len() {
-        //            let client = self.clients.pop().unwrap();
-        //            if client.stream.is_none() {
-        //                println!("client stream is none");
-        //                continue;
-        //            }
-        //            match client.stream.as_ref().unwrap().peek(&mut buf) {
-        //                Ok(0) => println!("connection with client was lost: {}", client.ip_addr.to_string()),
-        //                Ok(_) => {
-        //                    good.push(client);
-        //                }
-        //                Err(e) => {
-        //                    good.push(client);
-        //                },
-        //            }
-        //        }
-        //        println!("remaining clients: {}", good.len());
-        //        self.clients = good;
-    }
 }
 impl Server {
     pub fn try_accept_client(&mut self, redirect: bool) -> Result<u32> {
-        let msg = self.driver.greeter.try_read_msg(None)?;
-        let req: RegisterClientRequest = msg.unpack_payload()?;
-        self.driver.port_count += 1;
-        let newport = format!("{}:{}", self.address, self.driver.port_count);
+        //debug!("trying to accept client");
+        let req: RegisterClientRequest = self
+            .greeter
+            .try_recv_msg()?
+            .unpack_payload(self.greeter.encoding())?;
+        self.port_count += 1;
+        let newport = format!("{}:{}", self.address, self.port_count);
         debug!("newport: {}", newport);
-        let mut client_socket = self.driver.new_connection()?;
-        client_socket.bind(&newport)?;
+        let socket = Socket::bind(&newport, Transport::Tcp)?;
         // let client_socket = client_socket;
         debug!("req.addr: {:?}", req.addr);
 
@@ -245,16 +215,13 @@ impl Server {
             redirect: newport,
             error: String::new(),
         };
-        self.driver
-            .greeter
-            .send_msg(Message::from_payload(resp, false)?)?;
-        debug!("responded to client: {}", self.driver.port_count);
+        self.greeter.pack_send_msg_payload(resp, None)?;
+        debug!("responded to client: {}", self.port_count);
         debug!("client is blocking? {}", req.is_blocking);
         let client = Client {
-            id: self.driver.port_count,
+            id: self.port_count,
             addr: "".to_string(),
-            // connection: client_socket.clone(),
-            connection: client_socket,
+            connection: socket,
             is_blocking: req.is_blocking,
             keepalive_millis: 0,
             event_trigger: "".to_string(),
@@ -270,18 +237,8 @@ impl Server {
             scheduled_dts: Default::default(),
         };
 
-        self.clients.insert(self.driver.port_count, client);
-        Ok(self.driver.port_count)
-    }
-
-    pub fn try_handle_client(&mut self, client_id: &ClientId) -> Result<()> {
-        let msg = self
-            .clients
-            .get(client_id)
-            .unwrap()
-            .connection
-            .try_read_msg(None)?;
-        self.handle_message(msg, client_id)
+        self.clients.insert(self.port_count, client);
+        Ok(self.port_count)
     }
 
     // /// Handle new client connection.
@@ -351,7 +308,7 @@ pub struct Client {
     pub addr: String,
     /// Connection interface
     // pub connection: Arc<Mutex<PairSocket>>,
-    pub connection: PairSocket,
+    pub connection: Socket,
     /// Blocking client has to explicitly agree to let server continue to next turn,
     /// non-blocking client is more of a passive observer.
     pub is_blocking: bool,
@@ -371,46 +328,62 @@ pub struct Client {
 }
 impl Server {
     /// Handle message, delegating further processing to a specialized function.
-    fn handle_message(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
-        debug!("handling message: {}", msg.kind.clone());
-        match msg.kind.as_str() {
-            // TODO enabling compression for incoming requests would require
-            // rewriting this bit, sending whole msg to the handler instead of
-            // just the payload
-            HEARTBEAT => (),
-            PING_REQUEST => self.handle_ping_request(msg, client_id)?,
-            STATUS_REQUEST => self.handle_status_request(msg, client_id)?,
-            TURN_ADVANCE_REQUEST => self.handle_turn_advance_request(msg, client_id)?,
-            DATA_TRANSFER_REQUEST => self.handle_data_transfer_request(msg, client_id)?,
-            SCHEDULED_DATA_TRANSFER_REQUEST => {
-                self.handle_scheduled_data_transfer_request(msg, client_id)?
+    fn handle_event(&mut self, event: SocketEvent, client_id: &ClientId) -> Result<()> {
+        debug!("handling message: {:?}", event);
+        let encoding = self
+            .clients
+            .get(client_id)
+            .unwrap()
+            .connection
+            .encoding()
+            .clone();
+        match event {
+            SocketEvent::Heartbeat => (),
+            SocketEvent::Bytes(bytes) => {
+                self.handle_message(Message::from_bytes(bytes)?, client_id)?
             }
-            DATA_PULL_REQUEST => self.handle_data_pull_request(msg, client_id)?,
-
-            SPAWN_ENTITIES_REQUEST => self.handle_spawn_entities_request(msg, client_id)?,
-            EXPORT_SNAPSHOT_REQUEST => self.handle_export_snapshot_request(msg, client_id)?,
-
-            // LIST_LOCAL_SCENARIOS_REQUEST => {
-            //     handle_list_local_scenarios_request(payload, server_arc, client_id)
-            // }
-            // LOAD_LOCAL_SCENARIO_REQUEST => {
-            //     handle_load_local_scenario_request(payload, server_arc, client_id)
-            // }
-            // LOAD_REMOTE_SCENARIO_REQUEST => {
-            //     handle_load_remote_scenario_request(payload, server_arc, client_id)
-            // }
-            _ => println!("unknown message type: {}", msg.kind.as_str()),
+            SocketEvent::Message(msg) => self.handle_message(msg, client_id)?,
+            SocketEvent::Connect => println!("new connection event from client: {}", client_id),
+            SocketEvent::Disconnect => println!("disconnected event from client: {}", client_id),
+            _ => unimplemented!(),
         }
-
         trace!("handled");
         Ok(())
     }
+
+    fn handle_message(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
+        match msg.type_ {
+            // MessageKind::Heartbeat => (),
+            MessageType::PingRequest => self.handle_ping_request(msg, client_id)?,
+            MessageType::StatusRequest => self.handle_status_request(msg, client_id)?,
+            MessageType::TurnAdvanceRequest => self.handle_turn_advance_request(msg, client_id)?,
+
+            MessageType::DataTransferRequest => {
+                self.handle_data_transfer_request(msg, client_id)?
+            }
+            MessageType::DataPullRequest => self.handle_data_pull_request(msg, client_id)?,
+            MessageType::ScheduledDataTransferRequest => {
+                self.handle_scheduled_data_transfer_request(msg, client_id)?
+            }
+            // DATA_TRANSFER_REQUEST => self.handle_data_transfer_request(msg, client_id)?,
+            // SCHEDULED_DATA_TRANSFER_REQUEST => {
+            //     self.handle_scheduled_data_transfer_request(msg, client_id)?
+            // }
+            // DATA_PULL_REQUEST => self.handle_data_pull_request(msg, client_id)?,
+            //
+            // SPAWN_ENTITIES_REQUEST => self.handle_spawn_entities_request(msg, client_id)?,
+            // EXPORT_SNAPSHOT_REQUEST => self.handle_export_snapshot_request(msg, client_id)?,
+            _ => println!("unknown message type: {:?}", msg.type_),
+        }
+        Ok(())
+    }
+
     pub fn handle_export_snapshot_request(
         &mut self,
         msg: Message,
-        client_id: &ClientId,
+        client: &mut Client,
     ) -> Result<()> {
-        let req: ExportSnapshotRequest = msg.unpack_payload()?;
+        let req: ExportSnapshotRequest = msg.unpack_payload(client.connection.encoding())?;
         if req.save_to_disk {
             let snap = match &self.sim {
                 SimConnection::Local(sim) => sim.to_snapshot(false)?,
@@ -429,21 +402,15 @@ impl Server {
             snapshot: vec![],
         };
 
-        self.clients
-            .get(client_id)
-            .unwrap()
-            .connection
-            .send_msg(Message::from_payload(resp, false)?)?;
-        Ok(())
+        client.connection.pack_send_msg_payload(resp, None)
     }
 
     pub fn handle_spawn_entities_request(
         &mut self,
         msg: Message,
-        client_id: &ClientId,
+        client: &mut Client,
     ) -> Result<()> {
-        let req: SpawnEntitiesRequest = msg.unpack_payload()?;
-
+        let req: SpawnEntitiesRequest = msg.unpack_payload(client.connection.encoding())?;
         for prefab in req.entity_prefabs {
             trace!("handling prefab: {}", prefab);
             match &mut self.sim {
@@ -453,30 +420,25 @@ impl Server {
                 _ => unimplemented!(),
             }
         }
-
         let resp = SpawnEntitiesResponse {
             error: "".to_string(),
         };
         trace!("starting send..");
-        self.clients
-            .get(client_id)
-            .unwrap()
-            .connection
-            .send_msg(Message::from_payload(resp, false)?)
+
+        client.connection.pack_send_msg_payload(resp, None)
     }
 
     pub fn handle_ping_request(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
-        let req: PingRequest = msg.unpack_payload()?;
+        let client = self.clients.get_mut(client_id).unwrap();
+        let req: PingRequest = msg.unpack_payload(client.connection.encoding())?;
         let resp = PingResponse { bytes: req.bytes };
-        self.clients
-            .get(client_id)
-            .unwrap()
-            .connection
-            .send_msg(Message::from_payload(resp, false)?)
+        client.connection.pack_send_msg_payload(resp, None)
     }
 
     pub fn handle_status_request(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
-        let req: StatusRequest = msg.unpack_payload()?;
+        let connected_clients = self.clients.iter().map(|(id, c)| c.name.clone()).collect();
+        let mut client = self.clients.get_mut(client_id).unwrap();
+        let req: StatusRequest = msg.unpack_payload(client.connection.encoding())?;
         let model_scenario = match &self.sim {
             SimConnection::Local(sim) => sim.model.scenario.clone(),
             SimConnection::ClusterCoord(coord, coord_net) => {
@@ -488,8 +450,7 @@ impl Server {
             name: self.name.clone(),
             description: self.description.clone(),
             address: self.address.clone(),
-            connected_clients: self.clients.iter().map(|(id, c)| c.name.clone()).collect(),
-            //TODO
+            connected_clients,
             engine_version: outcome_core::VERSION.to_owned(),
             uptime: self.uptime,
             current_tick: match &self.sim {
@@ -543,11 +504,7 @@ impl Server {
                 .collect(),
         };
         trace!("sent status response");
-        self.clients
-            .get(client_id)
-            .unwrap()
-            .connection
-            .send_msg(Message::from_payload(resp, false)?)
+        client.connection.pack_send_msg_payload(resp, None)
     }
 
     pub fn handle_data_transfer_request(
@@ -555,18 +512,15 @@ impl Server {
         msg: Message,
         client_id: &ClientId,
     ) -> Result<()> {
-        let dtr: DataTransferRequest = match msg.unpack_payload() {
+        let mut client = self.clients.get_mut(client_id).unwrap();
+        let dtr: DataTransferRequest = match msg.unpack_payload(client.connection.encoding()) {
             Ok(r) => r,
             Err(e) => {
                 let response = DataTransferResponse {
                     data: None,
                     error: "FailedUnpackingPayload".to_string(),
                 };
-                self.clients
-                    .get(client_id)
-                    .unwrap()
-                    .connection
-                    .send_msg(Message::from_payload(response, false)?);
+                client.connection.pack_send_msg_payload(response, None)?;
                 // if let Ok(ms) = msg_size {
                 //     println!("sent DataTransferResponse ({} KB)", ms as f32 / 1000.0);
                 // }
@@ -578,20 +532,19 @@ impl Server {
         match &self.sim {
             SimConnection::ClusterCoord(coord, net) => {
                 let coord = coord.lock().unwrap();
-                let net = net.lock().unwrap();
+                let mut net = net.lock().unwrap();
                 let mut collection = Vec::new();
                 match dtr.transfer_type.as_str() {
                     "Full" => {
-                        for (worker_id, worker) in &net.workers {
-                            worker.pair_sock.send(
-                                crate::sig::Signal::from(outcome::distr::Signal::DataRequestAll)
-                                    .to_bytes()?,
+                        for (worker_id, worker) in &mut net.workers {
+                            worker.connection.send_sig(
+                                crate::sig::Signal::from(outcome::distr::Signal::DataRequestAll),
+                                None,
                             )?
                         }
-                        for (worker_id, worker) in &net.workers {
-                            let bytes = worker.pair_sock.read()?;
-                            let sig = crate::sig::Signal::from_bytes(&bytes)?.inner();
-                            match sig {
+                        for (worker_id, worker) in &mut net.workers {
+                            let (_, sig) = worker.connection.recv_sig()?;
+                            match sig.into_inner() {
                                 outcome::distr::Signal::DataResponse(data) => {
                                     collection.extend(data)
                                 }
@@ -618,20 +571,14 @@ impl Server {
                             data: Some(sdp),
                             error: String::new(),
                         };
-                        self.clients
-                            .get(client_id)
-                            .unwrap()
-                            .connection
-                            .send_msg(Message::from_payload(response, self.use_auth)?);
+                        client.connection.pack_send_msg_payload(response, None)?;
                     }
                     _ => unimplemented!(),
                 }
             }
-            SimConnection::Local(sim_instance) => handle_data_transfer_request_local(
-                &dtr,
-                sim_instance,
-                &self.clients.get(client_id).unwrap().connection,
-            )?,
+            SimConnection::Local(sim_instance) => {
+                handle_data_transfer_request_local(&dtr, sim_instance, client)?
+            }
             _ => unimplemented!(),
         };
 
@@ -643,8 +590,12 @@ impl Server {
         msg: Message,
         client_id: &ClientId,
     ) -> Result<()> {
-        let sdtr: ScheduledDataTransferRequest = msg.unpack_payload()?;
-        let mut client = self.clients.get_mut(client_id).unwrap();
+        let mut client = self
+            .clients
+            .get_mut(client_id)
+            .ok_or(Error::Other("failed getting client".to_string()))?;
+        let sdtr: ScheduledDataTransferRequest =
+            msg.unpack_payload(client.connection.encoding())?;
         for event_trigger in sdtr.event_triggers {
             let event_id = outcome::arraystring::new(&event_trigger)?;
             if !client.scheduled_dts.contains_key(&event_id) {
@@ -663,6 +614,7 @@ impl Server {
     fn handle_single_address(server: &Server) {}
 
     pub fn handle_data_pull_request(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
+        let mut client = self.clients.get_mut(client_id).unwrap();
         {
             let use_compression = self.use_compression.clone();
             // let sim_model = server.sim_model.clone();
@@ -672,70 +624,66 @@ impl Server {
                 _ => unimplemented!(),
             };
             //TODO
-            let dpr: DataPullRequest = msg.unpack_payload()?;
+            let dpr: DataPullRequest = msg.unpack_payload(client.connection.encoding())?;
             //TODO handle errors
             for (address, var) in dpr.data.strings {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_str_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_str_mut()? = var;
             }
             for (address, var) in dpr.data.ints {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_int_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_int_mut()? = var;
             }
             for (address, var) in dpr.data.floats {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_float_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_float_mut()? = var;
             }
             for (address, var) in dpr.data.bools {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_bool_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_bool_mut()? = var;
             }
             for (address, var) in dpr.data.string_lists {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_str_list_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_str_list_mut()? = var;
             }
             for (address, var) in dpr.data.int_lists {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_int_list_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_int_list_mut()? = var;
             }
             for (address, var) in dpr.data.float_lists {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_float_list_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_float_list_mut()? = var;
             }
             for (address, var) in dpr.data.bool_lists {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_bool_list_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_bool_list_mut()? = var;
             }
             #[cfg(feature = "outcome/grids")]
             for (address, var) in dpr.data.string_grids {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_str_grid_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_str_grid_mut()? = var;
             }
             #[cfg(feature = "outcome/grids")]
             for (address, var) in dpr.data.int_grids {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_int_grid_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_int_grid_mut()? = var;
             }
             #[cfg(feature = "outcome/grids")]
             for (address, var) in dpr.data.float_grids {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_float_grid_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_float_grid_mut()? = var;
             }
             #[cfg(feature = "outcome/grids")]
             for (address, var) in dpr.data.bool_grids {
-                let addr = Address::from_str(&address).unwrap();
-                *sim_instance.get_bool_grid_mut(&addr).unwrap() = var;
+                let addr = Address::from_str(&address)?;
+                *sim_instance.get_var_mut(&addr)?.as_bool_grid_mut()? = var;
             }
         }
         let resp = DataPullResponse {
             error: String::new(),
         };
         // send_message(message_from_payload(resp, false), stream, None);
-        self.clients
-            .get(client_id)
-            .unwrap()
-            .connection
-            .send_msg(Message::from_payload(resp, false)?)
+        client.connection.pack_send_msg_payload(resp, None)
     }
 
     pub fn handle_turn_advance_request(
@@ -743,7 +691,8 @@ impl Server {
         msg: Message,
         client_id: &ClientId,
     ) -> Result<()> {
-        let req: TurnAdvanceRequest = msg.unpack_payload()?;
+        let req: TurnAdvanceRequest =
+            msg.unpack_payload(self.clients.get(client_id).unwrap().connection.encoding())?;
 
         let mut client_furthest_tick = 0;
         {
@@ -755,35 +704,38 @@ impl Server {
             };
             trace!("current_tick before: {}", current_tick);
             let mut common_furthest_tick = current_tick + 99999;
-            for (id, client) in &mut self.clients {
-                if &client.id == client_id {
+            for (id, _client) in &mut self.clients {
+                if _client.id == *client_id {
                     trace!(
                         "({}) furthest_tick: {}, current_tick: {}",
-                        client.id,
-                        client.furthest_tick,
+                        _client.id,
+                        _client.furthest_tick,
                         current_tick
                     );
-                    if client.furthest_tick < current_tick {
-                        client.furthest_tick = current_tick;
+                    if _client.furthest_tick < current_tick {
+                        _client.furthest_tick = current_tick;
                     }
-                    if client.furthest_tick - current_tick < req.tick_count as usize {
-                        client.furthest_tick = client.furthest_tick + req.tick_count as usize;
+                    if _client.furthest_tick - current_tick < req.tick_count as usize {
+                        _client.furthest_tick = _client.furthest_tick + req.tick_count as usize;
                     }
-                    client_furthest_tick = client.furthest_tick.clone();
+                    client_furthest_tick = _client.furthest_tick.clone();
                 }
-                if !client.is_blocking {
+                if !_client.is_blocking {
                     trace!("omit non-blocking client..");
                     continue;
                 } else {
                     no_blocking_clients = false;
                 }
-                trace!("client_furthest_tick inside loop: {}", client.furthest_tick);
-                if client.furthest_tick == current_tick {
+                trace!(
+                    "client_furthest_tick inside loop: {}",
+                    _client.furthest_tick
+                );
+                if _client.furthest_tick == current_tick {
                     common_furthest_tick = current_tick;
                     break;
                 }
-                if client.furthest_tick < common_furthest_tick {
-                    common_furthest_tick = client.furthest_tick;
+                if _client.furthest_tick < common_furthest_tick {
+                    common_furthest_tick = _client.furthest_tick;
                 }
             }
             if no_blocking_clients {
@@ -806,7 +758,7 @@ impl Server {
                             );
 
                             // advanced turn, check if any scheduled datatransfers need sending
-                            for (_, client) in &self.clients {
+                            for (_, client) in &mut self.clients {
                                 for (event, dts_list) in &client.scheduled_dts {
                                     trace!("handling scheduled data transfer: event: {}", event);
                                     if sim_instance.event_queue.contains(&event) {
@@ -815,11 +767,11 @@ impl Server {
                                                 "handling scheduled data transfer: dtr: {:?}",
                                                 dtr
                                             );
-                                            handle_data_transfer_request_local(
-                                                dtr,
-                                                sim_instance,
-                                                &client.connection,
-                                            )?
+                                            // handle_data_transfer_request_local(
+                                            //     dtr,
+                                            //     sim_instance,
+                                            //     client,
+                                            // )?
                                         }
                                     }
                                 }
@@ -858,27 +810,28 @@ impl Server {
                 };
             }
 
-            let client_conn = &self.clients.get(client_id).unwrap().connection;
+            let client = self.clients.get_mut(client_id).unwrap();
+
             // responses
             if common_furthest_tick == current_tick {
                 let resp = TurnAdvanceResponse {
                     error: "BlockedFully".to_string(),
                 };
                 trace!("BlockedFully");
-                client_conn.send_msg(Message::from_payload(resp, false)?);
+                client.connection.pack_send_msg_payload(resp, None)?;
             } else if common_furthest_tick < client_furthest_tick {
                 let resp = TurnAdvanceResponse {
                     error: "BlockedPartially".to_string(),
                 };
                 trace!("BlockedPartially");
-                client_conn.send_msg(Message::from_payload(resp, false)?);
+                client.connection.pack_send_msg_payload(resp, None)?;
             //        } else if common_furthest_tick == client_furthest_tick {
             } else {
                 let resp = TurnAdvanceResponse {
                     error: String::new(),
                 };
                 trace!("Didn't block");
-                client_conn.send_msg(Message::from_payload(resp, false)?);
+                client.connection.pack_send_msg_payload(resp, None)?;
             }
         }
         Ok(())
@@ -887,9 +840,9 @@ impl Server {
     pub fn handle_list_local_scenarios_request(
         &mut self,
         payload: Vec<u8>,
-        client_id: &ClientId,
+        client: &mut Client,
     ) -> Result<()> {
-        let req: ListLocalScenariosRequest = unpack_payload(&payload, false, None)?;
+        let req: ListLocalScenariosRequest = unpack(&payload, client.connection.encoding())?;
         //TODO check `$working_dir/scenarios` for scenarios
         //
         //
@@ -898,19 +851,14 @@ impl Server {
             scenarios: Vec::new(),
             error: String::new(),
         };
-        self.clients
-            .get(client_id)
-            .unwrap()
-            .connection
-            .send_msg(Message::from_payload(resp, false)?)
+        client.connection.pack_send_msg_payload(resp, None)
     }
     pub fn handle_load_local_scenario_request(
         payload: Vec<u8>,
         server_arc: Arc<Mutex<Server>>,
-        client_id: &ClientId,
-        client_conn: &PairSocket,
+        client: &mut Client,
     ) -> Result<()> {
-        let req: LoadLocalScenarioRequest = unpack_payload(&payload, false, None)?;
+        let req: LoadLocalScenarioRequest = unpack(&payload, client.connection.encoding())?;
 
         //TODO
         //
@@ -918,15 +866,14 @@ impl Server {
         let resp = LoadLocalScenarioResponse {
             error: String::new(),
         };
-        client_conn.send_msg(Message::from_payload(resp, false)?)
+        client.connection.pack_send_msg_payload(resp, None)
     }
     pub fn handle_load_remote_scenario_request(
         payload: Vec<u8>,
         server_arc: Arc<Mutex<Server>>,
-        client_id: &ClientId,
-        client_conn: &PairSocket,
+        client: &mut Client,
     ) -> Result<()> {
-        let req: LoadRemoteScenarioRequest = unpack_payload(&payload, false, None)?;
+        let req: LoadRemoteScenarioRequest = unpack(&payload, client.connection.encoding())?;
 
         //TODO
         //
@@ -934,21 +881,21 @@ impl Server {
         let resp = LoadRemoteScenarioResponse {
             error: String::new(),
         };
-        client_conn.send_msg(Message::from_payload(resp, false)?)
+        client.connection.pack_send_msg_payload(resp, None)
     }
 }
 
 fn handle_data_transfer_request_local(
     dtr: &DataTransferRequest,
     sim_instance: &Sim,
-    client_conn: &PairSocket,
+    client: &mut Client,
 ) -> Result<()> {
     let mut data_pack = SimDataPack::empty();
     let model = &sim_instance.model;
     match dtr.transfer_type.as_str() {
         "Full" => {
             for (entity_uid, entity) in &sim_instance.entities {
-                for ((comp_name, var_id), v) in entity.storage.get_all_var() {
+                for ((comp_name, var_id), v) in entity.storage.map.iter() {
                     if v.is_float() {
                         data_pack.floats.insert(
                             format!(
@@ -1234,6 +1181,5 @@ fn handle_data_transfer_request_local(
         data: Some(data_pack),
         error: String::new(),
     };
-    client_conn.send_msg(Message::from_payload(response, false)?);
-    Ok(())
+    client.connection.pack_send_msg_payload(response, None)
 }

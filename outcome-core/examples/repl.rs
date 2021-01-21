@@ -61,8 +61,8 @@ fn main() {
         };
         let mut cmd_protos = Vec::new();
         for instr in instructions {
-            let cmd_proto = match instr.kind {
-                script::InstructionKind::Command(cp) => cp,
+            let cmd_proto = match instr.type_ {
+                script::InstructionType::Command(cp) => cp,
                 _ => {
                     println!("not a command");
                     continue 'outer;
@@ -84,7 +84,7 @@ fn main() {
             };
             commands.push(command);
         }
-        exec::execute(&commands, &ent_index, &comp_uid, &mut sim, None, None).unwrap();
+        exec::execute(&commands, &ent_uid, &comp_uid, &mut sim, None, None).unwrap();
 
         // print!("{}", input);
     }

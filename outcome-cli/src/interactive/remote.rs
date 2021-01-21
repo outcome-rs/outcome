@@ -2,7 +2,7 @@ use crate::interactive::Config;
 use outcome::Address;
 use outcome_net::Client;
 
-pub fn process_step(client: &Client, config: &Config) -> Result<(), String> {
+pub fn process_step(client: &mut Client, config: &Config) -> Result<(), String> {
     client
         .server_step_request(config.turn_ticks as u32)
         .unwrap();
@@ -26,7 +26,7 @@ pub fn process_step(client: &Client, config: &Config) -> Result<(), String> {
 /// 	"/universal/universal/generic/clock/string/hour",
 /// ]
 /// ```
-pub fn create_prompt(client: &Client, cfg: &Config) -> Result<String, String> {
+pub fn create_prompt(client: &mut Client, cfg: &Config) -> Result<String, String> {
     //    unimplemented!();
     if &cfg.prompt_format == "" {
         return create_prompt_default(client);
@@ -55,7 +55,7 @@ pub fn create_prompt(client: &Client, cfg: &Config) -> Result<String, String> {
     }
     Ok(out_string)
 }
-pub fn create_prompt_default(client: &Client) -> Result<String, String> {
+pub fn create_prompt_default(client: &mut Client) -> Result<String, String> {
     let status = client.server_status().unwrap();
     let clock = status.get("current_tick").unwrap();
     Ok(format!(

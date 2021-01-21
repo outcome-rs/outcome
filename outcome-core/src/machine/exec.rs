@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::entity::{Entity, EntityNonSer, Storage};
-use crate::{Address, CompId, EntityId, StringId};
+use crate::{Address, CompId, EntityId, EntityUid, StringId};
 use crate::{Sim, SimModel};
 
 use super::cmd::{CentralRemoteCommand, Command, CommandResult, ExtCommand};
@@ -59,10 +59,11 @@ pub(crate) fn execute_ext(
 /// line numbers.
 pub(crate) fn execute_loc(
     cmds: &Vec<Command>,
+    locations: &Vec<LocationInfo>,
     mut ent_storage: &mut Storage,
     mut ent_insta: &mut EntityNonSer,
     mut comp_state: &mut StringId,
-    ent_uid: &EntityId,
+    ent_uid: &EntityUid,
     comp_uid: &CompId,
     sim_model: &SimModel,
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
@@ -70,7 +71,12 @@ pub(crate) fn execute_loc(
     start: Option<usize>,
     end: Option<usize>,
 ) -> Result<()> {
-    // debug!("execute_loc: cmds: {:?}", cmds);
+    trace!(
+        "execute_loc (start:{:?}, end:{:?}): cmds: {:?}",
+        start,
+        end,
+        cmds,
+    );
 
     // initialize a new call stack
     let mut call_stack = CallStackVec::new();
@@ -89,13 +95,15 @@ pub(crate) fn execute_loc(
             }
         }
         let loc_cmd = cmds.get(cmd_n).unwrap();
-        let location_info = sim_model
-            .get_component(comp_uid)
-            .unwrap()
-            .logic
-            .cmd_location_map
-            .get(cmd_n)
-            .ok_or(Error::new(LocationInfo::empty(), ErrorKind::Panic))?;
+        let location_info = locations.get(cmd_n).ok_or(Error::new(
+            LocationInfo::empty(),
+            ErrorKind::Other(format!(
+                "location info not found for command: {:?}",
+                loc_cmd
+            )),
+        ))?;
+        trace!("command: {:?}", loc_cmd);
+        trace!("command location_info: {:?}", location_info);
         // let mut comp = entity.components.get_mut(&comp_uid).unwrap();
         let results = loc_cmd.execute(
             &mut ent_storage,
@@ -116,7 +124,14 @@ pub(crate) fn execute_loc(
                     cmd_n = n;
                     continue 'outer;
                 }
-                CommandResult::JumpToTag(_) => unimplemented!(),
+                CommandResult::JumpToTag(t) => {
+                    if let Some((line, _)) =
+                        locations.iter().enumerate().find(|(_, l)| l.tag == Some(t))
+                    {
+                        cmd_n = line;
+                        continue 'outer;
+                    }
+                }
                 CommandResult::ExecExt(ext_cmd) => {
                     // push external command to an aggregate vec
                     ext_cmds.lock().unwrap().push((
@@ -153,7 +168,7 @@ pub(crate) fn execute_loc(
 /// Executes given set of commands within global sim scope.
 pub fn execute(
     cmds: &Vec<Command>,
-    ent_uid: &EntityId,
+    ent_uid: &EntityUid,
     comp_uid: &CompId,
     mut sim: &mut Sim,
     start: Option<usize>,
@@ -189,7 +204,8 @@ pub fn execute(
             .get(cmd_n)
             .unwrap_or(&empty_locinfo);
 
-        let entity = match sim.entities.get_mut(sim.entities_idx.get(ent_uid).unwrap()) {
+        // let entity = match sim.entities.get_mut(sim.entities_idx.get(ent_uid).unwrap()) {
+        let entity = match sim.entities.get_mut(ent_uid) {
             Some(e) => e,
             None => {
                 unimplemented!();

@@ -4,7 +4,7 @@ use shlex;
 
 use crate::{CompId, MedString, StringId, VarType};
 
-use crate::address::{Address, PartialAddress};
+use crate::address::{Address, PartialAddress, ShortLocalAddress};
 use crate::entity::Storage;
 use crate::model::ComponentModel;
 
@@ -13,10 +13,10 @@ use super::CommandResult;
 use crate::machine::error::{ErrorKind, Result};
 
 /// Print format
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrintFmt {
     pub fmt: String,
-    pub inserts: BTreeMap<usize, String>,
+    pub inserts: Vec<(usize, ShortLocalAddress)>,
 }
 
 impl PrintFmt {
@@ -24,23 +24,48 @@ impl PrintFmt {
         return "printfmt".to_string();
     }
     pub fn new(args: Vec<String>) -> Result<Self> {
-        let mut fmt = args[0].to_string();
-        let mut inserts = BTreeMap::new();
+        let matches = getopts::Options::new().parse(args)?;
+        let mut fmt = matches.free[0].clone();
+        let mut inserts = Vec::new();
+        let mut count = 1;
         loop {
-            match fmt.find('$') {
-                Some(index) => {
-                    let substring_end = fmt[index..].find(' ').unwrap_or(fmt.len());
-                    let substring = &fmt[index..substring_end];
-                    // inserts.insert(index, Address::from_str(&substring[1..]).unwrap());
-                    inserts.insert(index, substring[1..].to_string());
-                    fmt = format!(
-                        "{}{}",
-                        fmt[..index].to_string(),
-                        fmt[substring_end..].to_string()
-                    );
+            if let Some(index) = fmt.find("{}") {
+                //
+                fmt = fmt.replacen("{}", "", 1);
+                if let Some(addr_str) = matches.free.get(count) {
+                    if let Ok(addr) = ShortLocalAddress::from_str(addr_str) {
+                        inserts.push((index, addr));
+                    }
                 }
-                None => break,
+                count += 1;
+            } else {
+                break;
             }
+            // match fmt.find("{") {
+            //     Some(index) => {
+            //         let substring_end = match fmt[index..].find("}") {
+            //             Some(se) => se,
+            //             None => break,
+            //         };
+            //         let substring = &fmt[index + 1..index + substring_end];
+            //         println!("substring: {}", substring);
+            //         // inserts.insert(index, Address::from_str(&substring[1..]).unwrap());
+            //         // inserts.insert(index, substring[1..].to_string());
+            //         if let Some(addr_str) = matches.free.get(count) {
+            //             if let Ok(addr) = ShortLocalAddress::from_str(addr_str) {
+            //                 inserts.push((index, addr));
+            //             }
+            //         }
+            //
+            //         fmt = format!(
+            //             "{}{}",
+            //             fmt[..index].to_string(),
+            //             fmt[substring_end..].to_string()
+            //         );
+            //         count += 1;
+            //     }
+            //     None => break,
+            // }
         }
         //println!("fmt_string: {}, inserts_map: {:?}", &fmt, &inserts);
         Ok(PrintFmt { fmt, inserts })
@@ -60,14 +85,17 @@ impl PrintFmt {
             let mut output = self.fmt.clone();
             let mut track_added = 0;
             for (index, addr) in &self.inserts {
-                let part_addr = PartialAddress::from_str(addr).unwrap();
-                let substring = match part_addr {
-                    PartialAddress::ComponentLocal { var_type, var_id } => entity_db
-                        .get_var(&(*comp_uid, var_id), Some(var_type))
-                        .unwrap()
-                        .to_string(),
-                    _ => unimplemented!(),
-                };
+                // let part_addr = PartialAddress::from_str(addr).unwrap();
+                // let substring = match addr {
+                //     PartialAddress::ComponentLocal { var_type, var_id } => {
+                //         entity_db.get_var(&(*comp_uid, var_id)).unwrap().to_string()
+                //     }
+                //     _ => unimplemented!(),
+                // };
+                let substring = entity_db
+                    .get_var(&addr.storage_index_using(*comp_uid))
+                    .unwrap()
+                    .to_string();
 
                 // let substring = match entity_db.get_coerce_to_string(&addr, Some(&addr.component)) {
                 //     Some(s) => s,
@@ -122,14 +150,18 @@ impl Print {
         let print_string = match &self.source.var_type {
             VarType::Str => format!(
                 "{}",
-                match entity_db.get_str(&self.source.get_storage_index()) {
-                    Some(v) => v,
-                    None => return CommandResult::Break,
+                match entity_db.get_var(&self.source.storage_index()) {
+                    Ok(v) => v.to_string(),
+                    Err(_) => return CommandResult::Break,
                 }
             ),
             VarType::Int => format!(
                 "{}",
-                entity_db.get_int(&self.source.get_storage_index()).unwrap()
+                entity_db
+                    .get_var(&self.source.storage_index())
+                    .unwrap()
+                    .as_int()
+                    .unwrap()
             ),
             _ => return CommandResult::Continue,
         };

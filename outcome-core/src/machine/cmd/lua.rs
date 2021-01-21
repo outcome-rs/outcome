@@ -215,7 +215,7 @@ impl<'a> UserData for ProcHandle<'a> {
                 let ent_comps: &mut CompCollection = &mut data.2;
                 let ent_storage: &mut Storage = &mut data.1;
                 let loc_addr = Address::from_str(uid_str).unwrap();
-                let var_euid = loc_addr.get_storage_index();
+                let var_euid = loc_addr.storage_index();
                 let s = uid_str.rsplitn(3, "/").collect::<Vec<&str>>()[1];
                 let vt = VarType::from_str(s).unwrap();
                 match vt {
@@ -275,7 +275,7 @@ impl<'a> UserData for ProcHandle<'a> {
             };
             let ent_storage: &Storage = &*data.1;
             let loc_addr = Address::from_str(uid_str).unwrap();
-            let var_euid = loc_addr.get_storage_index();
+            let var_euid = loc_addr.storage_index();
             let s = uid_str.rsplitn(3, "/").collect::<Vec<&str>>()[1];
             let vt = VarType::from_str(s).unwrap();
             match vt {
@@ -355,7 +355,7 @@ impl LuaCall {
                                 arg_key.to_owned(),
                                 ctx.pack(
                                     storage
-                                        .get_str(&arg_addr.get_storage_index())
+                                        .get_str(&arg_addr.storage_index())
                                         .unwrap()
                                         .to_owned(),
                                 )
@@ -365,23 +365,21 @@ impl LuaCall {
                         VarType::Int => args_lua
                             .set(
                                 arg_key.to_owned(),
-                                ctx.pack(*storage.get_int(&arg_addr.get_storage_index()).unwrap())
+                                ctx.pack(*storage.get_int(&arg_addr.storage_index()).unwrap())
                                     .unwrap(),
                             )
                             .unwrap(),
                         VarType::Float => args_lua
                             .set(
                                 arg_key.to_owned(),
-                                ctx.pack(
-                                    *storage.get_float(&arg_addr.get_storage_index()).unwrap(),
-                                )
-                                .unwrap(),
+                                ctx.pack(*storage.get_float(&arg_addr.storage_index()).unwrap())
+                                    .unwrap(),
                             )
                             .unwrap(),
                         VarType::Bool => args_lua
                             .set(
                                 arg_key.to_owned(),
-                                ctx.pack(*storage.get_bool(&arg_addr.get_storage_index()).unwrap())
+                                ctx.pack(*storage.get_bool(&arg_addr.storage_index()).unwrap())
                                     .unwrap(),
                             )
                             .unwrap(),
@@ -419,19 +417,19 @@ impl LuaCall {
                 Some(addr) => {
                     match addr.var_type.unwrap() {
                         VarType::Str => match ctx.unpack(res_val) {
-                            Ok(v) => *storage.get_str_mut(&addr.get_storage_index()).unwrap() = v,
+                            Ok(v) => *storage.get_str_mut(&addr.storage_index()).unwrap() = v,
                             Err(e) => error!("pipe failed: {}", e),
                         },
                         VarType::Int => match ctx.unpack(res_val) {
-                            Ok(v) => *storage.get_int_mut(&addr.get_storage_index()).unwrap() = v,
+                            Ok(v) => *storage.get_int_mut(&addr.storage_index()).unwrap() = v,
                             Err(e) => error!("pipe failed: {}", e),
                         },
                         VarType::Float => match ctx.unpack(res_val) {
-                            Ok(v) => *storage.get_float_mut(&addr.get_storage_index()).unwrap() = v,
+                            Ok(v) => *storage.get_float_mut(&addr.storage_index()).unwrap() = v,
                             Err(e) => error!("pipe failed: {}", e),
                         },
                         VarType::Bool => match ctx.unpack(res_val) {
-                            Ok(v) => *storage.get_bool_mut(&addr.get_storage_index()).unwrap() = v,
+                            Ok(v) => *storage.get_bool_mut(&addr.storage_index()).unwrap() = v,
                             Err(e) => error!("pipe failed: {}", e),
                         },
                         _ => unimplemented!(),

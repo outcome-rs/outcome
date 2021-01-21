@@ -1,6 +1,6 @@
 use smallvec::SmallVec;
 
-use crate::address::{Address, LocalAddress};
+use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage, StorageIndex};
 use crate::model::{ComponentModel, SimModel};
 use crate::var::Var;
@@ -20,8 +20,8 @@ pub const COMMAND_NAMES: [&'static str; 1] = ["for"];
 pub struct ForIn {
     pub start: usize,
     pub end: usize,
-    pub target: LocalAddress,
-    pub variable: LocalAddress,
+    pub target: ShortLocalAddress,
+    pub variable: ShortLocalAddress,
 }
 impl ForIn {
     pub fn new(
@@ -32,7 +32,7 @@ impl ForIn {
         let line = location.line.unwrap();
 
         let variable = match &args.get(0) {
-            Some(arg) => LocalAddress::from_str(arg)
+            Some(arg) => ShortLocalAddress::from_str(arg)
                 .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
             // Some(arg) => StringId::from(arg).unwrap(),
             None => {
@@ -43,7 +43,7 @@ impl ForIn {
             }
         };
         let target = match args.get(2) {
-            Some(arg) => LocalAddress::from_str(arg)
+            Some(arg) => ShortLocalAddress::from_str(arg)
                 .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
             None => {
                 return Err(Error::new(
@@ -117,12 +117,9 @@ impl ForIn {
     ) -> CommandResult {
         // get target len
         // let iter_target = match ent_storage.get_var_from_addr(&self.target, Some(comp_uid)) {
-        let iter_target = match ent_storage.get_var(
-            &self.target.storage_index_using(*comp_id),
-            Some(self.target.var_type),
-        ) {
-            Some(var) => var,
-            None => {
+        let iter_target = match ent_storage.get_var(&self.target.storage_index_using(*comp_id)) {
+            Ok(var) => var,
+            Err(_) => {
                 return CommandResult::Err(Error::new(
                     *location,
                     //todo
@@ -146,12 +143,14 @@ impl ForIn {
         // let (comp_model, comp_id) = comp_uid;
         // let variable = (*comp_uid, self.variable.var_id);
         let variable = LocalAddress {
-            comp: Some(self.variable.comp.unwrap_or(*comp_id)),
+            // comp: self.variable.comp.unwrap_or(*comp_id),
+            comp: self.variable.comp.unwrap_or(*comp_id),
             var_type: self.variable.var_type,
             var_id: self.variable.var_id,
         };
         let target = LocalAddress {
-            comp: Some(self.target.comp.unwrap_or(*comp_id)),
+            // comp: self.target.comp.unwrap_or(*comp_id),
+            comp: self.target.comp.unwrap_or(*comp_id),
             var_type: self.target.var_type,
             var_id: self.target.var_id,
         };
@@ -185,24 +184,36 @@ impl ForIn {
             VarType::Int => {
                 match target.var_type {
                     VarType::Int => {
-                        if let Some(int_var) =
-                            ent_storage.get_int_mut(&target.storage_index().unwrap())
+                        if let Ok(int_var) = ent_storage
+                            .get_var_mut(&target.storage_index())
+                            .unwrap()
+                            .as_int_mut()
                         {
                             *int_var = iteration as i64;
                         }
                     }
                     VarType::IntList => {
                         let newvar = ent_storage
-                            .get_int_list(&target.storage_index().unwrap())
+                            .get_var_mut(&target.storage_index())
+                            .unwrap()
+                            .as_int_list_mut()
                             .unwrap()[iteration];
-                        match ent_storage.get_int_mut(&variable.storage_index().unwrap()) {
-                            Some(var) => *var = newvar,
-                            None => {
-                                ent_storage.insert_int(
-                                    &variable.storage_index().unwrap(),
-                                    ent_storage
-                                        .get_int_list(&target.storage_index().unwrap())
-                                        .unwrap()[iteration],
+                        match ent_storage
+                            .get_var_mut(&variable.storage_index())
+                            .unwrap()
+                            .as_int_mut()
+                        {
+                            Ok(var) => *var = newvar,
+                            Err(_) => {
+                                ent_storage.insert(
+                                    variable.storage_index(),
+                                    Var::Int(
+                                        ent_storage
+                                            .get_var(&target.storage_index())
+                                            .unwrap()
+                                            .as_int_list()
+                                            .unwrap()[iteration],
+                                    ),
                                 );
                             }
                         }

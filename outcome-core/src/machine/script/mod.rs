@@ -180,20 +180,19 @@ pub(crate) use self::parser::parse_script_at;
 
 pub(crate) const SCRIPT_FILE_EXTENSION: &str = ".outcome";
 
-//TODO
 use super::{CommandPrototype, LocationInfo};
 
 /// Result of parsing a single line.
 #[derive(Debug, Clone)]
 pub struct Instruction {
     pub location: LocationInfo,
-    pub kind: InstructionKind,
+    pub type_: InstructionType,
 }
 
 /// All the possible kinds of instructions, including `None`
 /// for empty lines.
 #[derive(Debug, Clone)]
-pub enum InstructionKind {
+pub enum InstructionType {
     Directive(DirectivePrototype),
     Command(CommandPrototype),
     None,

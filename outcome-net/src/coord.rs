@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpListener;
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -10,25 +11,22 @@ use std::thread::sleep;
 use std::time::Duration;
 use std::{io, thread};
 
+use fnv::FnvHashMap;
 use id_pool::IdPool;
 
 use outcome::distr::{Signal, SimCentral, SimNode};
 use outcome::{distr, EntityUid, SimModel};
 
+use crate::error::{Error, Result};
 use crate::msg::coord_worker::{
     IntroduceCoordRequest, IntroduceCoordResponse, IntroduceWorkerToCoordRequest,
-    IntroduceWorkerToCoordResponse, INTRODUCE_WORKER_TO_COORD_REQUEST,
-    INTRODUCE_WORKER_TO_COORD_RESPONSE,
+    IntroduceWorkerToCoordResponse,
 };
-use crate::msg::{unpack_payload, Message};
-
-use crate::error::{Error, Result};
+use crate::msg::{Message, MessageType};
 use crate::sig;
-use crate::transport::{CoordDriverInterface, PairSocket, SocketInterface};
+use crate::socket::{Socket, Transport};
+use crate::util::tcp_endpoint;
 use crate::worker::WorkerId;
-use crate::{util::tcp_endpoint, CoordDriver};
-use fnv::FnvHashMap;
-use std::ops::DerefMut;
 
 const COORD_ADDRESS: &str = "0.0.0.0:5912";
 
@@ -37,14 +35,14 @@ pub struct Worker {
     pub id: WorkerId,
     pub address: String,
     pub entities: Vec<EntityUid>,
-    pub pair_sock: PairSocket,
+    pub connection: Socket,
 }
 
 pub struct CoordNetwork {
     /// IP address of the coordinator
     pub address: String,
-    /// Network driver
-    driver: CoordDriver,
+    greeter: Socket,
+    inviter: Socket,
 
     /// Map of workers
     pub workers: FnvHashMap<u32, Worker>,
@@ -55,9 +53,11 @@ pub struct CoordNetwork {
 }
 impl CoordNetwork {
     pub fn new(addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
+        let addr_ip = addr.split(":").collect::<Vec<&str>>()[0];
         let mut net = CoordNetwork {
             address: addr.to_string(),
-            driver: CoordDriver::new(addr)?,
+            greeter: Socket::bind(addr, Transport::Tcp)?,
+            inviter: Socket::bind(&format!("{}:4141", addr_ip), Transport::Tcp)?,
             workers: Default::default(),
             id_pool: IdPool::new(),
             // routing_table: Default::default(),
@@ -68,22 +68,24 @@ impl CoordNetwork {
         Ok(net)
     }
     fn add_worker(&mut self, worker_addr: &str) -> Result<u32> {
-        let pair_sock = self.driver.new_pair_socket()?;
         let id = self.id_pool.request_id().unwrap();
-        pair_sock.bind(&format!(
-            "{}:898{}",
-            self.address
-                .split(':')
-                .collect::<Vec<&str>>()
-                .first()
-                .unwrap(),
-            id
-        ))?;
+        let socket = Socket::bind(
+            &format!(
+                "{}:892{}",
+                self.address
+                    .split(':')
+                    .collect::<Vec<&str>>()
+                    .first()
+                    .unwrap(),
+                id
+            ),
+            Transport::prefer_laminar(),
+        )?;
         let worker = Worker {
             id,
             address: worker_addr.to_string(),
             entities: vec![],
-            pair_sock,
+            connection: socket,
         };
         self.workers.insert(id, worker);
         Ok(id)
@@ -115,31 +117,36 @@ impl CoordNetwork {
     fn initialize_worker(&mut self, id: u32, model: SimModel) -> Result<()> {
         let (worker_id, worker) =
             self.workers
-                .iter()
+                .iter_mut()
                 .find(|(wid, _)| *wid == &id)
                 .ok_or(Error::Other(format!(
                     "unable to find worker with id: {}",
                     id
                 )))?;
 
+        //worker.connection.connect(&worker.address)?;
+
         let req = IntroduceCoordRequest {
-            ip_addr: worker.pair_sock.last_endpoint(),
+            ip_addr: worker.connection.last_endpoint().unwrap().to_string(),
+            //ip_addr: self.address.clone(),
             passwd: "".to_string(),
         };
-        self.driver
-            .inviter
-            .connect(&tcp_endpoint(&worker.address))?;
-        self.driver
-            .inviter
-            .send_msg(Message::from_payload(req, false)?)?;
+        self.inviter.connect(&worker.address)?;
+        self.inviter.pack_send_msg_payload(req, None)?;
         // println!("sent... ");
-        let resp: IntroduceCoordResponse = self.driver.inviter.read_msg()?.unpack_payload()?;
-        // println!("got response: {:?}", resp);
-        self.driver.inviter.disconnect("")?;
+        let resp: IntroduceCoordResponse = self
+            .inviter
+            .recv_msg()?
+            .1
+            .unpack_payload(self.inviter.encoding())?;
+        println!("got response: {:?}", resp);
+        self.inviter.disconnect(None)?;
+
+        worker.connection.connect(&resp.laminar_socket)?;
         let init_sig = Signal::InitializeNode(model);
         worker
-            .pair_sock
-            .send(crate::sig::Signal::from(init_sig).to_bytes()?)?;
+            .connection
+            .send_sig(crate::sig::Signal::from(init_sig), None)?;
         Ok(())
     }
 
@@ -180,7 +187,7 @@ impl Coord {
         worker_addrs: Vec<String>,
     ) -> Result<(Arc<Mutex<Coord>>, Arc<Mutex<CoordNetwork>>)> {
         let mut net = CoordNetwork::new(addr, worker_addrs)?;
-        let scenario = outcome::model::Scenario::from_dir_at(PathBuf::from(scenario_path))?;
+        let scenario = outcome::model::Scenario::from_path(PathBuf::from(scenario_path))?;
         let model = SimModel::from_scenario(scenario)?;
         net.initialize(model.clone());
         let mut coord = Coord::new_from_model(model)?;
@@ -195,18 +202,16 @@ impl Coord {
         thread::spawn(move || loop {
             sleep(Duration::from_millis(100));
             let mut net_guard = net_arc_clone.lock().unwrap();
-            if let Ok(msg) = &net_guard.driver.greeter.try_read_msg(None) {
-                match msg.kind.as_str() {
-                    INTRODUCE_WORKER_TO_COORD_REQUEST => {
+            if let Ok(msg) = &net_guard.greeter.try_recv_msg() {
+                match msg.type_ {
+                    MessageType::IntroduceWorkerToCoordRequest => {
                         debug!("handling new worker connection request");
-                        let req: IntroduceWorkerToCoordRequest = msg.unpack_payload().unwrap();
+                        let req: IntroduceWorkerToCoordRequest =
+                            msg.unpack_payload(net_guard.greeter.encoding()).unwrap();
                         let resp = IntroduceWorkerToCoordResponse {
                             error: "".to_string(),
                         };
-                        &net_guard
-                            .driver
-                            .greeter
-                            .send_msg(Message::from_payload(resp, false).unwrap());
+                        &net_guard.greeter.pack_send_msg_payload(resp, None).unwrap();
 
                         let worker_id = net_guard
                             .add_initialize_worker(&req.worker_addr, model.clone())
@@ -245,7 +250,7 @@ impl Coord {
                             }
                         }
                     }
-                    _ => trace!("msg.kind: {}", msg.kind),
+                    _ => trace!("msg.kind: {:?}", msg.type_),
                 }
             }
         });
@@ -253,10 +258,9 @@ impl Coord {
         thread::spawn(move || loop {
             sleep(Duration::from_micros(100));
             let mut guard = net_arc_clone.lock().unwrap();
-            for (worker_id, worker) in &guard.workers {
-                match worker.pair_sock.try_read(None) {
-                    Ok(sig) => debug!("{:?}", sig::Signal::from_bytes(&sig).unwrap()),
-                    _ => (),
+            for (worker_id, mut worker) in &mut guard.workers {
+                if let Ok((addr, sig)) = worker.connection.try_recv_sig() {
+                    debug!("{:?}", sig);
                 }
             }
         });
@@ -375,44 +379,46 @@ impl Coord {
 }
 
 impl outcome::distr::CentralCommunication for CoordNetwork {
-    fn sig_read(&self) -> outcome::Result<(String, Signal)> {
+    fn sig_read(&mut self) -> outcome::Result<(u32, Signal)> {
         //TODO
-        for (worker_id, worker) in &self.workers {
-            let bytes = worker.pair_sock.read().unwrap();
-            let sig = sig::Signal::from_bytes(&bytes).unwrap();
-            return Ok((worker.id.to_string(), sig.inner()));
+        for (worker_id, worker) in &mut self.workers {
+            let (addr, sig) = worker.connection.recv_sig().unwrap();
+            return Ok((worker.id, sig.into_inner()));
         }
         Err(outcome::error::Error::Other(
             "failed reading sig".to_string(),
         ))
     }
 
-    fn sig_read_from(&self, node_id: u32) -> outcome::Result<Signal> {
+    fn sig_read_from(&mut self, node_id: u32) -> outcome::Result<Signal> {
         unimplemented!()
     }
 
-    fn sig_send_to_node(&self, node_id: u32, signal: Signal) -> outcome::Result<()> {
-        let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
+    fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> outcome::Result<()> {
+        let sig = sig::Signal::from(signal);
         self.workers
-            .get(&node_id)
+            .get_mut(&node_id)
             .ok_or(outcome::error::Error::Other(format!(
                 "no worker with id: {}",
                 node_id
             )))?
-            .pair_sock
-            .send(sig_bytes)
+            .connection
+            .send_sig(sig, None)
             .map_err(|e| outcome::error::Error::Other(format!("network error: {}", e)));
         Ok(())
     }
 
-    fn sig_send_to_entity(&self, entity_uid: u32) -> outcome::Result<()> {
+    fn sig_send_to_entity(&mut self, entity_uid: u32) -> outcome::Result<()> {
         unimplemented!()
     }
 
-    fn sig_broadcast(&self, signal: Signal) -> outcome::Result<()> {
-        let sig_bytes = sig::Signal::from(signal).to_bytes().unwrap();
-        for (worker_id, worker) in &self.workers {
-            worker.pair_sock.send(sig_bytes.clone()).unwrap();
+    fn sig_broadcast(&mut self, signal: Signal) -> outcome::Result<()> {
+        let sig = sig::Signal::from(signal);
+        let len = self.workers.len();
+        for (idx, (worker_id, worker)) in &mut self.workers.iter_mut().enumerate() {
+            println!("broadcasting to {}/{}", idx, len);
+            println!("{:?}", worker.connection.last_endpoint());
+            worker.connection.send_sig(sig.clone(), None).unwrap();
         }
         Ok(())
     }

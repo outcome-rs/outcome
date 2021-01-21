@@ -1,7 +1,7 @@
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompId, EntityId, ShortString, Sim, StringId};
+use crate::{arraystring, CompId, EntityId, EntityUid, ShortString, Sim, StringId};
 use std::iter::FromIterator;
 
 use super::super::super::{
@@ -71,7 +71,7 @@ impl State {
 
         match positions_options {
             Some(positions) => Ok(Command::State(State {
-                comp: arraystring::new_truncate("position"),
+                comp: arraystring::new_truncate(""),
                 signature: None,
                 name: arraystring::new_truncate(&args[0]),
                 start_line: line + 1,
@@ -87,7 +87,7 @@ impl State {
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
-        ent_name: &EntityId,
+        ent_uid: &EntityUid,
         comp_name: &CompId,
         line: usize,
     ) -> Vec<CommandResult> {
@@ -100,6 +100,8 @@ impl State {
             _ => None,
         }) {
             new_self.comp = comp_info.name;
+            new_self.start_line = self.start_line - comp_info.start_line;
+            new_self.end_line = self.end_line - comp_info.start_line;
         }
 
         //println!("{:?}", new_self);
@@ -115,6 +117,7 @@ impl State {
         //println!("{:?}", sim.model.components);
         // let comp_name = self.signature.unwrap().component;
         let comp_name = self.comp;
+        // trace!("comp_name: {:?}", comp_name);
         for component in &mut sim.model.components {
             if component.name != comp_name {
                 continue;

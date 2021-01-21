@@ -69,6 +69,8 @@
 extern crate serde;
 #[macro_use]
 extern crate log;
+
+#[cfg(feature = "machine")]
 #[macro_use]
 extern crate fasteval;
 
@@ -167,6 +169,8 @@ const DEFAULT_SCENARIO_MODULE_DEP_VERSION: &str = "*";
 const DEFAULT_INACTIVE_STATE: &str = "idle";
 #[cfg(feature = "machine")]
 const DEFAULT_TRIGGER_EVENT: &str = "step";
+#[cfg(feature = "machine")]
+const DEFAULT_INIT_EVENT: &str = "init";
 
 /// Floating point numer type used throughout the library.
 #[cfg(feature = "small_nums")]
@@ -204,6 +208,8 @@ type LongString = arrayvec::ArrayString<[u8; 100]>;
 pub type EntityId = StringId;
 /// Component identifier type.
 pub type CompId = StringId;
+/// Variable identifier type.
+pub type VarId = StringId;
 /// Event identifier type.
 pub type EventId = StringId;
 

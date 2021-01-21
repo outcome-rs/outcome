@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use crate::error::{Error, Result};
+
 // default values for base var types
 const DEFAULT_STR_VALUE: &str = "";
 const DEFAULT_INT_VALUE: crate::Int = 0;
@@ -55,7 +57,7 @@ pub enum VarType {
 }
 
 impl fmt::Display for VarType {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> std::result::Result<(), fmt::Error> {
         write!(formatter, "{}", self.to_str())
     }
 }
@@ -78,7 +80,7 @@ pub static VAR_TYPES: &[&str; 12] = &[
 
 impl VarType {
     /// Creates new `VarType` from str.
-    pub fn from_str(s: &str) -> Option<VarType> {
+    pub fn from_str(s: &str) -> Result<VarType> {
         let var_type = match s {
             STR_VAR_TYPE_NAME | STR_VAR_TYPE_NAME_ALT => VarType::Str,
             INT_VAR_TYPE_NAME | INT_VAR_TYPE_NAME_ALT => VarType::Int,
@@ -96,9 +98,9 @@ impl VarType {
             FLOAT_GRID_VAR_TYPE_NAME | FLOAT_GRID_VAR_TYPE_NAME_ALT => VarType::FloatGrid,
             #[cfg(feature = "grids")]
             BOOL_GRID_VAR_TYPE_NAME | BOOL_GRID_VAR_TYPE_NAME_ALT => VarType::BoolGrid,
-            _ => return None,
+            _ => return Err(Error::InvalidVarType(s.to_string())),
         };
-        Some(var_type)
+        Ok(var_type)
     }
 
     /// Creates new `VarType` from str. Panics on invalid input.
@@ -120,7 +122,7 @@ impl VarType {
             FLOAT_GRID_VAR_TYPE_NAME | FLOAT_GRID_VAR_TYPE_NAME_ALT => VarType::FloatGrid,
             #[cfg(feature = "grids")]
             BOOL_GRID_VAR_TYPE_NAME | BOOL_GRID_VAR_TYPE_NAME_ALT => VarType::BoolGrid,
-            _ => panic!("failed creating var_type from: {}", s),
+            _ => panic!("invalid var type: {}", s),
         };
         var_type
     }
@@ -154,6 +156,18 @@ impl VarType {
             VarType::Int => Var::Int(DEFAULT_INT_VALUE),
             VarType::Float => Var::Float(DEFAULT_FLOAT_VALUE),
             VarType::Bool => Var::Bool(DEFAULT_BOOL_VALUE),
+            VarType::StrList => Var::StrList(Vec::new()),
+            VarType::IntList => Var::IntList(Vec::new()),
+            VarType::FloatList => Var::FloatList(Vec::new()),
+            VarType::BoolList => Var::BoolList(Vec::new()),
+            #[cfg(feature = "grids")]
+            VarType::StrGrid => Var::StrGrid(Vec::new()),
+            #[cfg(feature = "grids")]
+            VarType::IntGrid => Var::IntGrid(Vec::new()),
+            #[cfg(feature = "grids")]
+            VarType::FloatGrid => Var::FloatGrid(Vec::new()),
+            #[cfg(feature = "grids")]
+            VarType::BoolGrid => Var::BoolGrid(Vec::new()),
             // TODO implement other var types
             _ => unimplemented!(),
         }
@@ -197,7 +211,18 @@ impl Var {
             Var::Int(_) => VarType::Int,
             Var::Float(_) => VarType::Float,
             Var::Bool(_) => VarType::Bool,
-            _ => unimplemented!(),
+            Var::StrList(_) => VarType::StrList,
+            Var::IntList(_) => VarType::IntList,
+            Var::FloatList(_) => VarType::FloatList,
+            Var::BoolList(_) => VarType::BoolList,
+            #[cfg(feature = "grids")]
+            Var::StrGrid(_) => VarType::StrGrid,
+            #[cfg(feature = "grids")]
+            Var::IntGrid(_) => VarType::IntGrid,
+            #[cfg(feature = "grids")]
+            Var::FloatGrid(_) => VarType::FloatGrid,
+            #[cfg(feature = "grids")]
+            Var::BoolGrid(_) => VarType::BoolGrid,
         }
     }
 }
@@ -263,174 +288,246 @@ impl Var {
 
 /// Type-strict `as_type` getters.
 impl Var {
-    pub fn as_str(&self) -> Option<&String> {
+    pub fn as_str(&self) -> Result<&String> {
         match self {
-            Var::Str(v) => Some(v),
-            _ => None,
+            Var::Str(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected string, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_str_mut(&mut self) -> Option<&mut String> {
+    pub fn as_str_mut(&mut self) -> Result<&mut String> {
         match self {
-            Var::Str(v) => Some(v),
-            _ => None,
+            Var::Str(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected string, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_int(&self) -> Option<&crate::Int> {
+    pub fn as_int(&self) -> Result<&crate::Int> {
         match self {
-            Var::Int(v) => Some(v),
-            _ => None,
+            Var::Int(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected int, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_int_mut(&mut self) -> Option<&mut crate::Int> {
+    pub fn as_int_mut(&mut self) -> Result<&mut crate::Int> {
         match self {
-            Var::Int(v) => Some(v),
-            _ => None,
+            Var::Int(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected int, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_float(&self) -> Option<&crate::Float> {
+    pub fn as_float(&self) -> Result<&crate::Float> {
         match self {
-            Var::Float(v) => Some(v),
-            _ => None,
+            Var::Float(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected float, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_float_mut(&mut self) -> Option<&mut crate::Float> {
+    pub fn as_float_mut(&mut self) -> Result<&mut crate::Float> {
         match self {
-            Var::Float(v) => Some(v),
-            _ => None,
+            Var::Float(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected float, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_bool(&self) -> Option<&bool> {
+    pub fn as_bool(&self) -> Result<&bool> {
         match self {
-            Var::Bool(v) => Some(v),
-            _ => None,
+            Var::Bool(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected bool, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_bool_mut(&mut self) -> Option<&mut bool> {
+    pub fn as_bool_mut(&mut self) -> Result<&mut bool> {
         match self {
-            Var::Bool(v) => Some(v),
-            _ => None,
+            Var::Bool(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected bool, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_str_list(&self) -> Option<&Vec<String>> {
+    pub fn as_str_list(&self) -> Result<&Vec<String>> {
         match self {
-            Var::StrList(v) => Some(v),
-            _ => None,
+            Var::StrList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected string list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_str_list_mut(&mut self) -> Option<&mut Vec<String>> {
+    pub fn as_str_list_mut(&mut self) -> Result<&mut Vec<String>> {
         match self {
-            Var::StrList(v) => Some(v),
-            _ => None,
+            Var::StrList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected string list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_int_list(&self) -> Option<&Vec<crate::Int>> {
+    pub fn as_int_list(&self) -> Result<&Vec<crate::Int>> {
         match self {
-            Var::IntList(v) => Some(v),
-            _ => None,
+            Var::IntList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected int list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_int_list_mut(&mut self) -> Option<&mut Vec<crate::Int>> {
+    pub fn as_int_list_mut(&mut self) -> Result<&mut Vec<crate::Int>> {
         match self {
-            Var::IntList(v) => Some(v),
-            _ => None,
+            Var::IntList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected int list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_float_list(&self) -> Option<&Vec<crate::Float>> {
+    pub fn as_float_list(&self) -> Result<&Vec<crate::Float>> {
         match self {
-            Var::FloatList(v) => Some(v),
-            _ => None,
+            Var::FloatList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected float list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_float_list_mut(&mut self) -> Option<&mut Vec<crate::Float>> {
+    pub fn as_float_list_mut(&mut self) -> Result<&mut Vec<crate::Float>> {
         match self {
-            Var::FloatList(v) => Some(v),
-            _ => None,
+            Var::FloatList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected float list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_bool_list(&self) -> Option<&Vec<bool>> {
+    pub fn as_bool_list(&self) -> Result<&Vec<bool>> {
         match self {
-            Var::BoolList(v) => Some(v),
-            _ => None,
+            Var::BoolList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected bool list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_bool_list_mut(&mut self) -> Option<&mut Vec<bool>> {
+    pub fn as_bool_list_mut(&mut self) -> Result<&mut Vec<bool>> {
         match self {
-            Var::BoolList(v) => Some(v),
-            _ => None,
+            Var::BoolList(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected bool list, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 }
 
 #[cfg(feature = "grids")]
 impl Var {
-    pub fn as_str_grid(&self) -> Option<&Vec<Vec<String>>> {
+    pub fn as_str_grid(&self) -> Result<&Vec<Vec<String>>> {
         match self {
-            Var::StrGrid(v) => Some(v),
-            _ => None,
+            Var::StrGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected str grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_str_grid_mut(&mut self) -> Option<&mut Vec<Vec<String>>> {
+    pub fn as_str_grid_mut(&mut self) -> Result<&mut Vec<Vec<String>>> {
         match self {
-            Var::StrGrid(v) => Some(v),
-            _ => None,
+            Var::StrGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected str grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_int_grid(&self) -> Option<&Vec<Vec<crate::Int>>> {
+    pub fn as_int_grid(&self) -> Result<&Vec<Vec<crate::Int>>> {
         match self {
-            Var::IntGrid(v) => Some(v),
-            _ => None,
+            Var::IntGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected int grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_int_grid_mut(&mut self) -> Option<&mut Vec<Vec<crate::Int>>> {
+    pub fn as_int_grid_mut(&mut self) -> Result<&mut Vec<Vec<crate::Int>>> {
         match self {
-            Var::IntGrid(v) => Some(v),
-            _ => None,
+            Var::IntGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected int grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_float_grid(&self) -> Option<&Vec<Vec<crate::Float>>> {
+    pub fn as_float_grid(&self) -> Result<&Vec<Vec<crate::Float>>> {
         match self {
-            Var::FloatGrid(v) => Some(v),
-            _ => None,
+            Var::FloatGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected float grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_float_grid_mut(&mut self) -> Option<&mut Vec<Vec<crate::Float>>> {
+    pub fn as_float_grid_mut(&mut self) -> Result<&mut Vec<Vec<crate::Float>>> {
         match self {
-            Var::FloatGrid(v) => Some(v),
-            _ => None,
+            Var::FloatGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected float grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_bool_grid(&self) -> Option<&Vec<Vec<bool>>> {
+    pub fn as_bool_grid(&self) -> Result<&Vec<Vec<bool>>> {
         match self {
-            Var::BoolGrid(v) => Some(v),
-            _ => None,
+            Var::BoolGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected bool grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
-    pub fn as_bool_grid_mut(&mut self) -> Option<&mut Vec<Vec<bool>>> {
+    pub fn as_bool_grid_mut(&mut self) -> Result<&mut Vec<Vec<bool>>> {
         match self {
-            Var::BoolGrid(v) => Some(v),
-            _ => None,
+            Var::BoolGrid(v) => Ok(v),
+            _ => Err(Error::InvalidVarType(format!(
+                "expected bool grid, got {}",
+                self.get_type().to_str()
+            ))),
         }
     }
 
@@ -464,37 +561,28 @@ impl Var {
 }
 
 impl Var {
-    pub fn from_str(string: &str, target_type: Option<VarType>) -> Option<Var> {
+    pub fn from_str(string: &str, target_type: Option<VarType>) -> Result<Var> {
         match target_type {
             Some(tt) => match tt {
-                VarType::Str => Some(Var::Str(string.to_string())),
-                VarType::Int => match string.parse::<crate::Int>() {
-                    Ok(p) => Some(Var::Int(p)),
-                    Err(_) => None,
-                },
-                VarType::Float => match string.parse::<crate::Float>() {
-                    Ok(p) => Some(Var::Float(p)),
-                    Err(_) => None,
-                },
-                VarType::Bool => match string.parse::<bool>() {
-                    Ok(p) => Some(Var::Bool(p)),
-                    Err(_) => None,
-                },
+                VarType::Str => Ok(Var::Str(string.to_string())),
+                VarType::Int => Ok(Var::Int(string.parse::<crate::Int>()?)),
+                VarType::Float => Ok(Var::Float(string.parse::<crate::Float>()?)),
+                VarType::Bool => Ok(Var::Bool(string.parse::<bool>()?)),
                 _ => unimplemented!(),
             },
             None => {
                 if string.starts_with('"') {
                     if string.ends_with('"') {
-                        return Some(Var::Str(string.to_string()));
+                        return Ok(Var::Str(string.to_string()));
                     } else {
-                        return None;
+                        return Err(Error::Other("".to_string()));
                     }
                 } else if string == "true" || string == "false" {
-                    return Some(Var::Bool(string.parse::<bool>().unwrap()));
+                    return Ok(Var::Bool(string.parse::<bool>().unwrap()));
                 } else {
                     match string.parse::<crate::Int>() {
-                        Ok(i) => return Some(Var::Int(i)),
-                        Err(e) => return None,
+                        Ok(i) => return Ok(Var::Int(i)),
+                        Err(e) => return Err(Error::Other(e.to_string())),
                     }
                 }
             }

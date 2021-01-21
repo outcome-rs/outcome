@@ -11,7 +11,7 @@
 //! `Clients` and connect them together to form larger deployments.
 //!
 //!
-//! ## Networking constructs overview
+//! # Networking constructs overview
 //!
 //! `outcome-core` defines two basic types of objects for running distributed
 //! simulations: `Central` and `Node`, focused specifically on core storage and
@@ -48,14 +48,14 @@
 //! readiness to do so.
 //!
 //!
-//! ## I *gotta go fast*, can I make a custom worker?
+//! # I *gotta go fast*, can I make a custom worker?
 //!
 //! If you know some Rust you can definitely go about implementing your own
 //! `Worker`. This way you could skip some of the *IPC* overhead and gain
 //! direct access to the entities stored on the node attached to that worker.
 //!
 //!
-//! ## Using different transports ("drivers")
+//! # Using different transports ("drivers")
 //!
 //! Due to the way `cargo` handles crate features, and due to the need for
 //! multiple different network transport variants, this crate doesn't include
@@ -68,7 +68,7 @@
 //! outcome-net = { version = "*", features = ["transport_nng"] }
 //! ```
 //!
-//! ## Discussion
+//! # Discussion
 //!
 //! This crate may not be very useful if one wanted to implement fundamentally
 //! different networking functionality to what is provided here with the basic
@@ -92,6 +92,7 @@ mod client;
 mod coord;
 mod error;
 mod server;
+mod socket;
 mod util;
 mod worker;
 
@@ -100,7 +101,7 @@ pub(crate) use transport::nng::*;
 #[cfg(feature = "transport_zmq")]
 pub(crate) use transport::zmq::*;
 
-pub use client::Client;
+pub use client::{Client, ClientConfig};
 pub use coord::Coord;
 pub use server::{Server, ServerSettings, SimConnection};
 pub use worker::Worker;

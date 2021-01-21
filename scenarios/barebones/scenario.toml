@@ -1,9 +1,0 @@
-[scenario]
-name = "barebones" # has to match name of scenario directory
-version = "0.1.0"
-engine = "*"
-
-[mods]
-simple = "*"
-simple2 = "*"
-#test = { git = "https://github.com/theoutcome/test_module" }

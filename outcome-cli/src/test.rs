@@ -55,10 +55,15 @@ pub fn test_sim_struct(sim: &Sim) {
     let mut total_float_grid_variables_count = 0;
     let mut total_bool_grid_variables_count = 0;
     for ent in sim.get_entities() {
-        total_str_variables_count += ent.storage.get_all_str().len();
-        total_int_variables_count += ent.storage.get_all_int().len();
-        total_float_variables_count += ent.storage.get_all_float().len();
-        total_bool_variables_count += ent.storage.get_all_bool().len();
+        for (_, var) in ent.storage.map.iter() {
+            match var.get_type() {
+                outcome::VarType::Str => total_str_variables_count += 1,
+                outcome::VarType::Int => total_int_variables_count += 1,
+                outcome::VarType::Float => total_float_variables_count += 1,
+                outcome::VarType::Bool => total_bool_variables_count += 1,
+                _ => (),
+            }
+        }
         // total_str_list_variables_count += ent.storage.get_all_str_list().len();
         // total_int_list_variables_count += ent.storage.get_all_int_list().len();
         // total_float_list_variables_count += ent.storage.get_all_float_list().len();

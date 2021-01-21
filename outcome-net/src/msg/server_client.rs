@@ -1,13 +1,14 @@
-use crate::msg::Payload;
 use std::collections::HashMap;
+
+use crate::msg::{MessageType, Payload};
 
 /// One-way heartbeat message.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Heartbeat {}
 pub(crate) const HEARTBEAT: &str = "Heartbeat";
 impl Payload for Heartbeat {
-    fn kind_str(&self) -> &str {
-        HEARTBEAT
+    fn type_(&self) -> MessageType {
+        MessageType::Heartbeat
     }
 }
 
@@ -19,8 +20,8 @@ pub struct PingRequest {
 }
 pub(crate) const PING_REQUEST: &str = "PingRequest";
 impl Payload for PingRequest {
-    fn kind_str(&self) -> &str {
-        PING_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::PingRequest
     }
 }
 
@@ -31,8 +32,8 @@ pub struct PingResponse {
 }
 pub(crate) const PING_RESPONSE: &str = "PingResponse";
 impl Payload for PingResponse {
-    fn kind_str(&self) -> &str {
-        PING_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::PingResponse
     }
 }
 
@@ -46,8 +47,8 @@ pub struct StatusRequest {
 }
 pub(crate) const STATUS_REQUEST: &str = "StatusRequest";
 impl Payload for StatusRequest {
-    fn kind_str(&self) -> &str {
-        STATUS_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::StatusRequest
     }
 }
 
@@ -76,8 +77,8 @@ pub struct StatusResponse {
 }
 pub(crate) const STATUS_RESPONSE: &str = "StatusResponse";
 impl Payload for StatusResponse {
-    fn kind_str(&self) -> &str {
-        STATUS_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::StatusResponse
     }
 }
 
@@ -107,8 +108,8 @@ pub struct RegisterClientRequest {
 }
 pub(crate) const REGISTER_CLIENT_REQUEST: &str = "RegisterClientRequest";
 impl Payload for RegisterClientRequest {
-    fn kind_str(&self) -> &str {
-        REGISTER_CLIENT_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::RegisterClientRequest
     }
 }
 
@@ -123,8 +124,8 @@ pub struct RegisterClientResponse {
 }
 pub(crate) const REGISTER_CLIENT_RESPONSE: &str = "RegisterClientResponse";
 impl Payload for RegisterClientResponse {
-    fn kind_str(&self) -> &str {
-        REGISTER_CLIENT_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::RegisterClientResponse
     }
 }
 
@@ -143,8 +144,8 @@ pub struct DataTransferRequest {
 }
 pub(crate) const DATA_TRANSFER_REQUEST: &str = "DataTransferRequest";
 impl Payload for DataTransferRequest {
-    fn kind_str(&self) -> &str {
-        DATA_TRANSFER_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::DataTransferRequest
     }
 }
 
@@ -160,8 +161,8 @@ pub struct DataTransferResponse {
 }
 pub(crate) const DATA_TRANSFER_RESPONSE: &str = "DataTransferResponse";
 impl Payload for DataTransferResponse {
-    fn kind_str(&self) -> &str {
-        DATA_TRANSFER_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::DataTransferResponse
     }
 }
 
@@ -173,8 +174,8 @@ pub struct ScheduledDataTransferRequest {
 }
 pub(crate) const SCHEDULED_DATA_TRANSFER_REQUEST: &str = "ScheduledDataTransferRequest";
 impl Payload for ScheduledDataTransferRequest {
-    fn kind_str(&self) -> &str {
-        SCHEDULED_DATA_TRANSFER_REQUEST
+    fn type_(&self) -> MessageType {
+        unimplemented!()
     }
 }
 
@@ -249,8 +250,8 @@ pub struct DataPullRequest {
 }
 pub(crate) const DATA_PULL_REQUEST: &str = "DataPullRequest";
 impl Payload for DataPullRequest {
-    fn kind_str(&self) -> &str {
-        DATA_PULL_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::DataPullRequest
     }
 }
 
@@ -263,8 +264,8 @@ pub struct DataPullResponse {
 }
 pub(crate) const DATA_PULL_RESPONSE: &str = "DataPullResponse";
 impl Payload for DataPullResponse {
-    fn kind_str(&self) -> &str {
-        DATA_PULL_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::DataPullResponse
     }
 }
 
@@ -294,8 +295,8 @@ pub struct TurnAdvanceRequest {
 }
 pub(crate) const TURN_ADVANCE_REQUEST: &str = "TurnAdvanceRequest";
 impl Payload for TurnAdvanceRequest {
-    fn kind_str(&self) -> &str {
-        TURN_ADVANCE_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::TurnAdvanceRequest
     }
 }
 
@@ -310,8 +311,8 @@ pub struct TurnAdvanceResponse {
 }
 pub(crate) const TURN_ADVANCE_RESPONSE: &str = "TurnAdvanceResponse";
 impl Payload for TurnAdvanceResponse {
-    fn kind_str(&self) -> &str {
-        TURN_ADVANCE_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::TurnAdvanceResponse
     }
 }
 
@@ -323,8 +324,8 @@ pub struct SpawnEntitiesRequest {
 }
 pub(crate) const SPAWN_ENTITIES_REQUEST: &str = "SpawnEntitiesRequest";
 impl Payload for SpawnEntitiesRequest {
-    fn kind_str(&self) -> &str {
-        SPAWN_ENTITIES_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::SpawnEntitiesRequest
     }
 }
 
@@ -334,8 +335,8 @@ pub struct SpawnEntitiesResponse {
 }
 pub(crate) const SPAWN_ENTITIES_RESPONSE: &str = "SpawnEntitiesResponse";
 impl Payload for SpawnEntitiesResponse {
-    fn kind_str(&self) -> &str {
-        SPAWN_ENTITIES_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::SpawnEntitiesResponse
     }
 }
 
@@ -351,8 +352,8 @@ pub struct ExportSnapshotRequest {
 }
 pub(crate) const EXPORT_SNAPSHOT_REQUEST: &str = "ExportSnapshotRequest";
 impl Payload for ExportSnapshotRequest {
-    fn kind_str(&self) -> &str {
-        EXPORT_SNAPSHOT_REQUEST
+    fn type_(&self) -> MessageType {
+        MessageType::ExportSnapshotRequest
     }
 }
 
@@ -363,8 +364,8 @@ pub struct ExportSnapshotResponse {
 }
 pub(crate) const EXPORT_SNAPSHOT_RESPONSE: &str = "ExportSnapshotResponse";
 impl Payload for ExportSnapshotResponse {
-    fn kind_str(&self) -> &str {
-        EXPORT_SNAPSHOT_RESPONSE
+    fn type_(&self) -> MessageType {
+        MessageType::ExportSnapshotResponse
     }
 }
 
@@ -432,39 +433,33 @@ pub struct LoadRemoteScenarioResponse {
 //     pub model: String,
 // }
 
-impl Payload for outcome::distr::Signal {
-    fn kind_str(&self) -> &str {
-        "Signal"
-    }
-}
-
 impl Payload for ListLocalScenariosRequest {
-    fn kind_str(&self) -> &str {
-        "ListLocalScenariosRequest"
+    fn type_(&self) -> MessageType {
+        unimplemented!()
     }
 }
 impl Payload for ListLocalScenariosResponse {
-    fn kind_str(&self) -> &str {
-        "ListLocalScenariosResponse"
+    fn type_(&self) -> MessageType {
+        unimplemented!()
     }
 }
 impl Payload for LoadLocalScenarioRequest {
-    fn kind_str(&self) -> &str {
-        "LoadLocalScenarioRequest"
+    fn type_(&self) -> MessageType {
+        unimplemented!()
     }
 }
 impl Payload for LoadLocalScenarioResponse {
-    fn kind_str(&self) -> &str {
-        "LoadLocalScenarioResponse"
+    fn type_(&self) -> MessageType {
+        unimplemented!()
     }
 }
 impl Payload for LoadRemoteScenarioRequest {
-    fn kind_str(&self) -> &str {
-        "LoadRemoteScenarioRequest"
+    fn type_(&self) -> MessageType {
+        unimplemented!()
     }
 }
 impl Payload for LoadRemoteScenarioResponse {
-    fn kind_str(&self) -> &str {
-        "LoadRemoteScenarioResponse"
+    fn type_(&self) -> MessageType {
+        unimplemented!()
     }
 }

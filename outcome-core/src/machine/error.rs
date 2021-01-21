@@ -13,15 +13,21 @@ pub struct Error {
     location: LocationInfo,
     kind: ErrorKind,
 }
+
 impl Error {
     pub fn new(location: LocationInfo, kind: ErrorKind) -> Self {
         Self { location, kind }
     }
 }
+
 impl std::error::Error for Error {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ErrorKind {
+    CoreError(String),
+
+    ParseError(String),
+
     // basic parsing
     ErrorReadingFile(String),
     Initialization(String),
@@ -52,6 +58,26 @@ pub enum ErrorKind {
     StackEmpty,
     FailedGettingFromStorage(String),
     FailedGettingComponent(String),
+
+    Other(String),
+}
+
+impl From<Fail> for Error {
+    fn from(e: Fail) -> Self {
+        Self {
+            location: Default::default(),
+            kind: ErrorKind::ParseError(e.to_string()),
+        }
+    }
+}
+
+impl From<crate::error::Error> for Error {
+    fn from(e: crate::error::Error) -> Self {
+        Self {
+            location: Default::default(),
+            kind: ErrorKind::CoreError(e.to_string()),
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -142,7 +168,21 @@ impl fmt::Display for Error {
                 &format!("invalid address: {}", msg),
             ),
             // processing
-            _ => fmt_err_msg(formatter, &LocationInfo::empty(), "not implemented"),
+            // _ => fmt_err_msg(formatter, &LocationInfo::empty(), "not implemented"),
+            ErrorKind::CoreError(ref msg) => {
+                fmt_err_msg(formatter, &self.location, &format!("core error: {}", msg))
+            }
+            ErrorKind::ParseError(ref msg) => {
+                fmt_err_msg(formatter, &self.location, &format!("parse error: {}", msg))
+            }
+            ErrorKind::Panic => fmt_err_msg(formatter, &self.location, &format!("panic")),
+            ErrorKind::StackEmpty => {
+                fmt_err_msg(formatter, &self.location, &format!("stack empty"))
+            }
+
+            ErrorKind::Other(ref msg) => {
+                fmt_err_msg(formatter, &self.location, &format!("other error: {}", msg))
+            }
         }
     }
 }
@@ -169,13 +209,20 @@ fn fmt_err_msg(
 
 use annotate_snippets::display_list::{DisplayList, FormatOptions};
 use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
+use getopts::Fail;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
+use std::path::PathBuf;
 
 fn format_err_init_cmd(msg: &str, location: &LocationInfo) -> String {
     // println!("{:?}", location.source);
+    let source = PathBuf::new()
+        .join(location.root.unwrap().as_str())
+        .join(location.source.unwrap().as_str());
+    // let source = format!("{}/{}", &location.root.unwrap(), &location.source.unwrap());
+    // println!("{:?}", source);
+    let mut source_file = File::open(source).unwrap();
     let start_line = location.source_line.unwrap();
-    let mut source_file = File::open(location.source.unwrap().to_string()).unwrap();
     let source_string: String = BufReader::new(source_file)
         .lines()
         .nth(start_line - 1)

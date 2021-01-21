@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use crate::model::SimModel;
 
-use super::{DirectivePrototype, Instruction, InstructionKind};
+use super::{DirectivePrototype, Instruction, InstructionType};
 
 use crate::machine::{error::Error, ErrorKind, LocationInfo, Result};
 
@@ -36,8 +36,8 @@ pub(crate) fn run(
 fn eliminate_empty(instructions: &mut Vec<Instruction>) -> Result<()> {
     let mut out_instructions = Vec::new();
     for instruction in instructions.iter() {
-        match instruction.kind {
-            InstructionKind::None => continue,
+        match instruction.type_ {
+            InstructionType::None => continue,
             _ => out_instructions.push(instruction.clone()),
         }
     }
@@ -48,8 +48,8 @@ fn eliminate_empty(instructions: &mut Vec<Instruction>) -> Result<()> {
 fn eliminate_directives(instructions: &mut Vec<Instruction>) -> Result<()> {
     let mut out_instructions = Vec::new();
     for instruction in instructions.iter() {
-        match instruction.kind {
-            InstructionKind::Directive(_) => continue,
+        match instruction.type_ {
+            InstructionType::Directive(_) => continue,
             _ => out_instructions.push(instruction.clone()),
         }
     }
@@ -67,8 +67,8 @@ fn eliminate_directives(instructions: &mut Vec<Instruction>) -> Result<()> {
 /// present.
 fn run_includes(instructions: &mut Vec<Instruction>, sim_model: &SimModel) -> Result<()> {
     // run until there are no include directives left
-    while instructions.iter().any(|i| match &i.kind {
-        InstructionKind::Directive(dp) => match &dp.name {
+    while instructions.iter().any(|i| match &i.type_ {
+        InstructionType::Directive(dp) => match &dp.name {
             Some(n) => n == "include",
             _ => false,
         },
@@ -78,8 +78,8 @@ fn run_includes(instructions: &mut Vec<Instruction>, sim_model: &SimModel) -> Re
         let mut next_incl = None;
         let mut next_location = LocationInfo::empty();
         for (n, instr) in instructions.iter().enumerate() {
-            match &instr.kind {
-                InstructionKind::Directive(dp) => match &dp.name {
+            match &instr.type_ {
+                InstructionType::Directive(dp) => match &dp.name {
                     Some(i) => {
                         if i == "include" {
                             next_incl = Some(n);
@@ -99,8 +99,8 @@ fn run_includes(instructions: &mut Vec<Instruction>, sim_model: &SimModel) -> Re
                 let script_path = PathBuf::from_str(&incl.location.source.unwrap()).unwrap();
                 let script_parent_path = script_path.parent().unwrap();
                 // get the directive prototype
-                let incl_proto = match incl.kind {
-                    InstructionKind::Directive(dp) => dp,
+                let incl_proto = match incl.type_ {
+                    InstructionType::Directive(dp) => dp,
                     _ => continue,
                 };
                 trace!("execute include: {:?}", incl_proto);
@@ -144,14 +144,14 @@ fn run_conditionals(instructions: &mut Vec<Instruction>) -> Result<()> {
     let mut inside_if_else = false;
 
     for instruction in instructions.iter() {
-        match &instruction.kind {
-            InstructionKind::Command(cmd) => {
+        match &instruction.type_ {
+            InstructionType::Command(cmd) => {
                 // omit commands inside any if block
                 if !inside_if_if && !inside_if_else {
                     out_instructions.push(instruction.clone())
                 }
             }
-            InstructionKind::Directive(directive) => {
+            InstructionType::Directive(directive) => {
                 match directive.name.as_ref().unwrap().as_str() {
                     "if" => {
                         if inside_if_if {
@@ -234,8 +234,8 @@ fn run_remaining(
     program_data: &HashMap<String, String>,
 ) -> Result<()> {
     for instruction in instructions {
-        match &instruction.kind {
-            InstructionKind::Directive(directive) => {
+        match &instruction.type_ {
+            InstructionType::Directive(directive) => {
                 match directive.name.as_ref().unwrap().as_str() {
                     "print" => run_print(&directive, program_data, &instruction.location)?,
                     _ => continue,

@@ -1,0 +1,58 @@
+# Here's a quick tour of the machine scripting.
+#
+# 
+#
+# Everything written inside a script file is parsed into
+# a sequence of commands. 
+#
+#
+# State machine
+#
+# Everything is oriented around the idea of commands.
+# Commands look like this:
+# `[tag] command [arguments]`
+#
+# 
+#
+# As you might have already noticed, comments are denoted
+# with '#'. Any characters after the '#' will be ignored
+# by the parser. This also applies to comments made after
+# valid commands, as shown below.
+
+print "Hello!" # 
+
+
+# We can write loops and break out of them. A basic `loop`
+# command requires us to manually break out of it, or face
+# "infinite consequences" otherwise.
+loop
+	# If we removed this break we would get what's known as
+	# an "infinite loop", meaning it would block execution
+	# forever!
+	break
+end
+
+# Another example of a loop is a `while` loop. It allows us
+# to explicitly define a break condition for our loop.
+#
+# It performs it's condition check each time a single loop
+# cycle is finished. If it evaluates to true, next cycle
+# is executed. If it evaluates to false, we break out of
+# the loop and continue on to further commands.
+while int:value < 10
+	print "This should only print a few times"
+	# Here we evaluate an expression provided inside the
+	# quotes. `eval` command has a few tricks up it's
+	# sleeve. One of them is variable substitution.
+	eval "x + 1" x=int:value --out int:value
+	call do_work
+end
+
+
+proc do_work
+	print "doing work..."
+
+end
+
+
+

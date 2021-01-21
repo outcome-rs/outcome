@@ -26,14 +26,18 @@ pub fn read_text_file(file: &str) -> std::io::Result<String> {
     Ok(content)
 }
 
-/// Create a static deser object from given path using
-/// serde.
-pub fn static_deser_obj_from_path<T>(file_path: PathBuf) -> Result<T>
+/// Create a static deser object from given path using serde.
+pub fn deser_struct_from_path<T>(file_path: PathBuf) -> Result<T>
 where
     for<'de> T: serde::Deserialize<'de>,
 {
-    let file_data = read(file_path)?;
-    let d: T = toml::from_slice(&file_data)?;
+    let bytes = read(file_path.clone())?;
+    let d: T = match file_path.extension().unwrap().to_str().unwrap() {
+        "toml" => toml::from_slice(&bytes)?,
+        #[cfg(feature = "yaml")]
+        "yaml" | "yml" => serde_yaml::from_slice(&bytes)?,
+        _ => unimplemented!(),
+    };
     Ok(d)
 }
 
@@ -61,9 +65,14 @@ pub fn get_top_dirs_at(dir: PathBuf) -> Vec<PathBuf> {
     paths
 }
 
-/// Get paths to files with `yaml` or `yml` extension in a
-/// directory (recursive).
-pub fn get_yaml_files_at_dir(dir: PathBuf, exclude: &str) -> Vec<PathBuf> {
+/// Get paths to files with any of the given extensions in the provided
+/// directory.
+pub fn find_files_with_extension(
+    dir: PathBuf,
+    extensions: Vec<&str>,
+    recursive: bool,
+    exclude: Option<Vec<String>>,
+) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
     if dir.is_dir() {
         let dir_entry = match read_dir(&dir) {
@@ -78,13 +87,31 @@ pub fn get_yaml_files_at_dir(dir: PathBuf, exclude: &str) -> Vec<PathBuf> {
                 Ok(p) => p.path(),
                 _ => continue,
             };
-            if path.is_dir() {
-                paths.extend(get_yaml_files_at_dir(path, exclude));
+            if path.is_dir() && recursive {
+                paths.extend(find_files_with_extension(
+                    path,
+                    extensions.clone(),
+                    recursive,
+                    exclude.clone(),
+                ));
             } else if path.is_file() {
-                let extension = path.extension().unwrap_or(OsStr::new(""));
-                if extension == "yaml" || extension == "yml" {
-                    if path.file_name().unwrap_or(OsStr::new("")) != exclude {
+                let ext = path
+                    .extension()
+                    .unwrap_or(OsStr::new(""))
+                    .to_str()
+                    .unwrap_or("");
+                for extension in &extensions {
+                    if &ext == extension {
+                        // TODO excludes
+                        //if let Some(excludes) = exclude {
+                        //for exclude in excludes {
+                        //if path.file_name().unwrap_or(OsStr::new("")) == exclude {
+                        ////
+                        //}
+                        //}
+                        //}
                         paths.push(path.clone());
+                        break;
                     }
                 }
             }
@@ -102,7 +129,7 @@ pub fn get_yaml_files_at_dir(dir: PathBuf, exclude: &str) -> Vec<PathBuf> {
 //     let d: T = serde_yaml::from_slice(&file_data)?;
 //     Ok(d)
 // }
-/// Read a file at the given path to a String.
+/// Reads a file at the given path to a String.
 pub fn read_file(path: &str) -> Result<String> {
     // Create a path to the desired file
     let path = Path::new(path);
@@ -120,7 +147,7 @@ pub fn read_file(path: &str) -> Result<String> {
     Ok(s)
 }
 
-/// Coerce serde_yaml value to string.
+/// Coerces serde_yaml value to string.
 pub fn coerce_toml_val_to_string(val: &Value) -> String {
     match val {
         Value::String(v) => v.to_string(),

@@ -13,19 +13,19 @@ use std::str::FromStr;
 
 use super::parser;
 use super::preprocessor;
-use super::{Instruction, InstructionKind};
+use super::{Instruction, InstructionType};
 
 use crate::entity::Entity;
-use crate::machine;
 use crate::machine::cmd::{CentralRemoteCommand, Command, CommandResult, ExtCommand};
 use crate::machine::{cmd, exec, CommandPrototype, ErrorKind, LocationInfo};
 use crate::model::{
-    ComponentModel, EntityPrefabModel, EventModel, LogicModel, Scenario, SimModel, VarModel,
+    ComponentModel, EntityPrefab, EventModel, LogicModel, Scenario, SimModel, VarModel,
 };
 use crate::sim::Sim;
 use crate::var::{Var, VarType};
 use crate::ShortString;
 use crate::{error::Error, Result};
+use crate::{machine, EntityUid};
 use crate::{EntityId, StringId};
 use fnv::FnvHashMap;
 
@@ -39,7 +39,7 @@ impl cmd::register::Extend {
     ///
     /// For each given script source file, this command will read it,
     /// apply preprocessor, and then execute found commands.
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> machine::Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> machine::Result<()> {
         //println!("execute ext extend");
         // iterate over all the given source files
         for file in &self.source_files {
@@ -78,8 +78,8 @@ impl cmd::register::Extend {
             let mut cmd_locations: Vec<LocationInfo> = Vec::new();
             for instruction in instructions {
                 let location = instruction.location;
-                let cmd_proto = match instruction.kind {
-                    InstructionKind::Command(c) => c,
+                let cmd_proto = match instruction.type_ {
+                    InstructionType::Command(c) => c,
                     _ => continue,
                 };
                 cmd_prototypes.push(cmd_proto);

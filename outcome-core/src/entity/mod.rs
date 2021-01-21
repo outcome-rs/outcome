@@ -1,17 +1,18 @@
 //! Entity structure related definitions.
 
 mod storage;
+
 pub use self::storage::Storage;
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use crate::error::{Error, Result};
-use crate::model::{ComponentModel, EntityPrefabModel};
-use crate::{arraystring, SimModel};
-use crate::{model, CompId, StringId};
-
 use fnv::FnvHashMap;
+
+use crate::error::{Error, Result};
+use crate::model::{ComponentModel, EntityPrefab};
+use crate::{arraystring, EntityId, EventId, SimModel};
+use crate::{model, CompId, StringId};
 
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
@@ -94,19 +95,15 @@ pub use storage::StorageIndex;
 pub struct Entity {
     /// All data associated with the entity is stored here
     pub storage: Storage,
-    // /// Component store
-    // pub components: CompCollection,
-    /// asd
+
+    /// Current state of each component-tied state machine
     #[cfg(feature = "machine")]
     pub comp_state: FnvHashMap<CompId, StringId>,
 
-    /// Queue of components scheduled for execution,
-    /// keys are event ids, values are lists of component uids
+    /// Queue of scheduled component-tied machines for each event
     #[cfg(feature = "machine")]
-    pub comp_queue: FnvHashMap<StringId, Vec<CompId>>,
+    pub comp_queue: FnvHashMap<EventId, Vec<CompId>>,
 
-    // /// Map of events with lists of components
-    // pub comp_queue: FnvHashMap<EventIndex, Vec<CompUid>>,
     /// Non-serializable aspects of an entity
     // TODO use cfg_if to include this only if related features are enabled
     // #[serde(skip)]
@@ -124,69 +121,32 @@ pub struct EntityNonSer {
 
 impl Entity {
     /// Creates a new entity using the prefab model.
-    fn from_prefab_model(ent_model: &EntityPrefabModel, sim_model: &SimModel) -> Result<Entity> {
-        trace!("started from_prefab_model");
+    fn from_prefab(prefab: &EntityPrefab, model: &SimModel) -> Result<Entity> {
+        trace!("creating new entity from prefab");
         let mut ent = Entity::empty();
 
         #[cfg(feature = "machine")]
         {
             // ent.comp_queue.insert(
-            //     StringId::from_unchecked(crate::DEFAULT_TRIGGER_EVENT),
+            //     arraystring::new_unchecked(crate::DEFAULT_TRIGGER_EVENT),
             //     Vec::new(),
             // );
+            ent.comp_queue.insert(
+                arraystring::new_unchecked(crate::DEFAULT_INIT_EVENT),
+                Vec::new(),
+            );
 
-            ent.comp_queue
-                .insert(StringId::from("init").unwrap(), Vec::new());
-
-            for event in &sim_model.events {
+            for event in &model.events {
                 ent.comp_queue
                     .insert(arraystring::new_truncate(&event.id), Vec::new());
             }
         }
 
-        for comp_model in &sim_model.components {
-            // create a new component
-            // let mut comp = Component::from_model(&comp_model)?;
-            // add component vars to the entity
-            for var_model in &comp_model.vars {
-                ent.storage.insert(
-                    &comp_model.name,
-                    &var_model.id,
-                    &var_model.type_,
-                    var_model.default.clone(),
-                );
-            }
-
-            // ignore components that don't have any states
-            // (besides the built-in 'none' state)
-            // unimplemented!();
-            // if comp_model.script.states.len() > 1 {
-            // comps.push(comp);
-            //}
-            // comps.push(comp);
-            // }
-
-            // push comp refs to ent event queues based on the model
-            // triggers unimplemented!();
-            // for comp in comps {
-            //     let comp_model = sim_model
-            //         .get_component(&ent_model_type, &comp.model_type, &comp.model_id)
-            //         .unwrap();
-            #[cfg(feature = "machine")]
-            warn!("triggers: {:?}", comp_model.triggers);
-            for trigger in &comp_model.triggers {
-                let t = arraystring::new_truncate(trigger);
-                if let Some(q) = ent.comp_queue.get_mut(&t) {
-                    warn!("pushing to comp_queue: {}", comp_model.name);
-                    q.push(comp_model.name);
-                }
-            }
-            #[cfg(feature = "machine")]
-            ent.comp_state
-                .insert(comp_model.name, comp_model.start_state);
+        for comp in &prefab.components {
+            ent.attach(*comp, model)?;
         }
 
-        // setup dyn libs object for this entity
+        // TODO setup dyn libs
         // let mut libs = HashMap::new();
         // for comp_model in comp_models {
         //     for lib_path in &comp_model.lib_files {
@@ -203,23 +163,93 @@ impl Entity {
     }
 
     /// Creates a new entity from model.
-    pub fn from_prefab(prefab: &StringId, sim_model: &model::SimModel) -> Result<Entity> {
-        trace!("creating entity from prefab");
+    pub fn from_prefab_name(prefab: &EntityId, sim_model: &model::SimModel) -> Result<Entity> {
+        trace!("creating entity from prefab name: {}", prefab);
         let ent_model = sim_model
             .get_entity(prefab)
-            .ok_or(Error::NoEntityPrefab(prefab.to_string()))?;
-        Entity::from_prefab_model(ent_model, sim_model)
+            .ok_or(Error::NoEntityPrefab(*prefab))?;
+        Entity::from_prefab(ent_model, sim_model)
     }
 
     /// Creates a new empty entity.
     pub fn empty() -> Self {
         Entity {
-            storage: Storage::new(),
+            storage: Storage::default(),
             #[cfg(feature = "machine")]
             comp_state: Default::default(),
             #[cfg(feature = "machine")]
             comp_queue: Default::default(),
             insta: EntityNonSer::default(),
         }
+    }
+
+    pub fn attach(&mut self, component: CompId, model: &SimModel) -> Result<()> {
+        let comp_model = model.get_component(&component)?;
+        debug!("attaching component: {:?}", comp_model);
+
+        for var_model in &comp_model.vars {
+            self.storage.insert(
+                (component, var_model.id),
+                var_model
+                    .default
+                    .to_owned()
+                    .unwrap_or(var_model.type_.default_value()),
+            );
+        }
+
+        #[cfg(feature = "machine")]
+        {
+            trace!("triggers: {:?}", comp_model.triggers);
+            for trigger in &comp_model.triggers {
+                let t = arraystring::new_truncate(trigger);
+                if let Some(q) = self.comp_queue.get_mut(&t) {
+                    trace!("pushing to comp_queue: {}", comp_model.name);
+                    q.push(comp_model.name);
+                }
+            }
+            self.comp_state
+                .insert(comp_model.name, comp_model.logic.start_state);
+        }
+
+        // debug!("start_state: {}", comp_model.start_state);
+
+        //// ignore components that don't have any states
+        //// (besides the built-in 'none' state)
+        //// TODO
+        // if comp_model.logic.states.len() >= 0 {
+        // let comp_uid = (IndexString::from(comp_name).unwrap(),);
+
+        #[cfg(feature = "machine")]
+        if !self.comp_state.contains_key(&component) {
+            for trigger in &comp_model.triggers {
+                //                println!("trigger: {}", trigger);
+                let t = StringId::from(trigger).unwrap();
+                #[cfg(feature = "machine")]
+                self.comp_queue.get_mut(&t).unwrap().push(component);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn detach(&mut self, comp_name: &CompId, sim_model: &SimModel) -> Result<()> {
+        self.storage
+            .remove_comp_vars(comp_name, sim_model.get_component(comp_name)?);
+
+        #[cfg(feature = "machine")]
+        {
+            self.comp_state.remove(comp_name);
+            // find and remove references to component from all the queues
+            // for different events
+            for (q, v) in &mut self.comp_queue {
+                let n = match v.iter().position(|c| c == comp_name) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                v.remove(n);
+            }
+        }
+
+        Ok(())
     }
 }

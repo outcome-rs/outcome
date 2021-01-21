@@ -1,0 +1,7 @@
+[scenario]
+name = "hello_world"
+version = "0.1.0"
+engine = "*"
+
+[mods]
+hello_world = "0.1.0"

@@ -280,7 +280,7 @@ impl SimCentral {
         debug!("starting processing cext commands");
         #[cfg(feature = "machine")]
         for (context, cext_cmd) in cext_cmds.lock().unwrap().iter() {
-            // println!("{:?}", cext_cmd);
+            warn!("{:?}", cext_cmd);
             //TODO
             cext_cmd.execute_distr(self, network, &context.ent, &context.comp);
         }

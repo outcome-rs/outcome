@@ -1,0 +1,12 @@
+[package]
+name = "flock_service"
+version = "0.1.0"
+authors = ["adamsky <adamsky@enum.space>"]
+edition = "2018"
+
+[workspace]
+
+[dependencies]
+outcome-core = { path = "../../../../../outcome-core", features = ["machine_sandbox"] }
+outcome-net = { path = "../../../../../outcome-net", features = ["laminar_transport", "zmq_transport"] }
+anyhow = "1.0.38"

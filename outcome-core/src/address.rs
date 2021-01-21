@@ -4,39 +4,118 @@ use std::str::FromStr;
 
 use crate::entity::{Storage, StorageIndex};
 use crate::error::{Error, Result};
-use crate::{arraystring, CompId, StringId};
+use crate::{arraystring, CompId, EntityId, StringId, VarId};
 use crate::{Sim, VarType};
 
 pub const SEPARATOR_SYMBOL: &'static str = ":";
 
+/// Entity-scope address that can also handle component-scope locality.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ShortLocalAddress {
+    pub comp: Option<CompId>,
+    pub var_type: VarType,
+    pub var_id: VarId,
+}
+
+impl ShortLocalAddress {
+    pub fn into_local_address(self, component: Option<CompId>) -> Result<LocalAddress> {
+        match self.comp {
+            Some(c) => match component {
+                Some(_c) => Ok(LocalAddress {
+                    comp: _c,
+                    var_type: self.var_type,
+                    var_id: self.var_id,
+                }),
+                None => Ok(LocalAddress {
+                    comp: c,
+                    var_type: self.var_type,
+                    var_id: self.var_id,
+                }),
+            },
+            None => match component {
+                Some(_c) => Ok(LocalAddress {
+                    comp: _c,
+                    var_type: self.var_type,
+                    var_id: self.var_id,
+                }),
+                None => Err(Error::Other(
+                    "failed making into local address, missing comp name".to_string(),
+                )),
+            },
+        }
+    }
+
+    pub fn from_str(s: &str) -> Result<Self> {
+        let split = s
+            .split(crate::address::SEPARATOR_SYMBOL)
+            .collect::<Vec<&str>>();
+        if split.len() == 2 {
+            Ok(ShortLocalAddress {
+                comp: None,
+                var_type: VarType::from_str(split[0])?,
+                var_id: arraystring::new_truncate(split[1]),
+            })
+        } else if split.len() == 3 {
+            Ok(ShortLocalAddress {
+                comp: Some(arraystring::new_truncate(split[0])),
+                var_type: VarType::from_str(split[1])?,
+                var_id: arraystring::new_truncate(split[2]),
+            })
+        } else {
+            Err(Error::InvalidLocalAddress(s.to_string()))
+        }
+    }
+
+    pub fn storage_index(&self, comp_id: Option<CompId>) -> Result<StorageIndex> {
+        match comp_id {
+            Some(c) => Ok((c, self.var_id)),
+            None => match self.comp {
+                Some(_c) => Ok((_c, self.var_id)),
+                None => Err(Error::Other(
+                    "failed making storage index, short local address missing component name"
+                        .to_string(),
+                )),
+            },
+        }
+    }
+
+    pub fn storage_index_using(&self, comp_id: CompId) -> StorageIndex {
+        (comp_id, self.var_id)
+    }
+
+    pub fn to_string(&self) -> String {
+        match self.comp {
+            Some(c) => format!("{}:{}:{}", c, self.var_type.to_str(), self.var_id),
+            None => format!("{}:{}", self.var_type.to_str(), self.var_id),
+        }
+    }
+}
+
+/// Entity-scope address.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct LocalAddress {
-    pub comp: Option<StringId>,
+    pub comp: CompId,
     pub var_type: VarType,
-    pub var_id: StringId,
+    pub var_id: VarId,
 }
+
 impl LocalAddress {
-    pub fn from_str(input: &str) -> Result<Self> {
-        let split = input
+    pub fn from_str(s: &str) -> Result<Self> {
+        let split = s
             .split(crate::address::SEPARATOR_SYMBOL)
             .collect::<Vec<&str>>();
         if split.len() == 3 {
-            unimplemented!()
-        } else if split.len() == 2 {
             Ok(LocalAddress {
-                comp: None,
-                var_type: VarType::from_str(split[0]).unwrap(),
+                comp: arraystring::new_truncate(split[0]),
+                var_type: VarType::from_str(split[1])?,
                 var_id: arraystring::new_truncate(split[1]),
             })
         } else {
-            Err(Error::Other(input.to_string()))
+            Err(Error::InvalidLocalAddress(s.to_string()))
         }
     }
-    pub fn storage_index(&self) -> Option<StorageIndex> {
-        match self.comp {
-            Some(c) => Some((c, self.var_id)),
-            None => None,
-        }
+    pub fn storage_index(&self) -> StorageIndex {
+        (self.comp, self.var_id)
     }
     pub fn storage_index_using(&self, comp_id: CompId) -> StorageIndex {
         (comp_id, self.var_id)
@@ -46,13 +125,13 @@ impl LocalAddress {
     }
 }
 
-/// Unique reference to simulation data point.
+/// Globally unique reference to simulation variable.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Address {
-    pub entity: StringId,
-    pub component: StringId,
+    pub entity: EntityId,
+    pub component: CompId,
     pub var_type: VarType,
-    pub var_id: StringId,
+    pub var_id: VarId,
 }
 
 impl Address {
@@ -69,8 +148,7 @@ impl Address {
         Ok(Address {
             entity: arraystring::new_truncate(split[0]),
             component: arraystring::new_truncate(split[1]),
-            var_type: VarType::from_str(split[2])
-                .ok_or(Error::Other("Failed parsing vartype".to_string()))?,
+            var_type: VarType::from_str(split[2])?,
             var_id: arraystring::new_truncate(split[3]),
         })
     }
@@ -83,8 +161,8 @@ impl Address {
             self.var_id
         )
     }
-    pub fn get_storage_index(&self) -> StorageIndex {
-        unimplemented!()
+    pub fn storage_index(&self) -> StorageIndex {
+        (self.component, self.var_id)
     }
 }
 

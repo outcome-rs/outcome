@@ -2,7 +2,7 @@
 //!
 //! Provides an interface for parsing scripts into sets of instructions.
 
-use super::{DirectivePrototype, Instruction, InstructionKind};
+use super::{DirectivePrototype, Instruction, InstructionType};
 
 use crate::{arraystring, ShortString};
 use crate::{util, LongString};
@@ -21,18 +21,20 @@ pub(crate) fn parse_script_at(
     script_relative_path: &str,
     project_path: &str,
 ) -> Result<Vec<Instruction>> {
-    let text = util::read_text_file(&format!("{}/{}", project_path, script_relative_path))
-        .map_err(|e| {
-            Error::new(
-                LocationInfo::empty().with_source(script_relative_path),
-                ErrorKind::ErrorReadingFile(script_relative_path.to_string()),
-            )
-        })?;
-    parse_lines(&text, script_relative_path)
+    println!("{}", project_path);
+    let location = LocationInfo::empty().with_source(project_path, script_relative_path);
+    let full_path = format!("{}/{}", project_path, script_relative_path);
+    let text = util::read_text_file(&full_path).map_err(|e| {
+        Error::new(
+            location,
+            ErrorKind::ErrorReadingFile(script_relative_path.to_string()),
+        )
+    })?;
+    parse_lines(&text, location)
 }
 
 /// Parses multiple lines from a script at given path.
-pub(crate) fn parse_lines(lines: &str, script_relative_path: &str) -> Result<Vec<Instruction>> {
+pub(crate) fn parse_lines(lines: &str, location: LocationInfo) -> Result<Vec<Instruction>> {
     let mut instructions = vec![];
 
     // multiline switch
@@ -44,13 +46,8 @@ pub(crate) fn parse_lines(lines: &str, script_relative_path: &str) -> Result<Vec
         // trim whitespace on both ends of the line
         let mut line = line.trim().to_string();
         // create a location info struct for current line
-        let mut location_info = LocationInfo {
-            source: Some(arraystring::new_truncate(script_relative_path)),
-            source_line: Some(line_number),
-            line: None,
-            tag: None,
-            comp_name: None,
-        };
+        let mut location_info = location.clone();
+        location_info.source_line = Some(line_number);
         line_number = line_number + 1;
 
         // is the current line supposed to be continuation of the previous line?
@@ -58,7 +55,7 @@ pub(crate) fn parse_lines(lines: &str, script_relative_path: &str) -> Result<Vec
             line = format!("{}{}", multiline_str.as_ref().unwrap(), line);
             // instructions.push(Instruction {
             // location: location_info.clone(),
-            // kind: InstructionKind::None,
+            // type: InstructionType::None,
             //});
         }
 
@@ -121,7 +118,7 @@ fn parse_line(line_text: &str, location_info: LocationInfo) -> Result<Instructio
 
     if trimmed_text.is_empty() || trimmed_text.starts_with(&COMMENT_SYMBOL) {
         Ok(Instruction {
-            kind: InstructionKind::None,
+            type_: InstructionType::None,
             location: location_info,
         })
     } else {
@@ -158,7 +155,7 @@ fn parse_directive(text: &str, start_index: usize, location: LocationInfo) -> Re
             match parse_arguments_posix(&text, directive_end_index, &location) {
                 Ok(arguments) => Ok(Instruction {
                     location,
-                    kind: InstructionKind::Directive(DirectivePrototype {
+                    type_: InstructionType::Directive(DirectivePrototype {
                         name: Some(directive),
                         arguments: Some(arguments),
                     }),
@@ -179,7 +176,7 @@ fn parse_command(
     if line_text.is_empty() {
         Ok(Instruction {
             location: location_info,
-            kind: InstructionKind::None,
+            type_: InstructionType::None,
         })
     } else {
         // search for label
@@ -190,12 +187,11 @@ fn parse_command(
             arguments: None,
         };
         match find_tag(&location_info, &line_text, index) {
-            Ok(output) => {
-                let (next_index, value) = output;
+            Ok((next_index, value)) => {
                 index = next_index;
 
                 if let Some(val) = value {
-                    location_info.tag = Some(arraystring::new_truncate(&val));
+                    location_info.tag = Some(arraystring::new_truncate(&val[1..]));
                 }
                 //if value.is_some() {
                 //location_info.tag = Some(ArrStr10::from_str_truncate(value));
@@ -219,14 +215,14 @@ fn parse_command(
                     && instruction.output.is_none()
                     && instruction.name.is_none()
                 {
-                    InstructionKind::None
+                    InstructionType::None
                 } else {
-                    InstructionKind::Command(instruction)
+                    InstructionType::Command(instruction)
                 };
 
                 Ok(Instruction {
                     location: location_info,
-                    kind: instruction_kind,
+                    type_: instruction_kind,
                 })
             }
             Err(error) => Err(error),
@@ -513,14 +509,14 @@ fn test_parse_directive() {
     let expected = vec![
         Instruction {
             location: LocationInfo::empty(),
-            kind: InstructionKind::Directive(DirectivePrototype {
+            type_: InstructionType::Directive(DirectivePrototype {
                 name: Some("".to_string()),
                 arguments: Some(vec!["".to_string()]),
             }),
         },
         Instruction {
             location: LocationInfo::empty(),
-            kind: InstructionKind::Directive(DirectivePrototype {
+            type_: InstructionType::Directive(DirectivePrototype {
                 name: Some("".to_string()),
                 arguments: Some(vec!["".to_string()]),
             }),

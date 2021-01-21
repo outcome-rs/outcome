@@ -13,82 +13,101 @@ use fasteval::Evaler;
 //
 use self::getopts::Options;
 
-use crate::address::{Address, LocalAddress};
+use crate::address::{Address, LocalAddress, ShortLocalAddress};
 // use crate::component::Component;
 use crate::entity::{Entity, Storage};
 // use crate::error::Error;
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompId, MedString, Sim, StringId, VarType};
+use crate::{arraystring, CompId, MedString, Sim, StringId, Var, VarType};
 
 use super::super::{CommandPrototype, Error, LocationInfo, Registry, RegistryTarget, Result};
 use super::{Command, CommandResult};
+use crate::machine::ErrorKind;
 
-/// `evalp` command precompiles an evaluation and stores it
+/// Precompiles an evaluation and stores it
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Eval {
     pub expr: fasteval::Instruction,
     pub slab: fasteval::Slab,
+    pub args: Vec<(StringId, ShortLocalAddress)>,
     // pub arg0: Option<(ShortString, RegistryTarget)>,
-    pub out: Option<LocalAddress>,
+    pub out: Option<ShortLocalAddress>,
 }
+
 impl Eval {
     pub fn new(args: Vec<String>) -> Result<Command> {
+        let matches = getopts::Options::new()
+            .optopt("o", "out", "", "")
+            .parse(&args)?;
+
         let mut slab = fasteval::Slab::new();
         let parser = fasteval::Parser::new();
         let compiled = parser
-            .parse(&args[0], &mut slab.ps)
+            .parse(&matches.free[0], &mut slab.ps)
             .unwrap()
             .from(&slab.ps)
             .compile(&slab.ps, &mut slab.cs);
 
-        let mut out = None;
-        if args.len() == 2 {
-            out = LocalAddress::from_str(&args[1]).ok();
+        // let mut out = None;
+        let out = matches
+            .opt_str("out")
+            .map(|s| ShortLocalAddress::from_str(&s))
+            .transpose()?;
+
+        let mut eval_args = Vec::new();
+        for free_arg in matches.free.iter().skip(1) {
+            let split = free_arg.split('=').collect::<Vec<&str>>();
+            if split.len() == 2 {
+                eval_args.push((
+                    arraystring::new_truncate(split[0]),
+                    ShortLocalAddress::from_str(&split[1])?,
+                ));
+            }
         }
 
         Ok(Command::Eval(Eval {
             expr: compiled,
             slab,
+            args: eval_args,
             out,
         }))
     }
     pub fn execute_loc(
         &self,
-        comp_name: &CompId,
         storage: &mut Storage,
+        comp_name: &CompId,
         registry: &mut Registry,
+        location: &LocationInfo,
     ) -> CommandResult {
-        let mut ns = fasteval::StrToF64Namespace::new();
+        let mut ns = fasteval::StringToF64Namespace::new();
         // let mut map = BTreeMap::new();
-        let xval = *storage
-            .get_var(
-                &(
-                    arraystring::new_truncate("position"),
-                    arraystring::new_truncate("x"),
-                ),
-                Some(VarType::Float),
-            )
-            .unwrap()
-            .as_float()
-            .unwrap() as f64;
-        // println!("position:x value: {}", xval);
-        ns.insert("x", xval);
+        for (arg_name, arg_addr) in &self.args {
+            let val = match storage.get_var(&arg_addr.storage_index_using(*comp_name)) {
+                Ok(v) => v.to_float(),
+                Err(e) => {
+                    return CommandResult::Err(Error::new(
+                        *location,
+                        ErrorKind::CoreError(e.to_string()),
+                    ));
+                }
+            };
+            // println!("position:x value: {}", xval);
+            ns.insert(arg_name.to_string(), val);
+        }
 
         // let val = fasteval::ez_eval(&self.expr, &mut ns).unwrap();
         let val = self.expr.eval(&self.slab, &mut ns).unwrap();
-        // let val = fasteval::eval_compiled!(self.expr, &slab, &mut map);
+        // let val = fasteval::eval_compiled!(self.expr, &self.slab, &mut ns);
         // println!("evaled val: {}", val);
 
         if let Some(out) = self.out {
             let mut target = storage
-                .get_var_mut(&out.storage_index_using(*comp_name), Some(out.var_type))
+                .get_var_mut(&out.storage_index_using(*comp_name))
                 .unwrap();
             // *target = crate::Var::fr
-            let v = crate::Var::Float(val as crate::Float);
+            // let v = crate::Var::Float(val as crate::Float);
             // println!("newly created var::float: {:?}", v);
-            if target.is_float() {
-                *target = v;
-            }
+            *target = Var::Float(val);
         }
 
         // match self.out {

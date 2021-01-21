@@ -114,8 +114,9 @@ impl Sim {
     }
 
     /// Create simulation instance using a path to snapshot file.
-    pub fn from_snapshot_at(path: &PathBuf) -> Result<Self> {
-        let path = path.canonicalize().unwrap();
+    pub fn from_snapshot_at(path: &str) -> Result<Self> {
+        let pathbuf = PathBuf::from(path);
+        let path = pathbuf.canonicalize().unwrap();
         let mut file = match File::open(path) {
             Ok(f) => f,
             Err(e) => {
@@ -143,7 +144,7 @@ impl Sim {
 
     /// Creates new simulation instance from a path to scenario directory.
     pub fn from_scenario_at_path(path: PathBuf) -> Result<Sim> {
-        let scenario = Scenario::from_dir_at(path.clone())?;
+        let scenario = Scenario::from_path(path.clone())?;
         Sim::from_scenario(scenario)
     }
 
@@ -242,7 +243,7 @@ impl Sim {
 
         trace!("creating new entity");
         let mut ent = match prefab {
-            Some(p) => Entity::from_prefab(p, &self.model)?,
+            Some(p) => Entity::from_prefab_name(p, &self.model)?,
             None => Entity::empty(),
         };
         trace!("done");
@@ -359,12 +360,12 @@ impl Sim {
             if let Some((ent_id, _)) = &self.entities_idx.iter().find(|(id, uid)| uid == &ent_uid) {
                 ent_str = ent_id.to_string();
             }
-            out_map.extend(
-                ent.storage
-                    .get_all_coerce_to_string()
-                    .into_iter()
-                    .map(|(k, v)| (format!(":{}:{}", ent_str, k), v)),
-            );
+            out_map.extend(ent.storage.map.iter().map(|((comp_id, var_id), v)| {
+                (
+                    format!(":{}:{}:{}", ent_str, comp_id, var_id),
+                    v.to_string(),
+                )
+            }));
         }
         out_map
     }
@@ -373,7 +374,7 @@ impl Sim {
     pub fn get_var(&self, addr: &Address) -> Result<&Var> {
         if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
             if let Some(ent) = self.entities.get(ent_uid) {
-                return ent.storage.get_var_from_addr(addr, None);
+                return ent.storage.get_var(&addr.storage_index());
             }
         }
         if let Some(ent) = self.entities.get(
@@ -382,7 +383,7 @@ impl Sim {
                 .parse::<u32>()
                 .map_err(|e| Error::ParsingError(e.to_string()))?,
         ) {
-            return ent.storage.get_var_from_addr(addr, None);
+            return ent.storage.get_var(&addr.storage_index());
         }
         Err(Error::FailedGettingVariable(addr.to_string()))
     }
@@ -391,7 +392,7 @@ impl Sim {
     pub fn get_var_mut(&mut self, addr: &Address) -> Result<&mut Var> {
         if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
             if let Some(ent) = self.entities.get_mut(ent_uid) {
-                return ent.storage.get_var_mut_from_addr(addr, None);
+                return ent.storage.get_var_mut(&addr.storage_index());
             }
         } else {
             if let Some(ent) = self.entities.get_mut(
@@ -400,243 +401,33 @@ impl Sim {
                     .parse::<u32>()
                     .map_err(|e| Error::ParsingError(e.to_string()))?,
             ) {
-                return ent.storage.get_var_mut_from_addr(addr, None);
+                return ent.storage.get_var_mut(&addr.storage_index());
             }
         }
         Err(Error::FailedGettingVariable(addr.to_string()))
     }
 
-    /// Get a reference to `Str` variable from the sim using
-    /// an absolute address.
-    pub fn get_str(&self, addr: &Address) -> Option<&String> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `Str` variable from the sim
-    /// using an absolute address.
-    pub fn get_str_mut(&mut self, addr: &Address) -> Option<&mut String> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a reference to `Int` variable from the sim using
-    /// an absolute address.
-    pub fn get_int(&self, addr: &Address) -> Option<&crate::Int> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `Int` variable from the sim
-    /// using an absolute address.
-    pub fn get_int_mut(&mut self, addr: &Address) -> Option<&mut crate::Int> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a reference to `Float` variable from the sim
-    /// using an absolute address.
-    pub fn get_float(&self, addr: &Address) -> Option<&crate::Float> {
-        if let Some(entity) = self.entities.get(self.entities_idx.get(&addr.entity)?) {
-            return entity.storage.get_float(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `Float` variable from the sim
-    /// using an absolute address.
-    pub fn get_float_mut(&mut self, addr: &Address) -> Option<&mut crate::Float> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_float_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a reference to `Bool` variable from the sim
-    /// using an absolute address.
-    pub fn get_bool(&self, addr: &Address) -> Option<&bool> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_bool(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `Bool` variable from the sim
-    /// using an absolute address.
-    pub fn get_bool_mut(&mut self, addr: &Address) -> Option<&mut bool> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_bool_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a reference to `StrList` variable from the sim
-    /// using an absolute address.
-    pub fn get_str_list(&self, addr: &Address) -> Option<&Vec<String>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str_list(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `StrList` variable from the
-    /// sim using an absolute address.
-    pub fn get_str_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<String>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str_list_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a reference to `IntList` variable from the sim
-    /// using an absolute address.
-    pub fn get_int_list(&self, addr: &Address) -> Option<&Vec<crate::Int>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int_list(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `IntList` variable from the
-    /// sim using an absolute address.
-    pub fn get_int_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<crate::Int>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int_list_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a reference to `FloatList` variable from the sim
-    /// using an absolute address.
-    pub fn get_float_list(&self, addr: &Address) -> Option<&Vec<crate::Float>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_float_list(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `FloatList` variable from the
-    /// sim using an absolute address.
-    pub fn get_float_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<crate::Float>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity
-                .storage
-                .get_float_list_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a reference to `BoolList` variable from the sim
-    /// using an absolute address.
-    pub fn get_bool_list(&self, addr: &Address) -> Option<&Vec<bool>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_bool_list(&(addr.get_storage_index()));
-        }
-        None
-    }
-
-    /// Get a mut reference to `BoolList` variable from the
-    /// sim using an absolute address.
-    pub fn get_bool_list_mut(&mut self, addr: &Address) -> Option<&mut Vec<bool>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity
-                .storage
-                .get_bool_list_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-
     /// Set a var at address using a string value as input.
     pub fn set_from_string(&mut self, addr: &Address, val: &String) -> Result<()> {
         match addr.var_type {
-            //            VarType::Str => *self.get_str_mut(addr).unwrap() = val,
-            //            VarType::Int => *self.get_int_mut(addr).unwrap() =
-            // val.parse::<crate::Int>().unwrap(),            VarType::Float =>
-            // *self.get_float_mut(addr).unwrap() = val.parse::<crate::Float>().unwrap(),
-            //            VarType::Bool => *self.get_bool_mut(addr).unwrap() =
-            // val.parse::<bool>().unwrap(),            _ =>
-            // unimplemented!("set_from_string not yet implemented for var type {:?}",
-            // addr.var_type),
             VarType::Str => {
-                if let Some(v) = self.get_str_mut(&addr) {
-                    *v = val.clone();
-                } else {
-                    debug!(
-                        "failed setting str from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_str_mut()? = val.clone();
             }
             VarType::Int => {
-                if let Some(v) = self.get_int_mut(&addr) {
-                    *v = val.parse::<crate::Int>().unwrap();
-                } else {
-                    debug!(
-                        "failed setting int from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_int_mut()? = val
+                    .parse::<crate::Int>()
+                    .map_err(|e| Error::ParsingError(e.to_string()))?;
             }
             VarType::Float => {
-                *self.get_var_mut(&addr)? = Var::Float(
-                    val.parse::<crate::Float>()
-                        .map_err(|e| Error::ParsingError(e.to_string()))?,
-                )
+                *self.get_var_mut(&addr)?.as_float_mut()? = val
+                    .parse::<crate::Float>()
+                    .map_err(|e| Error::ParsingError(e.to_string()))?;
             }
-            VarType::Bool => *self.get_bool_mut(&addr).unwrap() = val.parse::<bool>().unwrap(),
+            VarType::Bool => {
+                *self.get_var_mut(&addr)?.as_bool_mut()? = val
+                    .parse::<bool>()
+                    .map_err(|e| Error::ParsingError(e.to_string()))?;
+            }
             _ => debug!(
                 "set_from_string not yet implemented for var type {:?}",
                 addr.var_type
@@ -649,50 +440,23 @@ impl Sim {
     pub fn set_from_string_list(&mut self, addr: &Address, vec: &Vec<String>) -> Result<()> {
         match addr.var_type {
             VarType::StrList => {
-                if let Some(v) = self.get_str_list_mut(&addr) {
-                    *v = vec.clone();
-                } else {
-                    error!(
-                        "failed setting str_list from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_str_list_mut()? = vec.clone();
             }
             VarType::IntList => {
-                if let Some(v) = self.get_int_list_mut(&addr) {
-                    *v = vec
-                        .iter()
-                        .map(|is| is.parse::<crate::Int>().unwrap())
-                        .collect();
-                } else {
-                    error!(
-                        "failed setting int_list from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_int_list_mut()? = vec
+                    .iter()
+                    .map(|is| is.parse::<crate::Int>().unwrap())
+                    .collect();
             }
             VarType::FloatList => {
-                if let Some(v) = self.get_float_list_mut(&addr) {
-                    *v = vec
-                        .iter()
-                        .map(|fs| fs.parse::<crate::Float>().unwrap())
-                        .collect();
-                } else {
-                    error!(
-                        "failed setting float_list from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_float_list_mut()? = vec
+                    .iter()
+                    .map(|fs| fs.parse::<crate::Float>().unwrap())
+                    .collect();
             }
             VarType::BoolList => {
-                if let Some(v) = self.get_bool_list_mut(&addr) {
-                    *v = vec.iter().map(|bs| bs.parse::<bool>().unwrap()).collect();
-                } else {
-                    error!(
-                        "failed setting bool_list from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_bool_list_mut()? =
+                    vec.iter().map(|bs| bs.parse::<bool>().unwrap()).collect();
             }
             _ => error!(
                 "set_from_string_list not yet implemented for var type {:?}",
@@ -709,61 +473,33 @@ impl Sim {
     pub fn set_from_string_grid(&mut self, addr: &Address, vec2d: &Vec<Vec<String>>) -> Result<()> {
         match addr.var_type {
             VarType::StrGrid => {
-                if let Some(v) = self.get_str_grid_mut(&addr) {
-                    *v = vec2d.clone();
-                } else {
-                    error!(
-                        "failed setting str_grid from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_str_grid_mut()? = vec2d.clone();
             }
             VarType::IntGrid => {
-                if let Some(v) = self.get_int_grid_mut(&addr) {
-                    *v = vec2d
-                        .iter()
-                        .map(|v| {
-                            v.iter()
-                                .map(|is| is.parse::<crate::Int>().unwrap())
-                                .collect()
-                        })
-                        .collect();
-                } else {
-                    error!(
-                        "failed setting int_grid from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_int_grid_mut()? = vec2d
+                    .iter()
+                    .map(|v| {
+                        v.iter()
+                            .map(|is| is.parse::<crate::Int>().unwrap())
+                            .collect()
+                    })
+                    .collect();
             }
             VarType::FloatGrid => {
-                if let Some(v) = self.get_float_grid_mut(&addr) {
-                    *v = vec2d
-                        .iter()
-                        .map(|v| {
-                            v.iter()
-                                .map(|fs| fs.parse::<crate::Float>().unwrap())
-                                .collect()
-                        })
-                        .collect();
-                } else {
-                    error!(
-                        "failed setting float_grid from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_float_grid_mut()? = vec2d
+                    .iter()
+                    .map(|v| {
+                        v.iter()
+                            .map(|fs| fs.parse::<crate::Float>().unwrap())
+                            .collect()
+                    })
+                    .collect();
             }
             VarType::BoolGrid => {
-                if let Some(v) = self.get_bool_grid_mut(&addr) {
-                    *v = vec2d
-                        .iter()
-                        .map(|v| v.iter().map(|bs| bs.parse::<bool>().unwrap()).collect())
-                        .collect();
-                } else {
-                    error!(
-                        "failed setting bool_grid from data at addr: {}",
-                        &addr.to_string()
-                    );
-                }
+                *self.get_var_mut(&addr)?.as_bool_grid_mut()? = vec2d
+                    .iter()
+                    .map(|v| v.iter().map(|bs| bs.parse::<bool>().unwrap()).collect())
+                    .collect();
             }
             _ => error!(
                 "set_from_string_grid not yet implemented for var type {:?}",
@@ -772,103 +508,11 @@ impl Sim {
         }
         Ok(())
     }
-    /// Get a reference to `StrGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_str_grid(&self, addr: &Address) -> Option<&Vec<Vec<String>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `StrGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_str_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<String>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_str_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a reference to `IntGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_int_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Int>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `IntGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_int_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Int>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_int_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a reference to `FloatGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_float_grid(&self, addr: &Address) -> Option<&Vec<Vec<crate::Float>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_float_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `FloatGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_float_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<crate::Float>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity
-                .storage
-                .get_float_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a reference to `BoolGrid` variable from the sim
-    /// using an absolute address.
-    pub fn get_bool_grid(&self, addr: &Address) -> Option<&Vec<Vec<bool>>> {
-        if let Some(entity) = self
-            .entities
-            .get(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity.storage.get_bool_grid(&(addr.get_storage_index()));
-        }
-        None
-    }
-    /// Get a mut reference to `BoolGrid` variable from the
-    /// sim using an absolute address.
-    pub fn get_bool_grid_mut(&mut self, addr: &Address) -> Option<&mut Vec<Vec<bool>>> {
-        if let Some(entity) = self
-            .entities
-            .get_mut(self.entities_idx.get(&addr.entity).unwrap())
-        {
-            return entity
-                .storage
-                .get_bool_grid_mut(&(addr.get_storage_index()));
-        }
-        None
-    }
 
     // TODO support more image types
     /// Apply image data as found in the model.
     #[cfg(feature = "load_img")]
-    fn apply_data_img(&mut self) {
+    fn apply_data_img(&mut self) -> Result<()> {
         use self::image::GenericImageView;
         for die in &self.model.data_imgs.clone() {
             //            debug!("loading image: {:?}", die);
@@ -894,8 +538,8 @@ impl Sim {
                         }
                     }
                     let ig = self
-                        .get_int_grid_mut(&Address::from_str(&addr).unwrap())
-                        .unwrap();
+                        .get_var_mut(&Address::from_str(&addr)?)?
+                        .as_int_grid_mut()?;
                     *ig = out_grid;
                 }
                 DataImageEntry::PngU8U8U8Concat(addr, path) => {
@@ -924,18 +568,7 @@ impl Sim {
                         }
                     }
                     let deal = Address::from_str(&addr).expect("failed creating addr from str");
-                    let ig = match self.get_int_grid_mut(&deal) {
-                        Some(i) => i,
-                        None => {
-                            error!("get_int_grid_mut failed while loading image");
-                            continue;
-                        }
-                    };
-                    //                    let ig = self.get_int_grid_mut(
-                    //                        &Address::from_str(&addr,
-                    // Some(&model)).expect("failed creating
-                    // addr from str"))
-                    // .expect("get_int_grid_mut failed");
+                    let ig = self.get_var_mut(&deal)?.as_int_grid_mut()?;
                     *ig = out_grid;
                 }
                 DataImageEntry::PngU8U8U8(addr, path) => {
@@ -961,13 +594,14 @@ impl Sim {
                         }
                     }
                     let ig = self
-                        .get_int_grid_mut(&Address::from_str(&addr).unwrap())
-                        .unwrap();
+                        .get_var_mut(&Address::from_str(&addr)?)?
+                        .as_int_grid_mut()?;
                     *ig = out_grid;
                 }
                 _ => (),
             }
         }
+        Ok(())
     }
 }
 
@@ -1053,121 +687,46 @@ impl Sim {
 
 /// Entity and component handling functions.
 impl Sim {
-    fn attach_component(
-        &mut self,
-        comp_model: model::ComponentModel,
-        entity_uid: String,
-    ) -> Result<()> {
-        unimplemented!();
-        //        let comp =
-        // Component::from_model(&comp_model);
-        //        let comp_id = format!("{}/{}",
-        // &comp_model.type_, &comp_model.id);
-        // self.model.components. push(comp_model);
-        // let mut ent = self.get_entity_mut(&
-        // entity_uid).unwrap();        if !ent.
-        // components.contains_key(&comp_id) {
-        // ent.components.insert(comp_id, comp);
-        // Ok(())        } else {
-        //            Err(format!("couldn't attach
-        // component: \"{}\" already
-        // exists on entity \"{}\"", comp_id, entity_uid))
-        // }
-    }
-    fn detach_component(&mut self, entity_uid: String, comp_id: String) -> Result<()> {
-        unimplemented!();
-        //        let ent =
-        // self.get_entity_mut(&entity_uid).unwrap();
-        //        if ent.components.contains_key(&comp_id) {
-        //            ent.components.remove(&comp_id);
-        //            Ok(())
-        //        } else {
-        //            Err(format!("couldn't detach
-        // component: \"{}\" doesn't exist on entity
-        // \"{}\"", comp_id, entity_uid))        }
+    /// Gets reference to entity using a valid integer id
+    pub fn get_entity(&self, uid: &EntityUid) -> Result<&Entity> {
+        self.entities.get(uid).ok_or(Error::NoEntity(*uid))
     }
 
-    /// Add a new entity.
-    pub fn add_entity_old(&mut self, model_type: &str, model_id: &str, new_id: &str) -> Result<()> {
-        unimplemented!()
-        //     let ent_suid = (
-        //         IndexString::from_str(model_type).unwrap(),
-        //         IndexString::from_str(new_id).unwrap(),
-        //     );
-        //     let mut ent = Entity::from_model_ref(&ent_suid, &self.model).unwrap();
-        //     //        ent.id = new_id;
-        //
-        //     if !self.entities_idx.contains_key(&ent_suid) {
-        //         let new_uid = self.entity_idpool.request_id().unwrap();
-        //         self.entities_idx.insert(ent_suid, new_uid);
-        //         self.entities.insert(new_uid, ent);
-        //         Ok(())
-        //     } else {
-        //         let (a, b) = ent_suid;
-        //         //            debug!("{}", format!("Failed to add entity:
-        //         // entity with id \"{}/{}\" already exists", a,
-        //         // b));
-        //         Err(format!(
-        //             "Failed to add entity: entity with id \"{}/{}\" already exists",
-        //             a, b
-        //         ))
-        //     }
+    /// Gets mutable reference to entity using an integer id
+    pub fn get_entity_mut(&mut self, uid: &EntityUid) -> Result<&mut Entity> {
+        self.entities.get_mut(uid).ok_or(Error::NoEntity(*uid))
     }
-    //    /// Remove an entity.
-    //    pub fn remove_entity(&mut self, ent_uid: &str) ->
-    // Result<(), String> {        unimplemented!();
-    //        if self.entities.contains_key(ent_uid) {
-    //            self.entities.remove(ent_uid);
-    //            Ok(())
-    //        } else {
-    //            Err(format!("Failed to remove entity: entity
-    // with key \"{}\" doesn't exist", ent_uid))        }
-    //    }
 
-    /// Get reference to entity using a valid integer id.
-    pub fn get_entity(&self, uid: &EntityUid) -> Option<&Entity> {
-        self.entities.get(uid)
+    /// Gets reference to entity using a string id
+    pub fn get_entity_str(&self, name: &StringId) -> Result<&Entity> {
+        let entity_uid = self
+            .entities_idx
+            .get(name)
+            .ok_or(Error::NoEntityIndexed(name.to_string()))?;
+        self.get_entity(entity_uid)
     }
-    /// Get mutable reference to entity using a valid integer id.
-    pub fn get_entity_mut(&mut self, uid: &EntityUid) -> Option<&mut Entity> {
-        self.entities.get_mut(uid)
+
+    /// Gets mutable reference to entity using a string id
+    pub fn get_entity_str_mut(&mut self, name: &StringId) -> Result<&mut Entity> {
+        let entity_uid = *self
+            .entities_idx
+            .get(name)
+            .ok_or(Error::NoEntityIndexed(name.to_string()))?;
+        self.get_entity_mut(&entity_uid)
     }
-    /// Get reference to entity using a str literal.
-    pub fn get_entity_str(&self, name: &StringId) -> Option<&Entity> {
-        self.entities.get(self.entities_idx.get(name).unwrap())
-    }
-    /// Get mutable reference to entity using a str literal.
-    pub fn get_entity_str_mut(&mut self, name: &StringId) -> Option<&mut Entity> {
-        self.entities.get_mut(self.entities_idx.get(name).unwrap())
-    }
-    // pub fn get_component(&self, entity: &StringId, comp: &StringId) -> Option<&Component> {
-    //     self.get_entity_str(entity).unwrap().components.get(comp)
-    // }
-    // pub fn get_component_mut(
-    //     &mut self,
-    //     entity: &StringId,
-    //     component: &StringId,
-    // ) -> Option<&mut Component> {
-    //     self.get_entity_str_mut(entity)
-    //         .unwrap()
-    //         .components
-    //         .get_mut(component)
-    // }
+
     pub fn get_entities(&self) -> Vec<&Entity> {
         self.entities.values().collect()
     }
+
     pub fn get_entities_mut(&mut self) -> Vec<&mut Entity> {
         self.entities.values_mut().collect()
     }
+
+    /// Gets entities that have the same set of components
     pub fn get_entities_of_type(&self, type_: &Vec<StringId>) -> Vec<&Entity> {
         unimplemented!()
     }
-    //    pub fn get_entity_model(&self, type_: &str, id: &str)
-    // -> Option<&model::Entity> {
-    // self.model.get_entity(type_, id)    }
-    //    pub fn get_component_model(&self, type_: &str, id:
-    // &str) -> Option<&model::Component> {
-    // self.model.get_component(type_, id)    }
 }
 
 #[test]
