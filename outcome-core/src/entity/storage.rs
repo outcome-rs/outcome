@@ -5,9 +5,9 @@ use fnv::FnvHashMap;
 use crate::address::{Address, LocalAddress};
 use crate::error::{Error, Result};
 use crate::model::ComponentModel;
-use crate::{arraystring, CompId, StringId, Var, VarId, VarType};
+use crate::{arraystring, CompName, StringId, Var, VarName, VarType};
 
-pub type StorageIndex = (CompId, VarId);
+pub type StorageIndex = (CompName, VarName);
 // type TypedStorageIndex = (StorageIndex, VarType);
 
 /// Entity's main data storage structure.
@@ -44,7 +44,7 @@ impl Storage {
         out_map
     }
 
-    pub fn insert(&mut self, idx: (CompId, VarId), var: Var) {
+    pub fn insert(&mut self, idx: (CompName, VarName), var: Var) {
         self.map.insert(idx, var);
     }
 
@@ -54,14 +54,14 @@ impl Storage {
     pub fn set_from_addr(&mut self, target: &Address, source: &Address) {
         unimplemented!();
     }
-    pub fn set_from_var(&mut self, target: &Address, comp_uid: Option<&CompId>, var: &Var) {
+    pub fn set_from_var(&mut self, target: &Address, comp_uid: Option<&CompName>, var: &Var) {
         let target = self
             .get_var_mut(&(target.component, target.var_id))
             .unwrap();
         *target = var.clone();
     }
 
-    pub fn remove_comp_vars(&mut self, comp_name: &CompId, comp_model: &ComponentModel) {
+    pub fn remove_comp_vars(&mut self, comp_name: &CompName, comp_model: &ComponentModel) {
         for var_model in &comp_model.vars {
             self.map.remove(&(*comp_name, var_model.id));
         }

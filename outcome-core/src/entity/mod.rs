@@ -11,8 +11,8 @@ use fnv::FnvHashMap;
 
 use crate::error::{Error, Result};
 use crate::model::{ComponentModel, EntityPrefab};
-use crate::{arraystring, EntityId, EventId, SimModel};
-use crate::{model, CompId, StringId};
+use crate::{arraystring, EntityName, EventName, SimModel};
+use crate::{model, CompName, StringId};
 
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
@@ -98,11 +98,11 @@ pub struct Entity {
 
     /// Current state of each component-tied state machine
     #[cfg(feature = "machine")]
-    pub comp_state: FnvHashMap<CompId, StringId>,
+    pub comp_state: FnvHashMap<CompName, StringId>,
 
     /// Queue of scheduled component-tied machines for each event
     #[cfg(feature = "machine")]
-    pub comp_queue: FnvHashMap<EventId, Vec<CompId>>,
+    pub comp_queue: FnvHashMap<EventName, Vec<CompName>>,
 
     /// Non-serializable aspects of an entity
     // TODO use cfg_if to include this only if related features are enabled
@@ -163,7 +163,7 @@ impl Entity {
     }
 
     /// Creates a new entity from model.
-    pub fn from_prefab_name(prefab: &EntityId, sim_model: &model::SimModel) -> Result<Entity> {
+    pub fn from_prefab_name(prefab: &EntityName, sim_model: &model::SimModel) -> Result<Entity> {
         trace!("creating entity from prefab name: {}", prefab);
         let ent_model = sim_model
             .get_entity(prefab)
@@ -183,7 +183,7 @@ impl Entity {
         }
     }
 
-    pub fn attach(&mut self, component: CompId, model: &SimModel) -> Result<()> {
+    pub fn attach(&mut self, component: CompName, model: &SimModel) -> Result<()> {
         let comp_model = model.get_component(&component)?;
         debug!("attaching component: {:?}", comp_model);
 
@@ -232,7 +232,7 @@ impl Entity {
         Ok(())
     }
 
-    pub fn detach(&mut self, comp_name: &CompId, sim_model: &SimModel) -> Result<()> {
+    pub fn detach(&mut self, comp_name: &CompName, sim_model: &SimModel) -> Result<()> {
         self.storage
             .remove_comp_vars(comp_name, sim_model.get_component(comp_name)?);
 

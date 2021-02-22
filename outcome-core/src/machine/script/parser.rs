@@ -21,9 +21,9 @@ pub(crate) fn parse_script_at(
     script_relative_path: &str,
     project_path: &str,
 ) -> Result<Vec<Instruction>> {
-    println!("{}", project_path);
     let location = LocationInfo::empty().with_source(project_path, script_relative_path);
     let full_path = format!("{}/{}", project_path, script_relative_path);
+    debug!("parsing script at: {}", full_path);
     let text = util::read_text_file(&full_path).map_err(|e| {
         Error::new(
             location,

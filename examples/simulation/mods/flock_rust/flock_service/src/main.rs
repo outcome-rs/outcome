@@ -3,24 +3,150 @@
 use anyhow::Result;
 
 use outcome_core::machine::cmd::CommandResult;
-use outcome_core::{arraystring::new_truncate, entity::Storage, entity::StorageIndex, EntityUid};
-use outcome_net::Client;
+use outcome_core::{arraystring::new_truncate, entity::Storage, entity::StorageIndex, EntityId};
+use outcome_net::msg::{
+    DataPullRequest, DataTransferRequest, DataTransferResponse, MessageType, PullRequestData,
+    TransferResponseData, TurnAdvanceRequest, TurnAdvanceResponse, TypedSimDataPack,
+    VarSimDataPack, VarSimDataPackOrdered,
+};
+use outcome_net::{Client, ClientConfig, CompressionPolicy, SocketEvent};
 
 pub fn main() -> Result<()> {
-    let mut client = Client::new("flock_service", true, false, None, Some(1000))?;
+    // let mut client = Client::new("flock_service", true, false, None, Some(1000))?;
+    let mut client = Client::new_with_config(
+        None,
+        ClientConfig {
+            name: "flock_service".to_string(),
+            heartbeat: None,
+            is_blocking: true,
+            ..Default::default()
+        },
+    )?;
     client.connect("127.0.0.1:9123".to_string(), None);
 
+    let mut advanced_turn = true;
+    let mut received_data = true;
+
+    let mut data = VarSimDataPackOrdered::default();
+    let mut order_id = None;
+
+    client
+        .connection
+        .pack_send_msg_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+    client.connection.pack_send_msg_payload(
+        DataTransferRequest {
+            transfer_type: "SelectVarOrdered".to_string(),
+            selection: vec!["4:velocity:float:x".to_string()],
+            // selection: vec![],
+        },
+        None,
+    )?;
+
     loop {
-        let data_pack = client.get_vars()?;
-        println!("data_pack: {:?}", data_pack);
-        client.server_step_request(4)?;
+        // println!("loop");
+        if advanced_turn && received_data && order_id.is_some() {
+            // println!("{:?}", data);
+            // for (addr, var) in data
+            // .vars
+            //     .iter_mut()
+            //     .filter(|(a, b)| a.contains(":velocity:float:x"))
+            for var in &mut data.vars {
+                if let Ok(v) = var.as_float_mut() {
+                    *v += 1.;
+                }
+            }
+
+            client.connection.pack_send_msg_payload(
+                DataPullRequest {
+                    data: PullRequestData::VarOrdered(order_id.unwrap(), data.clone()),
+                },
+                None,
+            )?;
+            client
+                .connection
+                .pack_send_msg_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+            client
+                .connection
+                .pack_send_msg_payload(data_transfer_request(), None)?;
+            advanced_turn = false;
+            received_data = false;
+        }
+
+        loop {
+            if let Ok((addr, event)) = client.connection.try_recv() {
+                match event {
+                    SocketEvent::Message(msg) => match msg.type_ {
+                        MessageType::TurnAdvanceResponse => {
+                            let resp: TurnAdvanceResponse =
+                                msg.unpack_payload(client.connection.encoding())?;
+                            if resp.error.is_empty() {
+                                // println!("[{:?}] advanced turn", std::time::SystemTime::now());
+                                advanced_turn = true;
+                            } else {
+                                // println!("{}", resp.error);
+                                client.connection.pack_send_msg_payload(
+                                    TurnAdvanceRequest { tick_count: 1 },
+                                    None,
+                                )?;
+                            }
+                        }
+                        MessageType::DataTransferResponse => {
+                            println!("received data transfer response");
+                            let resp: DataTransferResponse =
+                                msg.unpack_payload(client.connection.encoding())?;
+                            if let Some(resp_data) = resp.data {
+                                match resp_data {
+                                    TransferResponseData::VarOrdered(ord_id, d) => {
+                                        order_id = Some(ord_id);
+                                        data = d
+                                    }
+                                    _ => (),
+                                }
+                            }
+                            received_data = true;
+                        }
+                        MessageType::DataPullResponse => {
+                            println!("received pull response");
+                        }
+                        _ => (),
+                    },
+                    SocketEvent::Disconnect => {
+                        println!("server disconnected");
+                        return Ok(());
+                    }
+                    SocketEvent::Heartbeat => (),
+                    _ => println!("unhandled event: {:?}", event),
+                }
+            } else {
+                break;
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        // let data_pack = client.get_vars()?;
+        // println!("data_pack: {:?}", data_pack);
+        // if let Ok(resp) = client.server_step_request(4) {
+        //     println!(
+        //         "{:?}",
+        //         resp.unpack_payload::<TurnAdvanceResponse>(client.connection.encoding())
+        //     );
+        // }
     }
 
     Ok(())
 }
 
+fn data_transfer_request() -> DataTransferRequest {
+    DataTransferRequest {
+        transfer_type: "SelectVarOrdered".to_string(),
+        // selection: vec!["*:velocity:float:x".to_string()],
+        selection: vec![],
+    }
+}
+
 pub fn calculate_entity(
-    ent_uid: &EntityUid,
+    ent_uid: &EntityId,
     entity: &mut Storage,
     import: &mut Storage,
 ) -> Result<CommandResult> {

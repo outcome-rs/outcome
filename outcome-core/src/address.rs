@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::entity::{Storage, StorageIndex};
 use crate::error::{Error, Result};
-use crate::{arraystring, CompId, EntityId, StringId, VarId};
+use crate::{arraystring, CompName, EntityName, StringId, VarName};
 use crate::{Sim, VarType};
 
 pub const SEPARATOR_SYMBOL: &'static str = ":";
@@ -12,13 +12,13 @@ pub const SEPARATOR_SYMBOL: &'static str = ":";
 /// Entity-scope address that can also handle component-scope locality.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ShortLocalAddress {
-    pub comp: Option<CompId>,
+    pub comp: Option<CompName>,
     pub var_type: VarType,
-    pub var_id: VarId,
+    pub var_id: VarName,
 }
 
 impl ShortLocalAddress {
-    pub fn into_local_address(self, component: Option<CompId>) -> Result<LocalAddress> {
+    pub fn into_local_address(self, component: Option<CompName>) -> Result<LocalAddress> {
         match self.comp {
             Some(c) => match component {
                 Some(_c) => Ok(LocalAddress {
@@ -66,7 +66,7 @@ impl ShortLocalAddress {
         }
     }
 
-    pub fn storage_index(&self, comp_id: Option<CompId>) -> Result<StorageIndex> {
+    pub fn storage_index(&self, comp_id: Option<CompName>) -> Result<StorageIndex> {
         match comp_id {
             Some(c) => Ok((c, self.var_id)),
             None => match self.comp {
@@ -79,7 +79,7 @@ impl ShortLocalAddress {
         }
     }
 
-    pub fn storage_index_using(&self, comp_id: CompId) -> StorageIndex {
+    pub fn storage_index_using(&self, comp_id: CompName) -> StorageIndex {
         (comp_id, self.var_id)
     }
 
@@ -94,9 +94,9 @@ impl ShortLocalAddress {
 /// Entity-scope address.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct LocalAddress {
-    pub comp: CompId,
+    pub comp: CompName,
     pub var_type: VarType,
-    pub var_id: VarId,
+    pub var_id: VarName,
 }
 
 impl LocalAddress {
@@ -117,7 +117,7 @@ impl LocalAddress {
     pub fn storage_index(&self) -> StorageIndex {
         (self.comp, self.var_id)
     }
-    pub fn storage_index_using(&self, comp_id: CompId) -> StorageIndex {
+    pub fn storage_index_using(&self, comp_id: CompName) -> StorageIndex {
         (comp_id, self.var_id)
     }
     pub fn to_string(&self) -> String {
@@ -128,10 +128,10 @@ impl LocalAddress {
 /// Globally unique reference to simulation variable.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Address {
-    pub entity: EntityId,
-    pub component: CompId,
+    pub entity: EntityName,
+    pub component: CompName,
     pub var_type: VarType,
-    pub var_id: VarId,
+    pub var_id: VarName,
 }
 
 impl Address {

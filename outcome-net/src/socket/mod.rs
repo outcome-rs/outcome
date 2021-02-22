@@ -255,7 +255,7 @@ impl Socket {
             SocketEvent::Message(msg) => msg,
             _ => {
                 return Err(crate::error::Error::Other(format!(
-                    "expected message, got: {:?}",
+                    "expected message, got event: {:?}",
                     event
                 )))
             }

@@ -11,7 +11,7 @@ use crate::entity::Storage;
 use crate::model::{ComponentModel, EntityPrefab, EventModel, LogicModel, SimModel};
 use crate::sim::Sim;
 use crate::var::Var;
-use crate::{arraystring, CompId, MedString, ShortString, StringId};
+use crate::{arraystring, CompName, MedString, ShortString, StringId};
 
 #[cfg(feature = "machine_script")]
 use super::super::script::parse_script_at;
@@ -28,7 +28,7 @@ use crate::var::VarType::Str;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterVar {
-    comp: CompId,
+    comp: CompName,
     addr: ShortLocalAddress,
     val: Option<Var>,
 }
@@ -47,7 +47,7 @@ impl RegisterVar {
         match args.len() {
             1 => {
                 return Ok(RegisterVar {
-                    comp: CompId::new(),
+                    comp: CompName::new(),
                     addr,
                     val: None,
                 })
@@ -56,7 +56,7 @@ impl RegisterVar {
                 if args[1] != "=" {
                     let val = Var::from_str(&args[1], None)?;
                     return Ok(RegisterVar {
-                        comp: CompId::new(),
+                        comp: CompName::new(),
                         addr,
                         val: Some(val),
                     });
@@ -68,7 +68,7 @@ impl RegisterVar {
                     _ => Var::from_str(&args[1], None)?,
                 };
                 return Ok(RegisterVar {
-                    comp: CompId::new(),
+                    comp: CompName::new(),
                     addr,
                     val: Some(val),
                 });
@@ -100,8 +100,8 @@ impl RegisterVar {
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
-        ent_name: &crate::EntityUid,
-        comp_name: &crate::CompId,
+        ent_name: &crate::EntityId,
+        comp_name: &crate::CompName,
     ) -> Result<()> {
         debug!("registering var: {:?}", self);
 
@@ -283,8 +283,8 @@ impl RegisterComponent {
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
-        ent_name: &crate::EntityUid,
-        comp_name: &crate::CompId,
+        ent_name: &crate::EntityId,
+        comp_name: &crate::CompName,
     ) -> Result<()> {
         // trace!("executing register component cmd: {:?}", self);
 
@@ -343,7 +343,7 @@ impl RegisterComponent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterTrigger {
     pub name: StringId,
-    pub comp: CompId,
+    pub comp: CompName,
 }
 
 impl RegisterTrigger {
@@ -375,8 +375,8 @@ impl RegisterTrigger {
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
-        ent_name: &crate::EntityUid,
-        comp_name: &crate::CompId,
+        ent_name: &crate::EntityId,
+        comp_name: &crate::CompName,
     ) -> Result<()> {
         debug!("registering comp trigger: {:?}", self);
 
@@ -391,8 +391,8 @@ impl RegisterTrigger {
     pub fn execute_ext_distr(
         &self,
         central: &mut SimCentral,
-        ent_name: &crate::EntityId,
-        comp_name: &crate::CompId,
+        ent_name: &crate::EntityName,
+        comp_name: &crate::CompName,
     ) -> Result<()> {
         debug!("registering trigger: {:?}", self);
 

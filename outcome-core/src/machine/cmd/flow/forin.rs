@@ -4,7 +4,7 @@ use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage, StorageIndex};
 use crate::model::{ComponentModel, SimModel};
 use crate::var::Var;
-use crate::{CompId, MedString, StringId, VarType};
+use crate::{CompName, MedString, StringId, VarType};
 
 use super::super::{CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::cmd::flow::{end, ifelse};
@@ -111,7 +111,7 @@ impl ForIn {
         &self,
         call_stack: &mut CallStackVec,
         registry: &mut Registry,
-        comp_id: &CompId,
+        comp_id: &CompName,
         ent_storage: &mut Storage,
         location: &LocationInfo,
     ) -> CommandResult {

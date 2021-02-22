@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::entity::{Entity, EntityNonSer, Storage};
-use crate::{Address, CompId, EntityId, EntityUid, StringId};
+use crate::{Address, CompName, EntityId, EntityName, StringId};
 use crate::{Sim, SimModel};
 
 use super::cmd::{CentralRemoteCommand, Command, CommandResult, ExtCommand};
@@ -63,8 +63,8 @@ pub(crate) fn execute_loc(
     mut ent_storage: &mut Storage,
     mut ent_insta: &mut EntityNonSer,
     mut comp_state: &mut StringId,
-    ent_uid: &EntityUid,
-    comp_uid: &CompId,
+    ent_uid: &EntityId,
+    comp_uid: &CompName,
     sim_model: &SimModel,
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
     central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>>,
@@ -168,8 +168,8 @@ pub(crate) fn execute_loc(
 /// Executes given set of commands within global sim scope.
 pub fn execute(
     cmds: &Vec<Command>,
-    ent_uid: &EntityUid,
-    comp_uid: &CompId,
+    ent_uid: &EntityId,
+    comp_uid: &CompName,
     mut sim: &mut Sim,
     start: Option<usize>,
     end: Option<usize>,

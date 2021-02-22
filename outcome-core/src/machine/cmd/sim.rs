@@ -1,7 +1,7 @@
 use crate::entity::Storage;
 use crate::machine::cmd::{CentralRemoteCommand, Command, CommandResult};
 use crate::machine::{error::Error, LocationInfo};
-use crate::{Address, CompId, Sim, StringId};
+use crate::{Address, CompName, Sim, StringId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimControl {
@@ -21,7 +21,7 @@ impl SimControl {
         &self,
         storage: &mut Storage,
         comp_state: &StringId,
-        comp_uid: &CompId,
+        comp_uid: &CompName,
         location: &LocationInfo,
     ) -> CommandResult {
         CommandResult::ExecCentralExt(CentralRemoteCommand::Sim(self.clone()))

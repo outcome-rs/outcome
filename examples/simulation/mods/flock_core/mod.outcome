@@ -6,7 +6,13 @@ component velocity
 end
 
 component flock_member
+	#trigger step
 	var bool:nothing
+
+	state start 
+		#print some
+		set bool:nothing true
+	end
 end
 
 component flock_member_params 
@@ -19,8 +25,15 @@ component children
 	var int_list:id
 end
 
-
 prefab bird children flock_member flock_member_params velocity
-set int:0 1
-spawn bird -o int:0
 
+set int:0 100000
+for int:new in int:0 
+	#print new 
+	spawn bird -o int:0
+end
+
+# spawn bird -o int:0
+
+
+#invoke step

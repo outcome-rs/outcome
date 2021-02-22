@@ -8,8 +8,8 @@ use fnv::FnvHashMap;
 use crate::distr::{NodeCommunication, Signal};
 use crate::entity::Entity;
 use crate::sim::step;
-use crate::{CompId, Result};
-use crate::{EntityId, EntityUid, SimModel, StringId};
+use crate::{CompName, Result};
+use crate::{EntityId, EntityName, SimModel, StringId};
 
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
@@ -28,8 +28,8 @@ pub struct SimNode {
     pub clock: usize,
     pub model: SimModel,
     pub event_queue: Vec<StringId>,
-    pub entities: FnvHashMap<EntityUid, Entity>,
-    pub entities_idx: FnvHashMap<EntityId, EntityUid>,
+    pub entities: FnvHashMap<EntityId, Entity>,
+    pub entities_idx: FnvHashMap<EntityName, EntityId>,
 }
 
 impl SimNode {
@@ -71,9 +71,9 @@ impl SimNode {
 
     pub fn add_entity(
         &mut self,
-        uid: EntityUid,
-        prefab_id: Option<EntityId>,
-        target_id: Option<EntityId>,
+        uid: EntityId,
+        prefab_id: Option<EntityName>,
+        target_id: Option<EntityName>,
     ) -> Result<()> {
         let entity = match &prefab_id {
             Some(p) => Entity::from_prefab_name(p, &self.model)?,
@@ -92,7 +92,7 @@ impl SimNode {
     /// Apply registered model entities by instantiating them.
     /// None of the existing entities are removed. Only entities
     /// registered with the `spawn` flag are instantiated.
-    pub fn apply_model_entities(&mut self, selection: &Vec<EntityUid>) {
+    pub fn apply_model_entities(&mut self, selection: &Vec<EntityId>) {
         trace!("start adding entities");
         unimplemented!();
         // let mut counter = 0;
@@ -164,8 +164,9 @@ impl SimNode {
             Arc::new(Mutex::new(Vec::new()));
 
         // loc phase
-        self.entities.par_iter_mut().for_each(
-            |(ent_uid, mut entity): (&EntityUid, &mut Entity)| {
+        self.entities
+            .par_iter_mut()
+            .for_each(|(ent_uid, mut entity): (&EntityId, &mut Entity)| {
                 trace!("processing entity: {:?}", entity);
                 step::step_entity_local(
                     model,
@@ -175,8 +176,7 @@ impl SimNode {
                     &ext_cmds,
                     &central_ext_cmds,
                 );
-            },
-        );
+            });
         trace!("sim_node finished local phase");
 
         // // send ext cmd requests

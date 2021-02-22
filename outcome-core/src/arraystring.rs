@@ -1,7 +1,4 @@
-//! Wrapper around `arrayvec::ArrayString`.
-//!
-//! Adds `from_truncate` and `from_unchecked` on top of
-//! `arrayvec::ArrayString`.
+//! Introduces additional functions for creating `arrayvec::ArrayString`s.
 
 use arrayvec::Array;
 

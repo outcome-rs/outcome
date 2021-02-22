@@ -9,7 +9,7 @@ use crate::address::Address;
 
 #[cfg(feature = "machine")]
 use crate::machine;
-use crate::{CompId, EntityId};
+use crate::{CompName, EntityName};
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -64,9 +64,9 @@ pub enum Error {
     ScenarioMissingModules,
 
     #[error("model: no entity prefab named: {0}")]
-    NoEntityPrefab(EntityId),
+    NoEntityPrefab(EntityName),
     #[error("model: no component named: {0}")]
-    NoComponentModel(CompId),
+    NoComponentModel(CompName),
 
     #[error("no entity found: {0}")]
     NoEntity(u32),

@@ -1,5 +1,5 @@
 use crate::entity::Storage;
-use crate::{Address, CompId, StringId, Var};
+use crate::{Address, CompName, StringId, Var};
 
 use super::super::{error::Error, LocationInfo};
 use super::CommandResult;
@@ -28,7 +28,7 @@ impl Range {
     pub fn execute_loc(
         &self,
         storage: &mut Storage,
-        comp_name: &CompId,
+        comp_name: &CompName,
         location: &LocationInfo,
     ) -> CommandResult {
         // println!("{:?}", self);

@@ -2,7 +2,7 @@
 
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompId, ShortString, StringId};
+use crate::{arraystring, CompName, ShortString, StringId};
 
 use crate::machine::cmd::{CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::error::{Error, ErrorKind};
@@ -33,7 +33,7 @@ impl Call {
         call_stack: &mut CallStackVec,
         line: usize,
         sim_model: &SimModel,
-        comp_uid: &CompId,
+        comp_uid: &CompName,
         location: &LocationInfo,
     ) -> CommandResult {
         // get the model of the currently executed component

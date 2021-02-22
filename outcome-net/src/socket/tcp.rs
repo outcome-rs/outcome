@@ -58,14 +58,16 @@ impl TcpSocket {
             //out_buffer: VecDeque::new(),
             //in_receiver: in_receiver.clone(),
             //out_sender: out_sender.clone(),
+            heartbeat_interval: config.heartbeat_interval,
+            time_since_heartbeat: Default::default(),
         };
 
         // Starts the poll mechanism to receive and send messages
         let poll_handle = std::thread::spawn(move || handler.start_polling());
 
         Ok(Self {
-            address: Some(address),
             config,
+            address: Some(address),
             connections: Vec::new(),
             poll_handle: Some(poll_handle),
             in_receiver,
@@ -89,7 +91,14 @@ impl TcpSocket {
     pub fn disconnect(&mut self, addr: Option<SocketAddr>) -> Result<()> {
         let addr: SocketAddr = match addr {
             Some(a) => a,
-            None => *self.connections.first().unwrap(),
+            None => match self.connections.first() {
+                Some(a) => *a,
+                None => {
+                    return Err(Error::Other(
+                        "no connections left to disconnect".to_string(),
+                    ))
+                }
+            },
         };
         self.connections
             .remove(self.connections.iter().position(|a| a == &addr).unwrap());
@@ -191,6 +200,8 @@ struct ConnectionHandler {
     out_receiver: Receiver<(SocketAddr, SocketEvent)>,
     out_sender: Sender<(SocketAddr, SocketEvent)>,
     //out_buffer: VecDeque<(SocketAddr, SocketEvent)>,
+    heartbeat_interval: Option<Duration>,
+    time_since_heartbeat: Duration,
 }
 
 impl ConnectionHandler {
@@ -199,9 +210,12 @@ impl ConnectionHandler {
     }
 
     pub fn start_polling_with_duration(&mut self, sleep_duration: Option<Duration>) {
-        // don't break out of this loop
+        let mut last_time = std::time::Instant::now();
         loop {
-            self.manual_poll();
+            let now = std::time::Instant::now();
+            let delta_time = now - last_time;
+            last_time = now;
+            self.manual_poll(delta_time);
             match sleep_duration {
                 None => yield_now(),
                 Some(duration) => sleep(duration),
@@ -209,21 +223,36 @@ impl ConnectionHandler {
         }
     }
 
-    pub fn manual_poll(&mut self) -> Result<()> {
+    /// Performs all the necessary operations to maintain a socket.
+    ///
+    /// Delta time argument represents duration since last manual poll call.
+    pub fn manual_poll(&mut self, delta_time: Duration) -> Result<()> {
+        // send heartbeats
+        if let Some(heartbeat) = self.heartbeat_interval {
+            self.time_since_heartbeat += delta_time;
+            if self.time_since_heartbeat > heartbeat {
+                self.time_since_heartbeat = Duration::from_millis(0);
+                for (addr, _) in &self.connections {
+                    self.out_sender.send((*addr, SocketEvent::Heartbeat));
+                }
+            }
+        }
+
+        // read incoming events
         for (addr, (stream, buffer)) in &mut self.connections {
-            //let mut buf = Vec::new();
             let mut buf = [0; 1024];
             let read_count = match stream.read(&mut buf) {
                 Ok(count) => count,
                 _ => 0,
-                //Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                //continue;
-                //}
-                //Err(e) => {
-                ////warn!("manual poll: io error: {}", e);
-                //continue;
-                //}
+                // Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // continue;
+                // }
+                // Err(e) => {
+                // warn!("manual poll: io error: {}", e);
+                // continue;
+                // }
             };
+
             //println!("read_count: {}", read_count);
             if read_count > 0 {
                 buffer.extend(&buf[..read_count]);
@@ -240,8 +269,7 @@ impl ConnectionHandler {
             }
         }
 
-        // grab all the waiting packets and send them over
-        //while let Some((address, event)) = self.out_receiver.iter()peekable().peek() {
+        // grab all the waiting events and send them over
         while let Ok((address, event)) = self.out_receiver.try_recv() {
             //warn!("{:?}", event);
             //println!("manual poll: sending");
@@ -285,6 +313,11 @@ impl ConnectionHandler {
                     payload: Vec::new(),
                 }
                 .to_bytes()?,
+                SocketEvent::Heartbeat => Message {
+                    type_: MessageType::Heartbeat,
+                    payload: Vec::new(),
+                }
+                .to_bytes()?,
                 SocketEvent::Bytes(b) => b,
                 _ => unimplemented!(),
             };
@@ -299,8 +332,10 @@ impl ConnectionHandler {
                     continue;
                 }
             };
-            stream.write_all(&len_buf).unwrap();
-            stream.write_all(&bytes).unwrap();
+
+            if let Ok(()) = stream.write_all(&len_buf) {
+                stream.write_all(&bytes);
+            }
 
             match &event {
                 SocketEvent::Disconnect => {
@@ -310,9 +345,9 @@ impl ConnectionHandler {
                         .position(|(a, _)| a == &address)
                         .unwrap();
                     let (_, (stream, _)) = &mut self.connections[idx];
-                    stream
-                        .shutdown(std::net::Shutdown::Both)
-                        .expect("failed shutting down");
+                    if let Err(e) = stream.shutdown(std::net::Shutdown::Both) {
+                        warn!("failed shutting down stream: {}", e);
+                    }
                     self.connections.remove(idx);
                     return Ok(());
                 }
@@ -334,10 +369,6 @@ impl ConnectionHandler {
                 Err(e) => return Err(Error::Other(format!("{:?}", e))),
             }
         }
-
-        //if let Ok((stream, addr)) = self.listener.accept() {
-        //self.connections.push((addr, stream));
-        //}
 
         Ok(())
     }

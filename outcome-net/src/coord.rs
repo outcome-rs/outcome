@@ -15,7 +15,7 @@ use fnv::FnvHashMap;
 use id_pool::IdPool;
 
 use outcome::distr::{Signal, SimCentral, SimNode};
-use outcome::{distr, EntityUid, SimModel};
+use outcome::{distr, EntityId, SimModel};
 
 use crate::error::{Error, Result};
 use crate::msg::coord_worker::{
@@ -32,41 +32,60 @@ const COORD_ADDRESS: &str = "0.0.0.0:5912";
 
 /// Single worker as seen by the coordinator.
 pub struct Worker {
-    pub id: WorkerId,
+    //pub id: WorkerId,
     pub address: String,
-    pub entities: Vec<EntityUid>,
+    pub entities: Vec<EntityId>,
     pub connection: Socket,
 }
 
 pub struct CoordNetwork {
-    /// IP address of the coordinator
-    pub address: String,
     greeter: Socket,
     inviter: Socket,
 
     /// Map of workers
     pub workers: FnvHashMap<u32, Worker>,
+}
+
+pub struct Coord {
+    pub central: SimCentral,
+
+    pub net: CoordNetwork,
+
+    /// IP address of the coordinator
+    pub address: String,
     /// Integer id pool for workers
     id_pool: IdPool,
     // /// Entity-worker routing table
     // pub routing_table: HashMap<EntityUid, WorkerId>,
 }
-impl CoordNetwork {
-    pub fn new(addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
+
+impl Coord {
+    /// Starts a new coordinator at a randomly chosen localhost port.
+    pub fn new_at_any(central: SimCentral, worker_addrs: Vec<String>) -> Result<Self> {
+        Self::new(central, "127.0.0.1:0", worker_addrs)
+    }
+
+    /// Creates a new coordinator listening on the given address.
+    pub fn new(central: SimCentral, addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
         let addr_ip = addr.split(":").collect::<Vec<&str>>()[0];
-        let mut net = CoordNetwork {
-            address: addr.to_string(),
+        let net = CoordNetwork {
             greeter: Socket::bind(addr, Transport::Tcp)?,
             inviter: Socket::bind(&format!("{}:4141", addr_ip), Transport::Tcp)?,
             workers: Default::default(),
+        };
+        let mut coord = Self {
+            central,
+            net,
+            address: addr.to_string(),
             id_pool: IdPool::new(),
             // routing_table: Default::default(),
         };
         for worker_addr in &worker_addrs {
-            net.add_worker(worker_addr)?;
+            coord.add_worker(worker_addr)?;
         }
-        Ok(net)
+        Ok(coord)
     }
+
     fn add_worker(&mut self, worker_addr: &str) -> Result<u32> {
         let id = self.id_pool.request_id().unwrap();
         let socket = Socket::bind(
@@ -82,12 +101,12 @@ impl CoordNetwork {
             Transport::prefer_laminar(),
         )?;
         let worker = Worker {
-            id,
+            // id,
             address: worker_addr.to_string(),
             entities: vec![],
             connection: socket,
         };
-        self.workers.insert(id, worker);
+        self.net.workers.insert(id, worker);
         Ok(id)
     }
 
@@ -106,23 +125,29 @@ impl CoordNetwork {
     /// visible on the network. Workers behind a firewall that don't have any
     /// ports exposed will have to initiate connection to the coordinator
     /// themselves.
-    /// Initializes coordinator by connecting to all the workers.
     pub fn initialize(&mut self, model: SimModel) -> Result<()> {
-        for worker_id in self.workers.iter().map(|(id, _)| *id).collect::<Vec<u32>>() {
+        for worker_id in self
+            .net
+            .workers
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<u32>>()
+        {
             self.initialize_worker(worker_id, model.clone())?;
         }
         Ok(())
     }
 
     fn initialize_worker(&mut self, id: u32, model: SimModel) -> Result<()> {
-        let (worker_id, worker) =
-            self.workers
-                .iter_mut()
-                .find(|(wid, _)| *wid == &id)
-                .ok_or(Error::Other(format!(
-                    "unable to find worker with id: {}",
-                    id
-                )))?;
+        let (worker_id, worker) = self
+            .net
+            .workers
+            .iter_mut()
+            .find(|(wid, _)| *wid == &id)
+            .ok_or(Error::Other(format!(
+                "unable to find worker with id: {}",
+                id
+            )))?;
 
         //worker.connection.connect(&worker.address)?;
 
@@ -131,16 +156,17 @@ impl CoordNetwork {
             //ip_addr: self.address.clone(),
             passwd: "".to_string(),
         };
-        self.inviter.connect(&worker.address)?;
-        self.inviter.pack_send_msg_payload(req, None)?;
+        self.net.inviter.connect(&worker.address)?;
+        self.net.inviter.pack_send_msg_payload(req, None)?;
         // println!("sent... ");
         let resp: IntroduceCoordResponse = self
+            .net
             .inviter
             .recv_msg()?
             .1
-            .unpack_payload(self.inviter.encoding())?;
+            .unpack_payload(self.net.inviter.encoding())?;
         println!("got response: {:?}", resp);
-        self.inviter.disconnect(None)?;
+        self.net.inviter.disconnect(None)?;
 
         worker.connection.connect(&resp.laminar_socket)?;
         let init_sig = Signal::InitializeNode(model);
@@ -155,117 +181,108 @@ impl CoordNetwork {
         self.initialize_worker(id, model)?;
         Ok(id)
     }
-}
 
-/// Cluster coordinator.
-///
-/// # Abstraction over `SimCentral`
-///
-/// Coordinator wraps
-pub struct Coord {
-    /// Central authority abstraction
-    pub central: SimCentral,
-}
+    // /// Creates a new coordinator.
+    // pub fn new_with_central(central: SimCentral) -> Result<Self> {
+    //     let mut coord = Coord { central };
+    //     Ok(coord)
+    // }
+    //
+    // /// Creates a new coordinator using a sim model.
+    // pub fn new_with_model(model: SimModel) -> Result<Self> {
+    //     let sim_central = distr::central::SimCentral::from_model(model)?;
+    //     Self::new_with_central(sim_central)
+    // }
 
-impl Coord {
-    /// Creates a new coordinator.
-    pub fn new(central: SimCentral) -> Result<Self> {
-        let mut coord = Coord { central };
-        Ok(coord)
+    /// Starts the  polling loop.
+    pub fn start(&mut self) -> Result<()> {
+        loop {
+            self.manual_poll()?;
+        }
+        Ok(())
     }
 
-    /// Creates a new coordinator using a sim model.
-    pub fn new_from_model(model: SimModel) -> Result<Self> {
-        let sim_central = distr::central::SimCentral::from_model(model)?;
-        Self::new(sim_central)
+    // TODO support less frequent polling of the greeter socket
+    /// Polls for messages coming from workers and processes them accordingly.
+    pub fn manual_poll(&mut self) -> Result<()> {
+        if let Ok(msg) = &self.net.greeter.try_recv_msg() {
+            match msg.type_ {
+                MessageType::IntroduceWorkerToCoordRequest => {
+                    debug!("handling new worker connection request");
+                    let req: IntroduceWorkerToCoordRequest =
+                        msg.unpack_payload(self.net.greeter.encoding()).unwrap();
+                    let resp = IntroduceWorkerToCoordResponse {
+                        error: "".to_string(),
+                    };
+                    &self.net.greeter.pack_send_msg_payload(resp, None).unwrap();
+
+                    let worker_id = self
+                        .add_initialize_worker(&req.worker_addr, self.central.model.clone())
+                        .unwrap();
+
+                    self.central.node_entities.insert(worker_id, Vec::new());
+
+                    // check if this is the only (first) worker
+                    if self.net.workers.len() == 1 {
+                        debug!("first worker connected");
+
+                        // module script init
+                        //TODO put this somewhere else?
+                        if outcome::FEATURE_MACHINE_SCRIPT {
+                            self.central
+                                .spawn_entity(
+                                    Some(outcome::StringId::from("_mod_init").unwrap()),
+                                    Some(outcome::StringId::from("_mod_init").unwrap()),
+                                    outcome::distr::DistributionPolicy::Random,
+                                )
+                                .unwrap();
+                            self.central
+                                .event_queue
+                                .push(outcome::StringId::from("_scr_init").unwrap());
+
+                            self.central.flush_queue(&mut self.net).unwrap();
+                        }
+                    }
+                }
+                _ => trace!("msg.kind: {:?}", msg.type_),
+            }
+        }
+
+        for (worker_id, mut worker) in &mut self.net.workers {
+            if let Ok((addr, sig)) = worker.connection.try_recv_sig() {
+                debug!("{:?}", sig);
+            }
+        }
+        Ok(())
     }
 
-    /// Starts a new cluster coordinator and initializes workers.
-    pub fn start(
+    /// Creates a new cluster coordinator and initializes workers.
+    pub fn new_with_path(
         scenario_path: &str,
         addr: &str,
         worker_addrs: Vec<String>,
-    ) -> Result<(Arc<Mutex<Coord>>, Arc<Mutex<CoordNetwork>>)> {
-        let mut net = CoordNetwork::new(addr, worker_addrs)?;
+    ) -> Result<Self> {
+        // let mut net = CoordNetwork::new(addr, worker_addrs)?;
         let scenario = outcome::model::Scenario::from_path(PathBuf::from(scenario_path))?;
         let model = SimModel::from_scenario(scenario)?;
-        net.initialize(model.clone());
-        let mut coord = Coord::new_from_model(model)?;
+        let sim_central = SimCentral::from_model(model)?;
 
-        let net_arc = Arc::new(Mutex::new(net));
-        let coord_arc = Arc::new(Mutex::new(coord));
+        // net.initialize(model.clone());
+        let mut coord = Coord::new(sim_central, addr, worker_addrs)?;
+
+        // let net_arc = Arc::new(Mutex::new(net));
+        // let coord_arc = Arc::new(Mutex::new(coord));
         debug!("created new cluster coordinator");
 
-        let coord_arc_clone = coord_arc.clone();
-        let net_arc_clone = net_arc.clone();
-        let model = coord_arc.lock().unwrap().central.model.clone();
-        thread::spawn(move || loop {
-            sleep(Duration::from_millis(100));
-            let mut net_guard = net_arc_clone.lock().unwrap();
-            if let Ok(msg) = &net_guard.greeter.try_recv_msg() {
-                match msg.type_ {
-                    MessageType::IntroduceWorkerToCoordRequest => {
-                        debug!("handling new worker connection request");
-                        let req: IntroduceWorkerToCoordRequest =
-                            msg.unpack_payload(net_guard.greeter.encoding()).unwrap();
-                        let resp = IntroduceWorkerToCoordResponse {
-                            error: "".to_string(),
-                        };
-                        &net_guard.greeter.pack_send_msg_payload(resp, None).unwrap();
+        // let coord_arc_clone = coord_arc.clone();
+        // let net_arc_clone = net_arc.clone();
+        // let model = coord_arc.lock().unwrap().central.model.clone();
+        // let net_arc_clone = net_arc.clone();
+        // thread::spawn(move || loop {
+        //     sleep(Duration::from_micros(100));
+        // });
 
-                        let worker_id = net_guard
-                            .add_initialize_worker(&req.worker_addr, model.clone())
-                            .unwrap();
-
-                        let mut coord_lock = coord_arc_clone.lock().unwrap();
-                        coord_lock
-                            .central
-                            .node_entities
-                            .insert(worker_id, Vec::new());
-
-                        // check if this is the only (first) worker
-                        if net_guard.workers.len() == 1 {
-                            debug!("first worker connected");
-
-                            // module script init
-                            //TODO put this somewhere else?
-                            if outcome::FEATURE_MACHINE_SCRIPT {
-                                coord_lock
-                                    .central
-                                    .spawn_entity(
-                                        Some(outcome::StringId::from("_mod_init").unwrap()),
-                                        Some(outcome::StringId::from("_mod_init").unwrap()),
-                                        outcome::distr::DistributionPolicy::Random,
-                                    )
-                                    .unwrap();
-                                coord_lock
-                                    .central
-                                    .event_queue
-                                    .push(outcome::StringId::from("_scr_init").unwrap());
-
-                                coord_lock
-                                    .central
-                                    .flush_queue(net_guard.deref_mut())
-                                    .unwrap();
-                            }
-                        }
-                    }
-                    _ => trace!("msg.kind: {:?}", msg.type_),
-                }
-            }
-        });
-        let net_arc_clone = net_arc.clone();
-        thread::spawn(move || loop {
-            sleep(Duration::from_micros(100));
-            let mut guard = net_arc_clone.lock().unwrap();
-            for (worker_id, mut worker) in &mut guard.workers {
-                if let Ok((addr, sig)) = worker.connection.try_recv_sig() {
-                    debug!("{:?}", sig);
-                }
-            }
-        });
-
-        Ok((coord_arc, net_arc))
+        Ok(coord)
     }
 
     // /// Starts a new cluster coordinator.
@@ -383,7 +400,7 @@ impl outcome::distr::CentralCommunication for CoordNetwork {
         //TODO
         for (worker_id, worker) in &mut self.workers {
             let (addr, sig) = worker.connection.recv_sig().unwrap();
-            return Ok((worker.id, sig.into_inner()));
+            return Ok((*worker_id, sig.into_inner()));
         }
         Err(outcome::error::Error::Other(
             "failed reading sig".to_string(),

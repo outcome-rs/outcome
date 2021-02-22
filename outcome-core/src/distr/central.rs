@@ -10,7 +10,7 @@ use rand::prelude::SliceRandom;
 use crate::distr::{CentralCommunication, DistributionPolicy, NodeCommunication, Signal};
 use crate::error::{Error, Result};
 use crate::model::Scenario;
-use crate::{arraystring, Address, EntityId, EntityUid, ShortString, SimModel, StringId, Var};
+use crate::{arraystring, Address, EntityId, EntityName, ShortString, SimModel, StringId, Var};
 
 #[cfg(feature = "machine")]
 use crate::machine::{cmd::CentralRemoteCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
@@ -42,12 +42,12 @@ pub struct SimCentral {
     /// assigned custom individual policies that override it.
     pub distribution_policy: DistributionPolicy,
 
-    pub node_entities: FnvHashMap<u32, Vec<EntityUid>>,
+    pub node_entities: FnvHashMap<u32, Vec<EntityId>>,
     // pub entity_node_routes: FnvHashMap<>
-    pub entities_idx: FnvHashMap<EntityId, EntityUid>,
+    pub entities_idx: FnvHashMap<EntityName, EntityId>,
     entity_idpool: IdPool,
 
-    ent_spawn_queue: FnvHashMap<u32, Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>>,
+    ent_spawn_queue: FnvHashMap<u32, Vec<(EntityId, Option<EntityName>, Option<EntityName>)>>,
     pub model_changes_queue: SimModel,
 }
 
@@ -59,10 +59,10 @@ impl SimCentral {
 
     /// Flushes the communication queue, lumping requests of the same type
     /// together if possible.
-    pub fn flush_queue<N: CentralCommunication>(&mut self, net: &mut N) -> Result<()> {
+    pub fn flush_queue<C: CentralCommunication>(&mut self, comms: &mut C) -> Result<()> {
         if !self.ent_spawn_queue.is_empty() {
             for (k, v) in &self.ent_spawn_queue {
-                net.sig_send_to_node(*k, Signal::SpawnEntities(v.clone()))?;
+                comms.sig_send_to_node(*k, Signal::SpawnEntities(v.clone()))?;
             }
             self.ent_spawn_queue.clear();
         }
@@ -186,7 +186,7 @@ impl SimCentral {
         &self,
         node_count: usize,
         policy: DistributionPolicy,
-    ) -> Vec<Vec<EntityUid>> {
+    ) -> Vec<Vec<EntityId>> {
         match policy {
             // EntityAssignMethod::Random => {
             //     let mut ent_models = self.model.entities.clone();

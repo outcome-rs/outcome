@@ -12,7 +12,11 @@ use smallvec::SmallVec;
 
 use crate::address::LocalAddress;
 use crate::entity::StorageIndex;
-use crate::{CompId, EntityId, EntityUid, LongString, MedString, ShortString, StringId, VarType};
+use crate::{
+    CompName, EntityId, EntityName, LongString, MedString, ShortString, StringId, VarType,
+};
+
+pub const START_STATE_NAME: &'static str = "start";
 
 /// Holds instruction location information.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
@@ -81,8 +85,8 @@ pub(crate) type CommandResultVec = SmallVec<[cmd::CommandResult; 2]>;
 /// taking place.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ExecutionContext {
-    pub ent: EntityUid,
-    pub comp: CompId,
+    pub ent: EntityId,
+    pub comp: CompName,
     pub location: LocationInfo,
 }
 
@@ -173,7 +177,7 @@ pub struct IfElseMetaData {
 /// Contains information about a single component block call.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ComponentCallInfo {
-    pub name: CompId,
+    pub name: CompName,
     pub start_line: usize,
     pub end_line: usize,
     // pub current: usize,

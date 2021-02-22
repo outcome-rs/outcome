@@ -26,7 +26,7 @@ use crate::entity::{Entity, Storage};
 use crate::error::{Error, Result};
 use crate::model::{DataEntry, DataImageEntry, Scenario};
 use crate::sim::step;
-use crate::{model, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType};
+use crate::{model, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType};
 
 #[cfg(feature = "machine")]
 use crate::machine::{
@@ -40,7 +40,7 @@ pub enum Signal {
     /// Request node to start initialization using given model and list of entities
     InitializeNode(SimModel),
     // uid, prefab string_id, target string_id
-    SpawnEntities(Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>),
+    SpawnEntities(Vec<(EntityId, Option<EntityName>, Option<EntityName>)>),
     /// Request node to start processing step, includes event_queue vec
     StartProcessStep(Vec<StringId>),
 
@@ -87,7 +87,7 @@ pub trait CentralCommunication {
     /// Sends a signal to node.
     fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
     /// Sends a signal to node where the specified entity lives.
-    fn sig_send_to_entity(&mut self, entity_uid: EntityUid) -> Result<()>;
+    fn sig_send_to_entity(&mut self, entity_uid: EntityId) -> Result<()>;
 
     /// Sends a signal to all the nodes.
     fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;
@@ -110,7 +110,7 @@ pub trait NodeCommunication {
     /// Sends a signal to node.
     fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
     /// Sends a signal to node where the specified entity lives.
-    fn sig_send_to_entity(&mut self, entity_uid: EntityUid) -> Result<()>;
+    fn sig_send_to_entity(&mut self, entity_uid: EntityId) -> Result<()>;
 
     /// Sends a signal to all the nodes.
     fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;

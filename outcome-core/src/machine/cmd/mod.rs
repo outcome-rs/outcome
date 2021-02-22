@@ -31,8 +31,8 @@ use smallvec::SmallVec;
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
 
-use crate::{arraystring, model, util, CompId, EntityUid, ShortString};
-use crate::{EntityId, MedString, Sim, StringId, VarType};
+use crate::{arraystring, model, util, CompName, EntityId, ShortString};
+use crate::{EntityName, MedString, Sim, StringId, VarType};
 
 use crate::address::{Address, ShortLocalAddress};
 use crate::entity::{Entity, EntityNonSer, Storage};
@@ -252,8 +252,8 @@ impl Command {
         comp_state: &mut StringId,
         call_stack: &mut super::CallStackVec,
         registry: &mut super::Registry,
-        comp_uid: &CompId,
-        ent_uid: &EntityUid,
+        comp_uid: &CompName,
+        ent_uid: &EntityId,
         sim_model: &SimModel,
         location: &LocationInfo,
     ) -> CommandResultVec {
@@ -369,7 +369,12 @@ pub enum CentralRemoteCommand {
 impl CentralRemoteCommand {
     /// Executes the command locally, using a reference to the monolithic `Sim`
     /// struct.
-    pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityUid, comp_uid: &CompId) -> Result<()> {
+    pub fn execute(
+        &self,
+        mut sim: &mut Sim,
+        ent_uid: &EntityId,
+        comp_uid: &CompName,
+    ) -> Result<()> {
         match self {
             CentralRemoteCommand::Sim(cmd) => return cmd.execute_ext(sim),
 
@@ -399,8 +404,8 @@ impl CentralRemoteCommand {
         &self,
         mut central: &mut SimCentral,
         net: &mut N,
-        ent_uid: &EntityUid,
-        comp_name: &CompId,
+        ent_uid: &EntityId,
+        comp_name: &CompName,
     ) -> Result<()> {
         match self {
             CentralRemoteCommand::Spawn(cmd) => cmd.execute_ext_distr(central).unwrap(),
@@ -426,7 +431,12 @@ pub enum ExtCommand {
     // CentralizedExec(CentralExtCommand),
 }
 impl ExtCommand {
-    pub fn execute(&self, mut sim: &mut Sim, ent_uid: &EntityUid, comp_uid: &CompId) -> Result<()> {
+    pub fn execute(
+        &self,
+        mut sim: &mut Sim,
+        ent_uid: &EntityId,
+        comp_uid: &CompName,
+    ) -> Result<()> {
         match self {
             ExtCommand::Get(cmd) => return cmd.execute_ext(sim, ent_uid),
             ExtCommand::Set(cmd) => return cmd.execute_ext(sim, ent_uid),
@@ -438,7 +448,7 @@ impl ExtCommand {
     pub fn execute_pre(
         &self,
         mut storage: &mut Storage,
-        ent_uid: &EntityId,
+        ent_uid: &EntityName,
     ) -> Option<(Address, Var)> {
         match self {
             ExtCommand::Get(cmd) => return cmd.exec_pre(storage, ent_uid),
@@ -684,7 +694,7 @@ impl Spawn {
     pub fn execute_loc(&self) -> CommandResult {
         CommandResult::ExecCentralExt(CentralRemoteCommand::Spawn(*self))
     }
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
         // let model = &sim.model;
         // let my_model_n = model
         //.entities

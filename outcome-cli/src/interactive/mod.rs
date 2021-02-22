@@ -32,7 +32,7 @@ use linefeed::{Interface, Prompter, ReadResult};
 //use notify::Watcher;
 
 use outcome::{Address, Sim, SimModel};
-use outcome_net::Client;
+use outcome_net::{Client, SocketEvent};
 
 use self::compl::MainCompleter;
 
@@ -362,7 +362,7 @@ pub fn start(_type: InterfaceType, config_path: &str, on_change: Option<OnChange
                                         }
                                     }
                                     SimDriver::Remote(client) => {
-                                        client.server_step_request(loop_count)?
+                                        client.server_step_request(loop_count)?;
                                     }
                                 }
                                 interface
@@ -645,6 +645,22 @@ show_list               {show_list}
                         }
                     }
                 }
+            }
+
+            // check for incoming network events
+            let mut driver = driver_arc.lock().unwrap();
+            match driver.deref_mut() {
+                SimDriver::Remote(ref mut client) => match client.connection.try_recv() {
+                    Ok((addr, event)) => match event {
+                        SocketEvent::Disconnect => {
+                            println!("\nServer terminated the connection...");
+                            break 'outer;
+                        }
+                        _ => (),
+                    },
+                    _ => (),
+                },
+                _ => (),
             }
         }
 

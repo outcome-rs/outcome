@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use crate::msg::{
     DataTransferRequest, DataTransferResponse, Heartbeat, Message, PingRequest,
-    RegisterClientRequest, RegisterClientResponse, SimDataPack, StatusRequest, StatusResponse,
-    TurnAdvanceRequest,
+    RegisterClientRequest, RegisterClientResponse, StatusRequest, StatusResponse,
+    TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
 };
 use crate::socket::{Encoding, Socket, SocketConfig, SocketType, Transport};
 use crate::{error::Error, Result};
@@ -66,7 +66,7 @@ pub struct Client {
     /// Configuration struct
     config: ClientConfig,
     /// Connection to server
-    connection: Socket,
+    pub connection: Socket,
     /// Current connection status
     connected: bool,
     /// Public ip address of the client, `None` if behind a firewall
@@ -190,11 +190,11 @@ impl Client {
         Ok(out_map)
     }
 
-    pub fn server_step_request(&mut self, steps: u32) -> Result<()> {
+    pub fn server_step_request(&mut self, steps: u32) -> Result<Message> {
         self.connection
             .pack_send_msg_payload(TurnAdvanceRequest { tick_count: steps }, None)?;
-        self.connection.recv()?;
-        Ok(())
+        let (_, resp) = self.connection.recv_msg()?;
+        Ok(resp)
     }
 
     // data querying
@@ -205,7 +205,7 @@ impl Client {
         unimplemented!();
     }
 
-    pub fn get_vars(&mut self) -> Result<SimDataPack> {
+    pub fn get_vars(&mut self) -> Result<Option<TransferResponseData>> {
         self.connection.pack_send_msg_payload(
             DataTransferRequest {
                 transfer_type: "Full".to_string(),
@@ -218,9 +218,7 @@ impl Client {
             .recv_msg()?
             .1
             .unpack_payload(self.connection.encoding())?;
-        if let Some(data_pack) = resp.data {
-            return Ok(data_pack);
-        }
-        Ok(SimDataPack::empty())
+
+        Ok(resp.data)
     }
 }

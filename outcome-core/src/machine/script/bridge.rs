@@ -25,8 +25,8 @@ use crate::sim::Sim;
 use crate::var::{Var, VarType};
 use crate::ShortString;
 use crate::{error::Error, Result};
-use crate::{machine, EntityUid};
-use crate::{EntityId, StringId};
+use crate::{machine, EntityId};
+use crate::{EntityName, StringId};
 use fnv::FnvHashMap;
 
 pub const FILE_EXTENSION: &'static str = ".os";
@@ -39,7 +39,7 @@ impl cmd::register::Extend {
     ///
     /// For each given script source file, this command will read it,
     /// apply preprocessor, and then execute found commands.
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> machine::Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> machine::Result<()> {
         //println!("execute ext extend");
         // iterate over all the given source files
         for file in &self.source_files {

@@ -19,8 +19,8 @@ use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::error::Error;
 use crate::model::{DataEntry, DataImageEntry, Scenario};
-use crate::{arraystring, model, EntityId, Result, SimModel, Var, VarType};
-use crate::{EntityUid, StringId};
+use crate::{arraystring, model, EntityName, Result, SimModel, Var, VarType};
+use crate::{EntityId, StringId};
 use fnv::FnvHashMap;
 
 /// Local (non-distributed) simulation instance object.
@@ -58,9 +58,9 @@ pub struct Sim {
     pub event_queue: Vec<StringId>,
 
     /// All entities that exist within the simulation are stored here
-    pub entities: FnvHashMap<EntityUid, Entity>,
+    pub entities: FnvHashMap<EntityId, Entity>,
     /// Map of string indexes for entities (string indexes are optional)
-    pub entities_idx: FnvHashMap<StringId, EntityUid>,
+    pub entities_idx: FnvHashMap<StringId, EntityId>,
     /// Pool of integer identifiers for entities
     entity_idpool: id_pool::IdPool,
 }
@@ -688,12 +688,12 @@ impl Sim {
 /// Entity and component handling functions.
 impl Sim {
     /// Gets reference to entity using a valid integer id
-    pub fn get_entity(&self, uid: &EntityUid) -> Result<&Entity> {
+    pub fn get_entity(&self, uid: &EntityId) -> Result<&Entity> {
         self.entities.get(uid).ok_or(Error::NoEntity(*uid))
     }
 
     /// Gets mutable reference to entity using an integer id
-    pub fn get_entity_mut(&mut self, uid: &EntityUid) -> Result<&mut Entity> {
+    pub fn get_entity_mut(&mut self, uid: &EntityId) -> Result<&mut Entity> {
         self.entities.get_mut(uid).ok_or(Error::NoEntity(*uid))
     }
 

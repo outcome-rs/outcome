@@ -31,7 +31,7 @@ use crate::{error::Error, sig, Result};
 use crate::socket::{Encoding, Socket, Transport};
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
 use outcome_core::{
-    arraystring, Address, CompId, EntityId, EntityUid, SimModel, StringId, Var, VarType,
+    arraystring, Address, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType,
 };
 
 //TODO remove this
@@ -314,7 +314,7 @@ impl Worker {
 
     fn handle_sig_spawn_entities(
         &mut self,
-        entities: Vec<(EntityUid, Option<EntityId>, Option<EntityId>)>,
+        entities: Vec<(EntityId, Option<EntityName>, Option<EntityName>)>,
     ) -> Result<()> {
         // debug!("spawning entities: {:?}", entities);
         for (ent_uid, prefab_id, target_id) in entities {
@@ -421,7 +421,7 @@ pub fn handle_status_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Re
 pub fn handle_data_transfer_request(msg: Message, server_arc: Arc<Mutex<Worker>>) -> Result<()> {
     unimplemented!();
     let dtr: DataTransferRequest = msg.unpack_payload(&Encoding::Bincode)?;
-    let mut data_pack = SimDataPack::empty();
+    let mut data_pack = VarSimDataPack::default();
     let mut server = server_arc.lock().unwrap();
     match dtr.transfer_type.as_str() {
         "Full" => {
@@ -461,7 +461,7 @@ pub fn handle_data_transfer_request(msg: Message, server_arc: Arc<Mutex<Worker>>
         _ => (),
     }
     let response = DataTransferResponse {
-        data: Some(data_pack),
+        data: Some(TransferResponseData::Var(data_pack)),
         error: String::new(),
     };
     Ok(())
@@ -480,11 +480,21 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
     //    let mut sim_model = &server.sim_model.clone();
     let mut sim_instance = &mut server.sim_node;
     let dpr: DataPullRequest = msg.unpack_payload(&Encoding::Bincode)?;
-    //TODO do all other var types
-    //TODO handle errors
-    for (address, string_var) in dpr.data.strings {
-        let addr = Address::from_str(&address)?;
-        //        *sim_instance.as_mut().unwrap().get_str_mut(&addr).unwrap() = string_var;
+    match dpr.data {
+        PullRequestData::Typed(data) => {
+            //TODO do all other var types
+            //TODO handle errors
+            for (address, string_var) in data.strings {
+                let addr = Address::from_str(&address)?;
+                //        *sim_instance.as_mut().unwrap().get_str_mut(&addr).unwrap() = string_var;
+            }
+        }
+        PullRequestData::Var(data) => {
+            //
+        }
+        PullRequestData::VarOrdered(order_idx, data) => {
+            //
+        }
     }
 
     let resp = DataPullResponse {

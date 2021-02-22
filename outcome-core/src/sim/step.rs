@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::entity::Entity;
 use crate::error::Error;
-use crate::{EntityId, EntityUid, SimModel, StringId};
+use crate::{EntityId, EntityName, SimModel, StringId};
 
 #[cfg(feature = "machine")]
 use crate::machine::{cmd::CentralRemoteCommand, cmd::ExtCommand, exec, ExecutionContext};
@@ -51,7 +51,7 @@ impl Sim {
 
             // loc phase
             self.entities.par_iter_mut().for_each(
-                |(ent_uid, mut entity): (&EntityUid, &mut Entity)| {
+                |(ent_uid, mut entity): (&EntityId, &mut Entity)| {
                     step_entity_local(
                         model,
                         &event_queue,
@@ -89,7 +89,7 @@ impl Sim {
 pub(crate) fn step_entity_local(
     model: &SimModel,
     event_queue: &Vec<StringId>,
-    ent_uid: &EntityUid,
+    ent_uid: &EntityId,
     mut entity: &mut Entity,
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
     central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>>,
@@ -103,7 +103,7 @@ pub(crate) fn step_entity_local(
             // debug!("event_queue: {:?}", event_queue);
             for comp_uid in event_queue {
                 if let Some(comp_state) = entity.comp_state.get_mut(comp_uid) {
-                    // debug!("comp_state: {}", comp_state);
+                    debug!("comp_state: {}", comp_state);
                     // let comp_curr_state = &comp.current_state;
                     if comp_state.as_ref() == "idle" {
                         continue;

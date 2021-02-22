@@ -4,7 +4,7 @@ use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, LogicModel, SimModel, VarModel};
 use crate::{
-    arraystring, CompId, EntityId, EntityUid, LongString, ShortString, Sim, StringId, VarType,
+    arraystring, CompName, EntityId, EntityName, LongString, ShortString, Sim, StringId, VarType,
 };
 
 use crate::machine::cmd::register::{RegisterComponent, RegisterEntityPrefab};
@@ -100,8 +100,8 @@ impl ComponentBlock {
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
-        ent_uid: &EntityUid,
-        comp_name: &CompId,
+        ent_uid: &EntityId,
+        comp_name: &CompName,
         line: usize,
     ) -> Vec<CommandResult> {
         trace!("executing component block: {:?}", self);
@@ -149,8 +149,20 @@ impl ComponentBlock {
             ..ComponentModel::default()
         };
 
+        debug!("adding new component to model: {:?}", component);
+
+        // overwrite existing components with the same name by default
+        if let Some(n) = sim
+            .model
+            .components
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.name == component.name)
+            .map(|(n, _)| n)
+        {
+            sim.model.components.remove(n);
+        }
         sim.model.components.push(component);
-        debug!("added new component to model: {:?}", self.name);
         // trace!("{:?}", self);
         Ok(())
     }

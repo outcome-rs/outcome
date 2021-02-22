@@ -2,7 +2,7 @@ use super::{Command, CommandResult};
 use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage};
 use crate::var::{Var, VarType};
-use crate::{CompId, EntityId, EntityUid, MedString, StringId};
+use crate::{CompName, EntityId, EntityName, MedString, StringId};
 
 use super::super::LocationInfo;
 use crate::machine::{Error, ErrorKind, Result};
@@ -16,7 +16,7 @@ impl SetIntIntAddr {
     pub fn execute_loc(
         &self,
         storage: &mut Storage,
-        comp_uid: &CompId,
+        comp_uid: &CompName,
         location: &LocationInfo,
     ) -> CommandResult {
         *storage
@@ -114,9 +114,9 @@ impl Set {
     pub fn execute_loc(
         &self,
         entity_db: &mut Storage,
-        ent_uid: &EntityUid,
+        ent_uid: &EntityId,
         comp_state: &mut StringId,
-        comp_uid: &CompId,
+        comp_uid: &CompName,
         location: &LocationInfo,
     ) -> CommandResult {
         let var_type = &self.target.var_type;

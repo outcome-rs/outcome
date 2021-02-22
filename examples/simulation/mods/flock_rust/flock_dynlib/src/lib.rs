@@ -1,6 +1,6 @@
 use outcome_core::machine::cmd::CommandResult;
 use outcome_core::{
-    arraystring::new_truncate, entity::Storage, entity::StorageIndex, machine::Result, EntityUid,
+    arraystring::new_truncate, entity::Storage, entity::StorageIndex, machine::Result, EntityId,
 };
 
 #[no_mangle]
@@ -9,7 +9,7 @@ pub fn minicall() -> u8 {
 }
 
 #[no_mangle]
-pub fn calculate_entity(ent_uid: &EntityUid, entity: &mut Storage) -> Result<CommandResult> {
+pub fn calculate_entity(ent_uid: &EntityId, entity: &mut Storage) -> Result<CommandResult> {
     // let bounds: Bounds<Vec2> = windows.get_primary().unwrap().into();
 
     // let import: Vec<f64> = entity

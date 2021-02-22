@@ -204,14 +204,14 @@ type MedString = arrayvec::ArrayString<[u8; 40]>;
 /// Long fixed-size string type.
 type LongString = arrayvec::ArrayString<[u8; 100]>;
 
-/// Entity identifier type.
-pub type EntityId = StringId;
-/// Component identifier type.
-pub type CompId = StringId;
-/// Variable identifier type.
-pub type VarId = StringId;
-/// Event identifier type.
-pub type EventId = StringId;
+/// Entity string identifier type.
+pub type EntityName = StringId;
+/// Component string identifier type.
+pub type CompName = StringId;
+/// Variable string identifier type.
+pub type VarName = StringId;
+/// Event string identifier type.
+pub type EventName = StringId;
 
-/// Unique entity identifier type.
-pub type EntityUid = u32;
+/// Entity unique integer identifier type.
+pub type EntityId = u32;

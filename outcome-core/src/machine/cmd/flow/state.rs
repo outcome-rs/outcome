@@ -1,7 +1,7 @@
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompId, EntityId, EntityUid, ShortString, Sim, StringId};
+use crate::{arraystring, CompName, EntityId, EntityName, ShortString, Sim, StringId};
 use std::iter::FromIterator;
 
 use super::super::super::{
@@ -16,7 +16,7 @@ pub const COMMAND_NAMES: [&'static str; 1] = ["state"];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct State {
-    pub comp: CompId,
+    pub comp: CompName,
     pub signature: Option<Address>,
     pub name: StringId,
     pub start_line: usize,
@@ -87,8 +87,8 @@ impl State {
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
-        ent_uid: &EntityUid,
-        comp_name: &CompId,
+        ent_uid: &EntityId,
+        comp_name: &CompName,
         line: usize,
     ) -> Vec<CommandResult> {
         // unimplemented!()

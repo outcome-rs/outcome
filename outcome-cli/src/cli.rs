@@ -18,7 +18,7 @@ use std::{env, thread};
 use anyhow::{Error, Result};
 use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
 use outcome::Sim;
-use outcome_net::{Coord, Server, ServerSettings, SimConnection, Worker};
+use outcome_net::{Coord, Server, ServerConfig, SimConnection, Worker};
 
 use self::simplelog::{Level, LevelPadding};
 use crate::init;
@@ -28,6 +28,7 @@ use core::mem;
 
 #[cfg(feature = "watcher")]
 use notify::{RecommendedWatcher, Watcher};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 pub const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
@@ -572,11 +573,17 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     }
 
     println!("listening for new clients on: {}", server_address);
+
     if let Some(cluster_addr) = matches.value_of("cluster") {
         println!("listening for new workers on: {}", &cluster_addr);
     }
 
-    ServerSettings {
+    let project_path = match matches.value_of("scenario-path") {
+        Some(path) => path.to_string(),
+        None => unimplemented!(),
+    };
+
+    let config = ServerConfig {
         name: match matches.value_of("name") {
             Some(n) => n.to_string(),
             None => "outcome_server".to_string(),
@@ -585,35 +592,64 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
             Some(d) => d.to_string(),
             None => "It's a server alright.".to_string(),
         },
-        address: server_address.to_string(),
-        project_path: match matches.value_of("scenario-path") {
-            Some(path) => path.to_string(),
-            None => unimplemented!(),
-        },
-        use_auth,
-        passwd_list,
-        use_compression: matches.is_present("use-compression"),
-        keepalive_millis: match matches.value_of("keep-alive") {
-            Some(millis) => match millis.parse::<usize>() {
-                Ok(f) => f,
+        self_keepalive: match matches.value_of("keep-alive") {
+                Some(millis) => match millis.parse::<usize>() {
+                Ok(ka) => match ka {
+                    // 0 means keep alive forever
+                    0 => None,
+                    _ => Some(Duration::from_millis(ka as u64)),
+                }
                 Err(e) => panic!("failed parsing keep-alive (millis) value: {}", e),
             },
-            // 0 means keep alive forever
-            None => 0,
+            // nothing means keep alive forever
+            None => None,
         },
-        cluster: matches.value_of("cluster").map(|s| s.to_string()),
-        workers: match matches.value_of("workers") {
-            Some(workers_str) => workers_str
-                .split(",")
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>(),
-            None => Vec::new(),
-        },
-    }
-    .build()?
-    .start()?;
+        poll_wait: Duration::from_millis(1),
+        accept_delay: Duration::from_millis(100),
 
-    // Server::start(sim_instance, server_address)?;
+        client_keepalive: Some(Duration::from_secs(2)),
+
+        use_auth,
+        auth_pairs: vec![],
+        use_compression: matches.is_present("use-compression"),
+
+        ..Default::default()
+        // cluster: matches.value_of("cluster").map(|s| s.to_string()),
+        // workers: match matches.value_of("workers") {
+        //     Some(workers_str) => workers_str
+        //         .split(",")
+        //         .map(|s| s.to_string())
+        //         .collect::<Vec<String>>(),
+        //     None => Vec::new(),
+        // },
+    };
+
+    // TODO
+    let sim_instance = match matches.value_of("cluster") {
+        Some(addr) => {
+            SimConnection::ClusterCoord(Coord::new_with_path(&project_path, addr, Vec::new())?)
+        }
+        None => SimConnection::Local(Sim::from_scenario_at(&project_path)?),
+    };
+
+    let mut server = Server::new_with_config(server_address, config, sim_instance);
+
+    // run a loop allowing graceful shutdown
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    server.start_polling(running)?;
+    println!("Initiating graceful shutdown...");
+    for (client_id, client) in &mut server.clients {
+        client.connection.disconnect(None);
+    }
+    server.manual_poll()?;
+
+    thread::sleep(Duration::from_secs(1));
 
     Ok(())
 }

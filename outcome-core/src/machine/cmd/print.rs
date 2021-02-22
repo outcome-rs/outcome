@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use shlex;
 
-use crate::{CompId, MedString, StringId, VarType};
+use crate::{CompName, MedString, StringId, VarType};
 
 use crate::address::{Address, PartialAddress, ShortLocalAddress};
 use crate::entity::Storage;
@@ -76,7 +76,7 @@ impl PrintFmt {
         &self,
         entity_db: &mut Storage,
         comp_state: &StringId,
-        comp_uid: &CompId,
+        comp_uid: &CompName,
         location: &LocationInfo,
     ) -> CommandResult {
         //todo
@@ -127,7 +127,7 @@ impl Print {
         let addr = Address::from_str(&args[0]).unwrap();
         Ok(Print { source: addr })
     }
-    pub fn from_str(args_str: &str, comp_uid: &CompId) -> Result<Self> {
+    pub fn from_str(args_str: &str, comp_uid: &CompName) -> Result<Self> {
         //todo
         unimplemented!()
         // let split: Vec<&str> = args_str.split(" ").collect();

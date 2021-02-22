@@ -31,10 +31,10 @@
 //! interacting with the simulation, including things like reading and writing
 //! data, creating entities and more, simply by passing messages.
 //!
-//! Since message-based communication is considered language agnostic, with
+//! Message-based communication can be considered language agnostic, with
 //! many popular messaging and serialization libraries providing
-//! implementations in multiple programming languages, client code can be
-//! written in anything from C to Python to JavaScript.
+//! implementations in multiple programming languages. This means client code
+//! can be written in anything from C to Python to JavaScript.
 //!
 //! `Server` construct can exists in one of three forms: `SimServer` for
 //! single-machine deployments, and `CoordServer` or `WorkerServer` for
@@ -101,9 +101,11 @@ pub(crate) use transport::nng::*;
 #[cfg(feature = "transport_zmq")]
 pub(crate) use transport::zmq::*;
 
-pub use client::{Client, ClientConfig};
+pub use client::{Client, ClientConfig, CompressionPolicy};
 pub use coord::Coord;
-pub use server::{Server, ServerSettings, SimConnection};
+pub use server::{Server, ServerConfig, SimConnection};
 pub use worker::Worker;
+
+pub use socket::SocketEvent;
 
 pub use error::{Error, Result};

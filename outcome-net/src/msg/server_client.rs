@@ -149,6 +149,13 @@ impl Payload for DataTransferRequest {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum TransferResponseData {
+    Typed(TypedSimDataPack),
+    Var(VarSimDataPack),
+    VarOrdered(u32, VarSimDataPackOrdered),
+}
+
 /// Response to `DataTransferRequest`.
 ///
 /// `data` structure containing a set of lists containing different types of data.
@@ -156,7 +163,8 @@ impl Payload for DataTransferRequest {
 /// `error` contains the report of any errors that might have occurred.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct DataTransferResponse {
-    pub data: Option<SimDataPack>,
+    // pub data: Option<TypedSimDataPack>,
+    pub data: Option<TransferResponseData>,
     pub error: String,
 }
 pub(crate) const DATA_TRANSFER_RESPONSE: &str = "DataTransferResponse";
@@ -179,12 +187,22 @@ impl Payload for ScheduledDataTransferRequest {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct VarSimDataPackOrdered {
+    pub vars: Vec<outcome::Var>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct VarSimDataPack {
+    pub vars: HashMap<String, outcome::Var>,
+}
+
 /// Structure holding all data organized based on data types.
 ///
 /// Each data type is represented by a set of key-value pairs, where
 /// keys are addresses represented with strings.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct SimDataPack {
+pub struct TypedSimDataPack {
     pub strings: HashMap<String, String>,
     pub ints: HashMap<String, outcome_core::Int>,
     pub floats: HashMap<String, outcome_core::Float>,
@@ -198,9 +216,9 @@ pub struct SimDataPack {
     pub float_grids: HashMap<String, Vec<Vec<outcome_core::Float>>>,
     pub bool_grids: HashMap<String, Vec<Vec<bool>>>,
 }
-impl SimDataPack {
-    pub fn empty() -> SimDataPack {
-        SimDataPack {
+impl TypedSimDataPack {
+    pub fn empty() -> TypedSimDataPack {
+        TypedSimDataPack {
             strings: HashMap::new(),
             ints: HashMap::new(),
             floats: HashMap::new(),
@@ -242,11 +260,23 @@ impl SimDataPack {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum PullRequestData {
+    /// Request to pull a key-value map of addresses and vars in string-form
+    Typed(TypedSimDataPack),
+    // TypedOrdered(TypedSimDataPackOrdered),
+    /// Request to pull a key-value map of addresses and serialized vars
+    Var(VarSimDataPack),
+    /// Request to pull an ordered list of serialized vars, based on ordering
+    /// provided by server when responding to data transfer request
+    VarOrdered(u32, VarSimDataPackOrdered),
+}
+
 /// Request the server to pull provided data into the main simulation
 /// database.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct DataPullRequest {
-    pub data: SimDataPack,
+    pub data: PullRequestData,
 }
 pub(crate) const DATA_PULL_REQUEST: &str = "DataPullRequest";
 impl Payload for DataPullRequest {

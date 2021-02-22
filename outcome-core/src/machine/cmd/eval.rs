@@ -18,7 +18,7 @@ use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage};
 // use crate::error::Error;
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompId, MedString, Sim, StringId, Var, VarType};
+use crate::{arraystring, CompName, MedString, Sim, StringId, Var, VarType};
 
 use super::super::{CommandPrototype, Error, LocationInfo, Registry, RegistryTarget, Result};
 use super::{Command, CommandResult};
@@ -75,7 +75,7 @@ impl Eval {
     pub fn execute_loc(
         &self,
         storage: &mut Storage,
-        comp_name: &CompId,
+        comp_name: &CompName,
         registry: &mut Registry,
         location: &LocationInfo,
     ) -> CommandResult {

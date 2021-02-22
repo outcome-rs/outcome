@@ -17,6 +17,9 @@ pub enum Error {
     #[error("other: {0}")]
     Other(String),
 
+    #[error("no activity for {0} milliseconds, terminating server")]
+    ServerKeepaliveLimitReached(u32),
+
     #[error("data store disconnected")]
     Disconnect(#[from] std::io::Error),
 

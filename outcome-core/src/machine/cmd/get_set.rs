@@ -5,8 +5,8 @@ use std::str::FromStr;
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::SimModel;
-use crate::{model, EntityUid, Var};
-use crate::{EntityId, Sim, StringId, VarType};
+use crate::{model, EntityId, Var};
+use crate::{EntityName, Sim, StringId, VarType};
 
 use super::{Command, CommandResult, ExtCommand};
 use crate::machine::error::{Error, ErrorKind};
@@ -49,7 +49,7 @@ impl Get {
     pub fn execute_loc(&self) -> CommandResult {
         CommandResult::ExecExt(ExtCommand::Get(*self))
     }
-    pub fn exec_pre(&self, storage: &mut Storage, ent_uid: &EntityId) -> Option<(Address, Var)> {
+    pub fn exec_pre(&self, storage: &mut Storage, ent_uid: &EntityName) -> Option<(Address, Var)> {
         unimplemented!();
         // let var = match
         // storage.get_var(&self.source.as_loc()) {
@@ -62,7 +62,7 @@ impl Get {
     }
     //    //TODO it could maybe be faster to not deal with `Var`
     // enum here?
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
         // println!("{:?}, {:?}", self.source.get_ent_type,
         // self.source.get_ent_id)
         let ext_ent = match sim.get_entity_str(&self.source.entity)
@@ -151,7 +151,7 @@ pub struct ExtSetVar {
     pub source: Var,
 }
 impl ExtSetVar {
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
         unimplemented!();
         // let ext_ent = match sim
         //.entities
@@ -179,7 +179,7 @@ pub struct ExtSet {
     pub source: Address,
 }
 impl ExtSet {
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityUid) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
         let loc_ent = match sim.get_entity(ent_uid) {
             Ok(e) => e,
             Err(_) => {

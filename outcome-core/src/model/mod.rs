@@ -1,17 +1,9 @@
-//! Definitions for model contents, as well as logic for turning
-//! deserialized data into model objects.
+//! Model content definitions, logic for turning deserialized data into
+//! model objects.
 
 #![allow(unused)]
 
-extern crate semver;
-extern crate serde;
-// extern crate serde_yaml;
-extern crate toml;
-
 mod deser;
-//mod dyn_deser;
-
-// pub use model::dyn_deser::*;
 
 use std::collections::HashMap;
 use std::fs::{read, read_dir, File};
@@ -20,49 +12,42 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use fnv::FnvHashMap;
+use semver::{Version, VersionReq};
+use toml::Value;
 
-use crate::{arraystring, CompId, EntityId, EventId, Result, VarId};
-use crate::{util, ShortString};
-use crate::{MedString, StringId};
-use crate::{Var, VarType};
+use crate::address::{Address, LocalAddress, ShortLocalAddress};
+use crate::error::Error;
+use crate::util;
+use crate::{arraystring, MedString, ShortString, StringId};
+use crate::{CompName, EntityName, EventName, Result, Var, VarName, VarType};
 use crate::{
     MODULE_ENTRY_FILE_NAME, MODULE_MANIFEST_FILE, SCENARIO_MANIFEST_FILE, SCENARIO_MODS_DIR_NAME,
     VERSION,
 };
 
-use crate::address::{Address, LocalAddress, ShortLocalAddress};
-use crate::error::Error;
-//use crate::script::bridge::FILE_EXTENSION;
-
 #[cfg(feature = "machine_script")]
 use crate::machine::script::{parser, preprocessor, InstructionType};
+use crate::machine::START_STATE_NAME;
 
-//use crate::machine::cmd::Command;
-//use crate::machine::{cmd, CommandPrototype, LocationInfo};
-
-use self::semver::{Version, VersionReq};
-use self::toml::Value;
-
-/// Contains a collection of all the model data for the simulation.
+/// Collection of all the model data needed for running a simulation.
 ///
-/// # Instantiating simulation from `SimModel`
+/// # Instantiating simulation from model
 ///
 /// Creating a simulation instance requires passing an existing `SimModel`.
 ///
 /// # Dynamic model
 ///
 /// As `SimModel` is stored within, and used for runtime processing of, the
-/// simulation instance, it can be mutated at runtime. This allows for dynamic
-/// changing of the underlying simulation rules at any point during simulation
-/// processing.
+/// simulation instance, it itself can also be mutated at runtime. This allows
+/// for dynamic changes to the underlying simulation rules at any point during
+/// simulation processing.
 ///
 /// # Role of the model in a distributed setting
 ///
 /// In a situation where there are multiple nodes, each holding and processing
 /// locally stored entities, the model serves as the collection of common rules
 /// shared by the whole system. As such it needs to always stay synchronized
-/// across the whole system. This is especially true since the rules may change
-/// at runtime.
+/// across the whole system.
 ///
 /// In a distributed setting, any changes to the model are handled centrally
 /// and propagated to all the nodes.
@@ -79,6 +64,7 @@ pub struct SimModel {
 }
 
 impl SimModel {
+    /// Creates a new simulation model from a scenario structure.
     pub fn from_scenario(scenario: Scenario) -> Result<SimModel> {
         // first create an empty sim model
         let mut model = SimModel {
@@ -109,11 +95,14 @@ impl SimModel {
                     true,
                     None,
                 );
-                println!("{:?}", files);
+                debug!("yaml files: {:?}", files);
                 for file in files {
-                    let file_struct: deser::DataFile = util::deser_struct_from_path(file)?;
-                    println!("{:?}", file_struct);
-                    model.apply_from_structured_file(file_struct)?;
+                    if let Ok(file_struct) = util::deser_struct_from_path(file.clone()) {
+                        trace!("yaml file struct: {:?}", file_struct);
+                        model.apply_from_structured_file(file_struct)?;
+                    } else {
+                        warn!("unable to parse file: {}", file.to_string_lossy());
+                    }
                 }
             }
 
@@ -182,9 +171,9 @@ impl SimModel {
 
                 // turn instructions into proper commands
                 let mut commands: Vec<Command> = Vec::new();
-                // first get a list of commands from the main instruction list
                 let mut cmd_prototypes: Vec<CommandPrototype> = Vec::new();
                 let mut cmd_locations: Vec<LocationInfo> = Vec::new();
+                // first get a list of commands from the main instruction list
                 for instruction in instructions {
                     let cmd_prototype = match instruction.type_ {
                         InstructionType::Command(c) => c,
@@ -240,7 +229,7 @@ impl SimModel {
 impl SimModel {
     pub fn apply_from_structured_file(&mut self, file_struct: deser::DataFile) -> Result<()> {
         for component in file_struct.components {
-            println!("{:?}", component);
+            trace!("file struct component: {:?}", component);
             if let Some(comp_struct) = component.1 {
                 let comp_model = ComponentModel::from_deser(&component.0, comp_struct)?;
                 self.components.push(comp_model);
@@ -263,7 +252,7 @@ impl SimModel {
     }
 
     /// Get reference to component model using `type_` and `id` args.
-    pub fn get_component(&self, name: &CompId) -> Result<&ComponentModel> {
+    pub fn get_component(&self, name: &CompName) -> Result<&ComponentModel> {
         self.components
             .iter()
             .find(|comp| &comp.name == name)
@@ -279,20 +268,27 @@ impl SimModel {
 /// Scenario manifest model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScenarioManifest {
-    // required
+    /// Name of, and unique reference to, the scenario
     pub name: String,
     /// Semver specifier for the scenario version
     pub version: String,
     /// Semver specifier for the engine version
     pub engine: String,
 
-    // optional
+    /// List of the module dependencies for the scenario
     pub mods: Vec<ScenarioModuleDep>,
+    /// Map of settings, each being essentially an arbitrary data setter
     pub settings: HashMap<String, String>,
+
+    /// More free-form than the name
     pub title: Option<String>,
+    /// Short description of the scenario
     pub desc: Option<String>,
+    /// Long description of the scenario
     pub desc_long: Option<String>,
+    /// Author information
     pub author: Option<String>,
+    /// Source website information
     pub website: Option<String>,
 }
 
@@ -311,11 +307,10 @@ impl ScenarioManifest {
         }
 
         Ok(ScenarioManifest {
-            // required
             name: deser_manifest.scenario.name,
             version: deser_manifest.scenario.version,
             engine: deser_manifest.scenario.engine,
-            // optional
+
             settings: deser_manifest
                 .settings
                 .iter()
@@ -421,12 +416,8 @@ impl Scenario {
     /// Create a scenario model from a path reference to scenario manifest.
     pub fn from_path(path: PathBuf) -> Result<Scenario> {
         let dir_path = path.parent().unwrap();
-        println!("{:?}", dir_path);
+        println!("scenario dir_path: {:?}", dir_path);
         // get the scenario manifest
-        // let scenario_manifest = ScenarioManifest::from_dir_at(path.clone()).expect(&format!(
-        //     "failed making scenario manifest from dir path: \"{}\"",
-        //     path.to_str().unwrap()
-        // ));
         let scenario_manifest = ScenarioManifest::from_path(path.clone())?;
 
         // if the version requirement for the engine specified in
@@ -803,14 +794,14 @@ impl Module {
 /// Trigger event model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventModel {
-    pub id: EventId,
+    pub id: EventName,
 }
 
 /// Entity prefab model.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntityPrefab {
-    pub name: EntityId,
-    pub components: Vec<CompId>,
+    pub name: EntityName,
+    pub components: Vec<CompName>,
 }
 
 // cfg_if! {
@@ -838,17 +829,21 @@ pub struct EntityPrefab {
 // }
 //
 /// Component model.
+///
+/// Components are primarily referenced by their name. Other than that
+/// each component defines a list of variables and a list of event triggers.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComponentModel {
-    pub name: CompId,
+    /// String identifier of the component
+    pub name: CompName,
+    /// List of variables that define the component's interface
     pub vars: Vec<VarModel>,
+    /// List of events that serve as triggers for the component
     pub triggers: Vec<StringId>,
 
+    /// Logic attached to the component
     #[cfg(feature = "machine")]
     pub logic: LogicModel,
-    //pub source_files: Vec<PathBuf>,
-    //pub script_files: Vec<PathBuf>,
-    //pub lib_files: Vec<PathBuf>,
 }
 
 impl ComponentModel {
@@ -862,7 +857,10 @@ impl ComponentModel {
                 .map(|(k, v)| VarModel::from_deser(&k, v).unwrap())
                 .collect(),
             triggers: Vec::new(),
-            ..Default::default()
+            logic: LogicModel {
+                start_state: arraystring::new_unchecked(START_STATE_NAME),
+                ..Default::default()
+            },
         })
     }
 }
@@ -871,9 +869,9 @@ impl ComponentModel {
 #[cfg(feature = "machine")]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogicModel {
-    /// Starting state
+    /// Name of the starting state
     pub start_state: StringId,
-    /// List of loc phase commands
+    /// List of local phase commands
     pub commands: Vec<crate::machine::cmd::Command>,
     /// List of pre phase commands
     pub pre_commands: FnvHashMap<ShortString, Vec<crate::machine::cmd::ExtCommand>>,
@@ -881,7 +879,7 @@ pub struct LogicModel {
     pub states: FnvHashMap<StringId, (usize, usize)>,
     /// Mapping of non-state procedure names to their start and end lines
     pub procedures: FnvHashMap<ShortString, (usize, usize)>,
-    /// Location info mapped for each command on the list by vec index
+    /// Location info mapped for each command on the list by index
     pub cmd_location_map: Vec<crate::machine::LocationInfo>,
 }
 
@@ -889,7 +887,7 @@ pub struct LogicModel {
 impl LogicModel {
     pub fn empty() -> LogicModel {
         LogicModel {
-            start_state: StringId::from("start").unwrap(),
+            start_state: arraystring::new_unchecked(crate::machine::START_STATE_NAME),
             commands: Vec::new(),
             states: FnvHashMap::default(),
             procedures: FnvHashMap::default(),
@@ -902,6 +900,7 @@ impl LogicModel {
         let mut new_logic = LogicModel::empty();
         new_logic.commands = self.commands[start_line..last_line].to_vec();
         new_logic.cmd_location_map = self.cmd_location_map[start_line..last_line].to_vec();
+        // warn!("{:?}", new_logic);
         new_logic
     }
 }
@@ -909,7 +908,7 @@ impl LogicModel {
 /// Variable model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VarModel {
-    pub id: VarId,
+    pub id: VarName,
     pub type_: VarType,
     pub default: Option<Var>,
 }

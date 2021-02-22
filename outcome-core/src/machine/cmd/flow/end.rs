@@ -3,7 +3,7 @@ use arrayvec::ArrayVec;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
 use crate::var::Var;
-use crate::{CompId, VarType};
+use crate::{CompName, VarType};
 
 use super::super::super::{error::Error, CallInfo, CallStackVec, LocationInfo, ProcedureCallInfo};
 use super::super::CommandResult;
@@ -21,7 +21,7 @@ impl End {
     pub fn execute_loc(
         &self,
         call_stack: &mut CallStackVec,
-        comp_uid: &CompId,
+        comp_uid: &CompName,
         ent_storage: &mut Storage,
         location: &LocationInfo,
     ) -> CommandResult {
