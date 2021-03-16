@@ -7,6 +7,7 @@ use crate::{
     arraystring, CompName, EntityId, EntityName, LongString, ShortString, Sim, StringId, VarType,
 };
 
+use crate::distr::SimCentral;
 use crate::machine::cmd::register::{RegisterComponent, RegisterEntityPrefab};
 use crate::machine::cmd::{
     CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo,
@@ -163,6 +164,44 @@ impl ComponentBlock {
             sim.model.components.remove(n);
         }
         sim.model.components.push(component);
+        // trace!("{:?}", self);
+        Ok(())
+    }
+
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+        warn!("component block");
+        let comp_model = central.model.get_component(&self.source_comp).unwrap();
+
+        let component = ComponentModel {
+            name: self.name.into(),
+            //start_state: arraystring::new_unchecked("start"),
+            // triggers: vec![StringId::from_unchecked("step")],
+            // logic: LogicModel {
+            //     commands: comp_model.logic.commands.clone(),
+            //     cmd_location_map: comp_model.logic.cmd_location_map.clone(),
+            //     ..LogicModel::default()
+            // },
+            logic: comp_model.logic.get_subset(self.start_line, self.end_line),
+            ..ComponentModel::default()
+        };
+
+        trace!(
+            "execute_ext_distr: adding new component to model: {:?}",
+            component
+        );
+
+        // overwrite existing components with the same name by default
+        if let Some(n) = central
+            .model
+            .components
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.name == component.name)
+            .map(|(n, _)| n)
+        {
+            central.model.components.remove(n);
+        }
+        central.model.components.push(component);
         // trace!("{:?}", self);
         Ok(())
     }

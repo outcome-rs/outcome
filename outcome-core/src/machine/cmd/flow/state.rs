@@ -9,6 +9,7 @@ use super::super::super::{
     Registry,
 };
 use super::super::{CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo};
+use crate::distr::SimCentral;
 use crate::machine::error::ErrorKind;
 use crate::machine::ComponentCallInfo;
 
@@ -112,6 +113,7 @@ impl State {
         out_vec.push(CommandResult::JumpToLine(self.end_line + 1));
         out_vec
     }
+
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<(), Error> {
         //println!("execute ext on state cmd");
         //println!("{:?}", sim.model.components);
@@ -119,6 +121,25 @@ impl State {
         let comp_name = self.comp;
         // trace!("comp_name: {:?}", comp_name);
         for component in &mut sim.model.components {
+            if component.name != comp_name {
+                continue;
+            }
+            component
+                .logic
+                .states
+                .insert(self.name, (self.start_line, self.end_line));
+            debug!("inserted state {:?} at comp {:?}", self, comp_name);
+        }
+        Ok(())
+    }
+
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<(), Error> {
+        //println!("execute ext on state cmd");
+        //println!("{:?}", sim.model.components);
+        // let comp_name = self.signature.unwrap().component;
+        let comp_name = self.comp;
+        // trace!("comp_name: {:?}", comp_name);
+        for component in &mut central.model.components {
             if component.name != comp_name {
                 continue;
             }

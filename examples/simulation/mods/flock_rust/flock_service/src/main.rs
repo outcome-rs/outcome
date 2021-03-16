@@ -5,9 +5,9 @@ use anyhow::Result;
 use outcome_core::machine::cmd::CommandResult;
 use outcome_core::{arraystring::new_truncate, entity::Storage, entity::StorageIndex, EntityId};
 use outcome_net::msg::{
-    DataPullRequest, DataTransferRequest, DataTransferResponse, MessageType, PullRequestData,
-    TransferResponseData, TurnAdvanceRequest, TurnAdvanceResponse, TypedSimDataPack,
-    VarSimDataPack, VarSimDataPackOrdered,
+    DataPullRequest, DataTransferRequest, DataTransferResponse, Message, MessageType,
+    PullRequestData, TransferResponseData, TurnAdvanceRequest, TurnAdvanceResponse,
+    TypedSimDataPack, VarSimDataPack, VarSimDataPackOrdered,
 };
 use outcome_net::{Client, ClientConfig, CompressionPolicy, SocketEvent};
 
@@ -75,41 +75,44 @@ pub fn main() -> Result<()> {
         loop {
             if let Ok((addr, event)) = client.connection.try_recv() {
                 match event {
-                    SocketEvent::Message(msg) => match msg.type_ {
-                        MessageType::TurnAdvanceResponse => {
-                            let resp: TurnAdvanceResponse =
-                                msg.unpack_payload(client.connection.encoding())?;
-                            if resp.error.is_empty() {
-                                // println!("[{:?}] advanced turn", std::time::SystemTime::now());
-                                advanced_turn = true;
-                            } else {
-                                // println!("{}", resp.error);
-                                client.connection.pack_send_msg_payload(
-                                    TurnAdvanceRequest { tick_count: 1 },
-                                    None,
-                                )?;
-                            }
-                        }
-                        MessageType::DataTransferResponse => {
-                            println!("received data transfer response");
-                            let resp: DataTransferResponse =
-                                msg.unpack_payload(client.connection.encoding())?;
-                            if let Some(resp_data) = resp.data {
-                                match resp_data {
-                                    TransferResponseData::VarOrdered(ord_id, d) => {
-                                        order_id = Some(ord_id);
-                                        data = d
-                                    }
-                                    _ => (),
+                    SocketEvent::Bytes(bytes) => {
+                        let msg = Message::from_bytes(bytes)?;
+                        match msg.type_ {
+                            MessageType::TurnAdvanceResponse => {
+                                let resp: TurnAdvanceResponse =
+                                    msg.unpack_payload(client.connection.encoding())?;
+                                if resp.error.is_empty() {
+                                    // println!("[{:?}] advanced turn", std::time::SystemTime::now());
+                                    advanced_turn = true;
+                                } else {
+                                    // println!("{}", resp.error);
+                                    client.connection.pack_send_msg_payload(
+                                        TurnAdvanceRequest { tick_count: 1 },
+                                        None,
+                                    )?;
                                 }
                             }
-                            received_data = true;
+                            MessageType::DataTransferResponse => {
+                                println!("received data transfer response");
+                                let resp: DataTransferResponse =
+                                    msg.unpack_payload(client.connection.encoding())?;
+                                if let Some(resp_data) = resp.data {
+                                    match resp_data {
+                                        TransferResponseData::VarOrdered(ord_id, d) => {
+                                            order_id = Some(ord_id);
+                                            data = d
+                                        }
+                                        _ => (),
+                                    }
+                                }
+                                received_data = true;
+                            }
+                            MessageType::DataPullResponse => {
+                                println!("received pull response");
+                            }
+                            _ => (),
                         }
-                        MessageType::DataPullResponse => {
-                            println!("received pull response");
-                        }
-                        _ => (),
-                    },
+                    }
                     SocketEvent::Disconnect => {
                         println!("server disconnected");
                         return Ok(());
@@ -136,6 +139,8 @@ pub fn main() -> Result<()> {
 
     Ok(())
 }
+
+fn match_msg(msg: Message) {}
 
 fn data_transfer_request() -> DataTransferRequest {
     DataTransferRequest {

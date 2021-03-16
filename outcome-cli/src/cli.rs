@@ -199,11 +199,16 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
             NOTE: data sent between client and server is not encrypted, connection \n\
             is not secure! Passwords are used, but they are more of a convenience than a \n\
             serious security measure.")
-            .arg(Arg::with_name("scenario-path")
+            .arg(Arg::with_name("scenario")
                 .display_order(1)
-                .required(true)
+                .required(false)
                 .long("scenario")
                 .value_name("scenario-path"))
+            .arg(Arg::with_name("snapshot")
+                .display_order(1)
+                .required(false)
+                .long("snapshot")
+                .value_name("snapshot-path"))
             .arg(Arg::with_name("ip-address")
                 .display_order(2)
                 .required(false)
@@ -578,11 +583,6 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         println!("listening for new workers on: {}", &cluster_addr);
     }
 
-    let project_path = match matches.value_of("scenario-path") {
-        Some(path) => path.to_string(),
-        None => unimplemented!(),
-    };
-
     let config = ServerConfig {
         name: match matches.value_of("name") {
             Some(n) => n.to_string(),
@@ -624,12 +624,43 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         // },
     };
 
+    let worker_addrs = match matches.value_of("workers") {
+        Some(wstr) => wstr
+            .split(',')
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>(),
+        None => Vec::new(),
+    };
+
+    // let scenario_path = match matches.value_of("scenario") {
+    //     Some(path) => path.to_string(),
+    //     None => unimplemented!(),
+    // };
+
     // TODO
     let sim_instance = match matches.value_of("cluster") {
         Some(addr) => {
-            SimConnection::ClusterCoord(Coord::new_with_path(&project_path, addr, Vec::new())?)
+            if let Some(scenario_path) = matches.value_of("scenario") {
+                SimConnection::ClusterCoord(Coord::new_with_path(
+                    &scenario_path,
+                    addr,
+                    worker_addrs,
+                )?)
+            } else {
+                // TODO
+                unimplemented!()
+                // SimConnection::ClusterCoord(Coord::new_with_path());
+            }
         }
-        None => SimConnection::Local(Sim::from_scenario_at(&project_path)?),
+        None => {
+            if let Some(scenario_path) = matches.value_of("scenario") {
+                SimConnection::Local(Sim::from_scenario_at(&scenario_path)?)
+            } else if let Some(snapshot_path) = matches.value_of("snapshot") {
+                SimConnection::Local(Sim::from_snapshot_at(&snapshot_path)?)
+            } else {
+                unimplemented!()
+            }
+        }
     };
 
     let mut server = Server::new_with_config(server_address, config, sim_instance);

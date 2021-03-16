@@ -15,12 +15,12 @@
   <a href="https://theoutcomeproject.com">
     <img alt="website" src="https://img.shields.io/badge/project-website-yellowgreen" />
   </a>
-  <a href="https://discord.gg/tB6uy6f">
+  <a href="https://discord.com/invite/VxC4ssK7eX">
     <img alt="discord" src="https://img.shields.io/discord/540935926541713419?label=discord%20chat" />
   </a>
 </p>
 <p align="center">
-  <a href="https://patreon.com/theoutcome">
+  <a href="https://www.patreon.com/adamsky">
     <img alt="patreon" src="https://img.shields.io/badge/support%20on-patreon-orange" />
   </a>
   <a href="https://github.com/sponsors/adamsky">
@@ -35,11 +35,16 @@ distributed simulation engine for the modern age.
 
 Assembling, running and interacting with complex discrete event simulations,
 whether it's multiplayer game worlds, organic city simulations, or scientific
-calculations, is still not an easy task. Especially when it comes to
-distributing them across multiple machines in a dynamic way. Aside from a few
-existing [commercial](https://hadean.com/) [solutions](https://improbable.io/),
-scalable user-friendly distributed simulation still remains a mostly unexplored
-territory. This project is an attempt to change that.
+calculations, is still not a simple task. Especially when it comes to
+distributing them across multiple machines in a dynamic way. 
+
+This project can be seen as a (very) minimalistic re-envisioning of the
+[HLA standard](https://en.wikipedia.org/wiki/High_Level_Architecture) for
+distributed (federated) simulations, with a significantly lower barrier to
+entry. Scalable, user-friendly distributed simulation remains a largely
+unexplored territory, with only a handful of closed-source
+[commercial](https://hadean.com/) [solutions](https://improbable.io/)
+available. `outcome` is an attempt to change that.
 
 *NOTE: Currently in an early stage of development.
 Approach with caution.*
@@ -64,17 +69,28 @@ cumbersome
 
 ## What can it do?
 
-`outcome` provides a generic interface for quickly assembling dynamically
-scalable simulations. As such it has potential uses in many different domains.
+`outcome` provides a way for quickly assembling and running dynamically
+scalable simulations. It remains largely generic, and as such can potentially
+be used in many different domains, from games to social studies.
 
-It has the ability to connect together many separate programs, each tasked with
-simulating a different part of the system, and make them co-create a single
-unsharded world. This means that new models can be assembled from already existing,
-battle-tested modules.
+It has the ability to connect together multiple separate programs, each tasked
+with simulating a different part, or layer, of the system, and make them
+co-create a single un-sharded world. As such, it can be viewed as a high-level
+coupling tool that's able to abstract away many difficult problems that come
+with building distributed simulations.
 
+As `outcome` focuses heavily on a networking interface, it can serve as
+a one-stop-shop solution for creation of massively-multiplayer interactive
+experiences. Here, in a simulation cluster made of multiple worker nodes, each
+node can serve as a server for user clients to connect to, allowing for more
+concurrent connections to the system as a whole.
 
-One crucial aspect of this project is it's focus on the ease of use. 
-
+It can be used as a sort of backend for applications that are based on
+complex simulation models. For example deep-simulation strategy games can can
+leverage `outcome` to speed up their development process, getting things like
+modding support, ready-made sub-system models (e.g. climate or social models)
+made by the community, multiplayer capability and distributed simulation out
+of the box.
 
 
 ## How does it work?
@@ -84,21 +100,16 @@ and making them communicate in a coherent way. To make this happen, the engine
 provides a unifying conceptual framework in the form of an entity-component
 architecture.
 
-Multiple different game engines, physics solvers and agent-based AI models,
-can simulate a single large world without having to keep track of entities
-distributed around a collection of machines.
+Multiple different game engines, physics solvers, AIs and other programs
+can seamlessly co-create a single large world together. They query and mutate
+the distributed entity database provided by the engine using a simple messaging
+system.
 
-Engine runtime does dynamic optimisation of the system by monitoring current
-load and network traffic and transferring entities across machines accordingly.
-
-:
-
-
-
-This entity-focused approach makes it possible to quickly restructure the whole
-system at runtime. We can leverage this by constantly re-arranging entities
-in a way that minimizes inter-machine queries. It also makes dynamically adding
-and removing worker nodes for load-based scaling feasible.
+The entity-based approach makes it possible to quickly restructure the whole
+system at runtime. The engine monitors network traffic and current load among
+the workers, and re-distributes entities among them accordingly, minimizing
+slow inter-machine queries. Easy dynamic addition and removal of worker nodes
+for load-based scaling is another benefit to this approach.
 
 The runtime provides synchronization mechanisms for clients, allowing for
 running in lockstep as well as triggering activity based on custom-defined

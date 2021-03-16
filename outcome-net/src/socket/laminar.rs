@@ -14,7 +14,7 @@ use crossbeam_channel::{Receiver, Sender};
 
 /// Opinionated wrapper over a laminar socket.
 pub struct LaminarSocket {
-    config: SocketConfig,
+    pub config: SocketConfig,
     address: Option<SocketAddr>,
     connections: Vec<SocketAddr>,
     /// Default reliability for packets
@@ -55,7 +55,13 @@ impl LaminarSocket {
 
     pub fn bind_with_config(addr: &str, config: SocketConfig) -> Result<Self> {
         let address = addr.parse().unwrap();
-        let mut socket = laminar::Socket::bind(address).unwrap();
+        let lam_config = laminar::Config {
+            idle_connection_timeout: config.idle_timeout.unwrap_or(Duration::from_secs(5)),
+            heartbeat_interval: config.heartbeat_interval,
+            socket_polling_timeout: Some(Duration::from_secs(2)),
+            ..Default::default()
+        };
+        let mut socket = laminar::Socket::bind_with_config(address, lam_config).unwrap();
 
         let receiver = socket.get_event_receiver();
         let sender = socket.get_packet_sender();
@@ -124,7 +130,7 @@ impl LaminarSocket {
             if let Ok((addr, socket_event)) = Self::match_event(laminar_event) {
                 match socket_event {
                     SocketEvent::Bytes(bytes) => return Ok((addr, Message::from_bytes(bytes)?)),
-                    SocketEvent::Message(msg) => return Ok((addr, msg)),
+                    // SocketEvent::Message(msg) => return Ok((addr, msg)),
                     _ => {
                         self.event_backlog.push_back((addr, socket_event));
                         continue;
@@ -142,7 +148,9 @@ impl LaminarSocket {
                     SocketEvent::Bytes(bytes) => {
                         return Ok((addr, Signal::from_bytes(&bytes, &Encoding::Bincode)?))
                     }
+                    SocketEvent::Disconnect => return Err(crate::Error::HostUnreachable),
                     _ => {
+                        warn!("receiving signal, expected bytes, got: {:?}", socket_event);
                         self.event_backlog.push_back((addr, socket_event));
                         continue;
                     }
@@ -159,6 +167,21 @@ impl LaminarSocket {
             Err(_) => return Err(crate::Error::WouldBlock),
         };
         Self::match_event(laminar_event)
+    }
+
+    pub fn try_recv_msg(&mut self) -> Result<(SocketAddr, Message)> {
+        loop {
+            match self.try_recv() {
+                Ok((addr, socket_event)) => match socket_event {
+                    SocketEvent::Bytes(bytes) => return Ok((addr, Message::from_bytes(bytes)?)),
+                    _ => {
+                        self.event_backlog.push_back((addr, socket_event));
+                        continue;
+                    }
+                },
+                Err(_) => return Err(crate::Error::WouldBlock),
+            };
+        }
     }
 
     pub fn try_recv_sig(&mut self) -> Result<(SocketAddr, Signal)> {
@@ -190,7 +213,7 @@ impl LaminarSocket {
         Ok((addr, event))
     }
 
-    pub fn send(&mut self, bytes: Vec<u8>) -> Result<()> {
+    pub fn send(&self, bytes: Vec<u8>) -> Result<()> {
         debug!(
             "laminar send bytes count: {}, sending to port: {}",
             bytes.len(),

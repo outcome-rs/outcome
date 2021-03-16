@@ -183,7 +183,7 @@ pub struct ScheduledDataTransferRequest {
 pub(crate) const SCHEDULED_DATA_TRANSFER_REQUEST: &str = "ScheduledDataTransferRequest";
 impl Payload for ScheduledDataTransferRequest {
     fn type_(&self) -> MessageType {
-        unimplemented!()
+        MessageType::ScheduledDataTransferRequest
     }
 }
 
@@ -261,6 +261,30 @@ impl TypedSimDataPack {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TypedDataTransferRequest {
+    pub transfer_type: String,
+    pub selection: Vec<String>,
+}
+pub(crate) const TYPED_DATA_TRANSFER_REQUEST: &str = "TypedDataTransferRequest";
+impl Payload for TypedDataTransferRequest {
+    fn type_(&self) -> MessageType {
+        MessageType::DataTransferRequest
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TypedDataTransferResponse {
+    pub data: Option<TypedSimDataPack>,
+    pub error: String,
+}
+pub(crate) const TYPED_DATA_TRANSFER_RESPONSE: &str = "TypedDataTransferResponse";
+impl Payload for TypedDataTransferResponse {
+    fn type_(&self) -> MessageType {
+        MessageType::TypedDataTransferResponse
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum PullRequestData {
     /// Request to pull a key-value map of addresses and vars in string-form
     Typed(TypedSimDataPack),
@@ -296,6 +320,33 @@ pub(crate) const DATA_PULL_RESPONSE: &str = "DataPullResponse";
 impl Payload for DataPullResponse {
     fn type_(&self) -> MessageType {
         MessageType::DataPullResponse
+    }
+}
+
+/// Request the server to pull provided data into the main simulation
+/// database.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TypedDataPullRequest {
+    pub data: TypedSimDataPack,
+}
+pub(crate) const TYPED_DATA_PULL_REQUEST: &str = "TypedDataPullRequest";
+impl Payload for TypedDataPullRequest {
+    fn type_(&self) -> MessageType {
+        MessageType::TypedDataPullRequest
+    }
+}
+
+/// Response to `DataPullRequest`.
+///
+/// `error` contains the report of any errors that might have occurred.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TypedDataPullResponse {
+    pub error: String,
+}
+pub(crate) const TYPED_DATA_PULL_RESPONSE: &str = "TypedDataPullResponse";
+impl Payload for TypedDataPullResponse {
+    fn type_(&self) -> MessageType {
+        MessageType::TypedDataPullResponse
     }
 }
 
@@ -351,6 +402,9 @@ impl Payload for TurnAdvanceResponse {
 pub struct SpawnEntitiesRequest {
     /// List of entity prefabs to be spawned as new entities
     pub entity_prefabs: Vec<String>,
+    /// List of names for the new entities to be spawned, has to be the same
+    /// length as `entity_prefabs`
+    pub entity_names: Vec<String>,
 }
 pub(crate) const SPAWN_ENTITIES_REQUEST: &str = "SpawnEntitiesRequest";
 impl Payload for SpawnEntitiesRequest {

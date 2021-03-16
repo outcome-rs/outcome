@@ -28,7 +28,7 @@ use crate::transport::{SocketInterface, WorkerDriverInterface};
 use crate::util::tcp_endpoint;
 use crate::{error::Error, sig, Result};
 
-use crate::socket::{Encoding, Socket, Transport};
+use crate::socket::{Encoding, Socket, SocketConfig, Transport};
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
 use outcome_core::{
     arraystring, Address, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType,
@@ -175,22 +175,28 @@ impl Worker {
         println!("accepted");
 
         let addr_stem = self.addr.split(":").collect::<Vec<&str>>()[0];
-        let laminar_addr = format!("{}:6223", addr_stem);
+        let socket_addr = format!("{}:0", addr_stem);
+
+        //let addr_stem = self.addr.split(":").collect::<Vec<&str>>()[0];
+        //let laminar_addr = format!("{}:6223", addr_stem);
+        //let mut coord = Socket::bind(&laminar_addr, Transport::Laminar)?;
+        let soc_config = SocketConfig {
+            // idle_timeout: None,
+            ..Default::default()
+        };
+        let mut coord = Socket::bind_any_with_config(Transport::Tcp, soc_config)?;
 
         self.greeter.pack_send_msg_payload(
             IntroduceCoordResponse {
-                laminar_socket: laminar_addr.clone(),
+                conn_socket: coord.last_endpoint().unwrap().to_string(),
                 error: "".to_string(),
             },
             None,
         )?;
 
-        //let addr_stem = self.addr.split(":").collect::<Vec<&str>>()[0];
-        //let laminar_addr = format!("{}:6223", addr_stem);
-        let mut coord = Socket::bind(&laminar_addr, Transport::Laminar)?;
         coord.connect(&req.ip_addr)?;
 
-        coord.send_sig(crate::sig::Signal::from(Signal::EndOfMessages), None)?;
+        coord.send_sig(Signal::EndOfMessages, None)?;
 
         self.network.coord = Some(coord);
 
@@ -226,12 +232,12 @@ impl Worker {
 
         loop {
             // sleep a little to make this thread less expensive
-            // sleep(Duration::from_micros(50));
+            sleep(Duration::from_millis(10));
 
             if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
                 self.handle_signal(sig.into_inner())?;
             } else {
-                //println!("in loop");
+                // println!("in loop");
                 continue;
             }
         }
@@ -300,7 +306,7 @@ impl Worker {
             }
             Signal::DataRequestAll => self.handle_sig_data_request_all()?,
             Signal::SpawnEntities(entities) => self.handle_sig_spawn_entities(entities)?,
-            _ => (),
+            _ => warn!("unhandled signal: {:?}", sig),
         }
 
         Ok(())
@@ -316,7 +322,7 @@ impl Worker {
         &mut self,
         entities: Vec<(EntityId, Option<EntityName>, Option<EntityName>)>,
     ) -> Result<()> {
-        // debug!("spawning entities: {:?}", entities);
+        warn!("spawning entities: {:?}", entities);
         for (ent_uid, prefab_id, target_id) in entities {
             self.sim_node
                 .as_mut()
@@ -330,6 +336,7 @@ impl Worker {
         let mut collection = Vec::new();
         for (entity_uid, entity) in &self.sim_node.as_ref().unwrap().entities {
             for ((comp_id, var_id), var) in entity.storage.map.iter() {
+                warn!("sending: {}:{} = {:?}", comp_id, var_id, var);
                 collection.push((
                     Address {
                         entity: arraystring::new_truncate(&entity_uid.to_string()),
@@ -346,7 +353,7 @@ impl Worker {
             .coord
             .as_mut()
             .unwrap()
-            .send_sig(crate::sig::Signal::from(signal), None)?;
+            .send_sig(signal, None)?;
 
         Ok(())
     }
@@ -510,16 +517,25 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
 
 impl outcome::distr::NodeCommunication for WorkerNetwork {
     fn sig_read_central(&mut self) -> outcome::Result<Signal> {
-        let (addr, sig) = self.coord.as_mut().unwrap().recv_sig().unwrap();
-        Ok(sig.into_inner())
+        if let Some(coord) = &mut self.coord {
+            //let (addr, sig) = self.coord.as_mut().unwrap().recv_sig().unwrap();
+            let sig = match coord.recv_sig() {
+                Ok((addr, sig)) => sig,
+                Err(e) => return Err(outcome::error::Error::Other(e.to_string())),
+            };
+            Ok(sig.into_inner())
+            //match coord.recv_sig() {
+            //Ok((addr, sig)) => return Ok(
+            //if let Ok((addr, sig)) = coord.recv_sig() {
+            //return Ok(sig.into_inner());
+            //}
+        } else {
+            Err(outcome::error::Error::Other("no coord".to_string()))
+        }
     }
 
     fn sig_send_central(&mut self, signal: Signal) -> outcome::Result<()> {
-        self.coord
-            .as_mut()
-            .unwrap()
-            .send_sig(sig::Signal::from(signal), None)
-            .unwrap();
+        self.coord.as_mut().unwrap().send_sig(signal, None).unwrap();
         Ok(())
     }
 

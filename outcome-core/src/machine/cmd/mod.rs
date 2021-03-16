@@ -400,17 +400,21 @@ impl CentralRemoteCommand {
             _ => return Ok(()),
         }
     }
-    pub fn execute_distr<N: CentralCommunication>(
+    pub fn execute_distr(
         &self,
         mut central: &mut SimCentral,
-        net: &mut N,
         ent_uid: &EntityId,
         comp_name: &CompName,
     ) -> Result<()> {
         match self {
             CentralRemoteCommand::Spawn(cmd) => cmd.execute_ext_distr(central).unwrap(),
             CentralRemoteCommand::RegisterEntityPrefab(cmd) => cmd.execute_ext_distr(central)?,
-            _ => println!("unimplemented: {:?}", self),
+            CentralRemoteCommand::RegisterComponent(cmd) => cmd.execute_ext_distr(central)?,
+            CentralRemoteCommand::RegisterVar(cmd) => cmd.execute_ext_distr(central)?,
+            CentralRemoteCommand::RegisterTrigger(cmd) => cmd.execute_ext_distr(central)?,
+            CentralRemoteCommand::State(cmd) => cmd.execute_ext_distr(central)?,
+            CentralRemoteCommand::Component(cmd) => cmd.execute_ext_distr(central)?,
+            _ => error!("unimplemented: {:?}", self),
         }
         Ok(())
     }

@@ -109,7 +109,7 @@ impl Payload for IntroduceCoordRequest {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct IntroduceCoordResponse {
     //    pub clients: Vec<String>,
-    pub laminar_socket: String,
+    pub conn_socket: String,
     pub error: String,
 }
 

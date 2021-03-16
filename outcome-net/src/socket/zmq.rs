@@ -9,13 +9,14 @@ use zmq::SocketType;
 use crate::error::{Error, Result};
 use crate::msg::{prefix_with_msg_code, Message, MessageType, Payload};
 use crate::sig::Signal;
-use crate::socket::{Encoding, SocketConfig, SocketEvent};
-use crate::util;
+use crate::socket::{Encoding, Socket, SocketConfig, SocketEvent};
 use crate::util::tcp_endpoint;
+use crate::{msg, util};
+use std::convert::TryFrom;
 
 /// Opinionated wrapper over a ZeroMQ socket.
 pub struct ZmqSocket {
-    config: SocketConfig,
+    pub config: SocketConfig,
 
     endpoint_addr: Option<std::net::SocketAddr>,
     ctx: zmq::Context,
@@ -36,11 +37,18 @@ impl ZmqSocket {
 
     pub fn bind_with_config(addr: &str, config: SocketConfig) -> Result<Self> {
         let context = zmq::Context::new();
-        let socket = context.socket(zmq::SocketType::PAIR).unwrap();
+        let socket_type = match config.type_ {
+            super::SocketType::Req => SocketType::REQ,
+            super::SocketType::Rep => SocketType::REP,
+            super::SocketType::Pair => SocketType::PAIR,
+            _ => unimplemented!(),
+        };
+        let socket = context.socket(socket_type).unwrap();
         socket.bind(&util::tcp_endpoint(addr))?;
+        // socket.bind(addr)?;
         Ok(Self {
             config,
-            endpoint_addr: None,
+            endpoint_addr: Some(SocketAddr::from_str(addr).unwrap()),
             ctx: context,
             inner: socket,
             event_backlog: VecDeque::new(),
@@ -52,14 +60,8 @@ impl ZmqSocket {
     }
 
     pub fn last_endpoint(&self) -> Result<SocketAddr> {
-        let endpoint = self
-            .inner
-            .get_last_endpoint()
-            .unwrap()
-            .unwrap()
-            .parse()
-            .unwrap();
-        Ok(endpoint)
+        self.endpoint_addr
+            .ok_or(Error::Other("socket not bound to address".to_string()))
     }
 
     pub fn connect(&mut self, addr: &str) -> Result<()> {
@@ -80,15 +82,22 @@ impl ZmqSocket {
     pub fn recv(&self) -> Result<(SocketAddr, SocketEvent)> {
         // Waits until a socket event occurs
         let bytes = self.inner.recv_bytes(0).unwrap();
-        let msg = Message::from_bytes(bytes)?;
-        Ok((self.endpoint_addr.unwrap(), self.match_event(msg)?))
+        let msg: Message = msg::unpack(&bytes, &self.config.encoding)?;
+        let event = self.match_event(msg)?;
+        Ok((
+            self.endpoint_addr
+                .unwrap_or(SocketAddr::from_str("127.0.0.1:5151").unwrap()),
+            event,
+        ))
     }
 
     pub fn recv_msg(&mut self) -> Result<(SocketAddr, Message)> {
         loop {
             let (addr, event) = self.recv()?;
             let msg = match event {
-                SocketEvent::Bytes(bytes) => return Ok((addr, Message::from_bytes(bytes)?)),
+                SocketEvent::Bytes(bytes) => {
+                    return Ok((addr, msg::unpack(&bytes, &self.config.encoding)?))
+                }
                 SocketEvent::Message(msg) => return Ok((addr, msg)),
                 _ => {
                     self.event_backlog.push_back((addr, event));
@@ -119,27 +128,52 @@ impl ZmqSocket {
     pub fn try_recv(&self) -> Result<(SocketAddr, SocketEvent)> {
         let events = self.inner.get_events().unwrap();
         let poll = self.inner.poll(
-            zmq::PollEvents::POLLIN,
+            events,
+            // zmq::PollEvents::POLLIN,
             self.config
                 .try_timeout
                 .unwrap_or(Duration::from_millis(0))
                 .as_millis() as i64,
         )?;
+        if !events.contains(zmq::POLLIN) {
+            return Err(Error::WouldBlock);
+        }
         let bytes = match poll {
             0 => return Err(Error::WouldBlock),
             _ => self.inner.recv_bytes(0)?,
         };
-        let msg = Message::from_bytes(bytes)?;
-        Ok((self.endpoint_addr.unwrap(), self.match_event(msg)?))
+        // let msg = Message::from_bytes(bytes)?;
+        let msg: Message = msg::unpack(&bytes, &self.config.encoding)?;
+        let event = self.match_event(msg)?;
+
+        Ok((self.endpoint_addr.unwrap(), event))
     }
 
-    pub fn send(&mut self, bytes: Vec<u8>) -> Result<()> {
+    pub fn try_recv_msg(&mut self) -> Result<(SocketAddr, Message)> {
+        loop {
+            match self.try_recv() {
+                Ok((addr, socket_event)) => match socket_event {
+                    SocketEvent::Bytes(bytes) => {
+                        return Ok((addr, msg::unpack(&bytes, &self.config.encoding)?))
+                    }
+                    SocketEvent::Message(msg) => return Ok((addr, msg)),
+                    _ => {
+                        self.event_backlog.push_back((addr, socket_event));
+                        continue;
+                    }
+                },
+                Err(_) => return Err(crate::Error::WouldBlock),
+            };
+        }
+    }
+
+    pub fn send(&self, bytes: Vec<u8>) -> Result<()> {
         self.inner.send(bytes, 0)?;
         Ok(())
     }
 
     fn match_event(&self, msg: Message) -> Result<SocketEvent> {
-        let event = match msg.type_ {
+        let event = match MessageType::try_from(msg.type_)? {
             MessageType::Heartbeat => SocketEvent::Heartbeat,
             MessageType::Disconnect => SocketEvent::Disconnect,
             MessageType::Connect => SocketEvent::Connect,

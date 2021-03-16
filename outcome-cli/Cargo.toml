@@ -20,6 +20,7 @@ complete = ["outcome-core/machine_complete", "outcome-core/load_img", "psutils",
 
 nng = ["outcome-net/nng_transport"]
 zmq = ["outcome-net/zmq_transport"]
+msgpack = ["outcome-net/msgpack_encoding"]
 
 grids = ["outcome-core/grids", "outcome-net/grids"]
 

@@ -24,6 +24,8 @@ impl From<io::Error> for Error {
 pub enum Error {
     #[error("would block")]
     WouldBlock,
+    #[error("would block")]
+    NetworkError(String),
 
     // IoError(#[from] io::Error),
     #[error("io error: {0}")]

@@ -74,23 +74,28 @@ pub enum Signal {
     /// Central-external command to be executed on central
     #[cfg(feature = "machine")]
     ExecuteCentralExtCmd((ExecutionContext, CentralRemoteCommand)),
+    #[cfg(feature = "machine")]
+    ExecuteCentralExtCmds(Vec<(ExecutionContext, CentralRemoteCommand)>),
 }
 
 /// Trait representing central coordinator's ability to send and receive
 /// data over the network.
 pub trait CentralCommunication {
-    /// Reads a single incoming signal.
-    fn sig_read(&mut self) -> Result<(u32, Signal)>;
+    /// Gets ids of all the currently connected nodes.
+    fn get_node_ids(&self) -> Result<Vec<u32>>;
+
+    /// Tries to read a single incoming signal from any node.
+    fn try_recv_sig(&mut self) -> Result<(u32, Signal)>;
     /// Reads incoming signal from a specific node.
-    fn sig_read_from(&mut self, node_id: u32) -> Result<Signal>;
+    fn try_recv_sig_from(&mut self, node_id: u32) -> Result<Signal>;
 
-    /// Sends a signal to node.
-    fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
-    /// Sends a signal to node where the specified entity lives.
-    fn sig_send_to_entity(&mut self, entity_uid: EntityId) -> Result<()>;
+    /// Sends a signal to specified node.
+    fn send_sig_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
+    /// Sends a signal to node where the specified entity is currently stored.
+    fn send_sig_to_entity(&mut self, entity_uid: EntityId, signal: Signal) -> Result<()>;
 
-    /// Sends a signal to all the nodes.
-    fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;
+    /// Sends a signal to all nodes.
+    fn broadcast_sig(&mut self, signal: Signal) -> Result<()>;
 }
 
 /// Trait representing node's ability to send and receive data over the

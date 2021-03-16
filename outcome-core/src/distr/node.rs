@@ -80,6 +80,8 @@ impl SimNode {
             None => Entity::empty(),
         };
 
+        warn!("{:?}", entity);
+
         self.entities.insert(uid, entity);
 
         if let Some(t) = target_id {
@@ -222,27 +224,57 @@ impl SimNode {
         //     });
         // println!("sim_node finished read ext cmd responses");
 
-        let mut cexts = central_ext_cmds.lock().unwrap();
-        for cext in cexts.iter() {
-            // println!("sending cext cmd: {:?}", cext);
-            network.sig_send_central(Signal::ExecuteCentralExtCmd(cext.clone()));
+        let mut cexts = central_ext_cmds.lock().unwrap().clone();
+        cexts.reverse();
+        let mut counter = 0;
+        let mut cexts_part = Vec::new();
+        loop {
+            if let Some(cmd) = cexts.pop() {
+                counter += 1;
+                cexts_part.push(cmd);
+            } else {
+                if !cexts_part.is_empty() {
+                    network.sig_send_central(Signal::ExecuteCentralExtCmds(cexts_part.clone()));
+                }
+                break;
+            }
+
+            if counter >= 1000 {
+                counter = 0;
+                network.sig_send_central(Signal::ExecuteCentralExtCmds(cexts_part.clone()));
+                cexts_part.clear();
+            }
         }
+        // for cext in cexts {
+        //     // println!("sending cext cmd: {:?}", cext);
+        //     network.sig_send_central(Signal::ExecuteCentralExtCmd(cext));
+        // }
+        // network.sig_send_central(Signal::ExecuteCentralExtCmds(cexts));
         network.sig_send_central(Signal::EndOfMessages);
         loop {
+            // std::thread::sleep(std::time::Duration::from_millis(8));
             match network.sig_read_central()? {
                 Signal::SpawnEntities(e) => {
+                    warn!("signal: spawn entities: {:?}", e);
                     for (a, b, c) in e {
                         self.add_entity(a, b, c)?;
                     }
+                    info!("spawn entities finished");
                 }
                 // TODO currently rewrites the whole model with the received data
                 Signal::UpdateModel(model) => {
+                    info!("signal: update model");
                     self.model = model;
+                    info!("update model finished");
                 }
-                Signal::EndOfMessages => break,
+                Signal::EndOfMessages => {
+                    info!("signal: end of messages, breaking loop");
+                    break;
+                }
                 _ => (),
             }
         }
+        info!("sending signal process step finished");
         network.sig_send_central(Signal::ProcessStepFinished);
         trace!("sim_node finished send central ext cmd requests");
 

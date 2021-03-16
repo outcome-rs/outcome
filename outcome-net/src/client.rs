@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use crate::msg::{
     DataTransferRequest, DataTransferResponse, Heartbeat, Message, PingRequest,
-    RegisterClientRequest, RegisterClientResponse, StatusRequest, StatusResponse,
-    TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
+    RegisterClientRequest, RegisterClientResponse, ScheduledDataTransferRequest, StatusRequest,
+    StatusResponse, TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
 };
 use crate::socket::{Encoding, Socket, SocketConfig, SocketType, Transport};
 use crate::{error::Error, Result};
@@ -220,5 +220,16 @@ impl Client {
             .unpack_payload(self.connection.encoding())?;
 
         Ok(resp.data)
+    }
+
+    pub fn reg_scheduled_transfer(&mut self) -> Result<()> {
+        self.connection.pack_send_msg_payload(
+            ScheduledDataTransferRequest {
+                event_triggers: vec!["step".to_string()],
+                transfer_type: "SelectVarOrdered".to_string(),
+                selection: vec!["*:position:float:x".to_string()],
+            },
+            None,
+        )
     }
 }

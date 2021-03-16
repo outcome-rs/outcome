@@ -54,7 +54,7 @@ impl RegisterVar {
             }
             2 => {
                 if args[1] != "=" {
-                    let val = Var::from_str(&args[1], None)?;
+                    let val = Var::from_str(&args[1], Some(addr.var_type))?;
                     return Ok(RegisterVar {
                         comp: CompName::new(),
                         addr,
@@ -64,8 +64,8 @@ impl RegisterVar {
             }
             3 => {
                 let val = match args[1].as_str() {
-                    "=" => Var::from_str(&args[2], None)?,
-                    _ => Var::from_str(&args[1], None)?,
+                    "=" => Var::from_str(&args[2], Some(addr.var_type))?,
+                    _ => Var::from_str(&args[1], Some(addr.var_type))?,
                 };
                 return Ok(RegisterVar {
                     comp: CompName::new(),
@@ -106,6 +106,22 @@ impl RegisterVar {
         debug!("registering var: {:?}", self);
 
         sim.model
+            .get_component_mut(&self.comp)
+            .unwrap()
+            .vars
+            .push(crate::model::VarModel {
+                id: self.addr.var_id,
+                type_: self.addr.var_type,
+                default: self.val.clone(),
+            });
+        Ok(())
+    }
+
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+        debug!("registering var: {:?}", self);
+
+        central
+            .model
             .get_component_mut(&self.comp)
             .unwrap()
             .vars
@@ -338,6 +354,20 @@ impl RegisterComponent {
 
         Ok(())
     }
+
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+        let component = ComponentModel {
+            name: self.name.into(),
+            triggers: self.trigger_events.clone(),
+            ..ComponentModel::default()
+        };
+        trace!(
+            "execute_ext_distr: registering component: {:?}",
+            component.name
+        );
+        central.model.components.push(component);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -388,12 +418,7 @@ impl RegisterTrigger {
         Ok(())
     }
 
-    pub fn execute_ext_distr(
-        &self,
-        central: &mut SimCentral,
-        ent_name: &crate::EntityName,
-        comp_name: &crate::CompName,
-    ) -> Result<()> {
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
         debug!("registering trigger: {:?}", self);
 
         central

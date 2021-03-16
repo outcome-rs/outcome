@@ -22,6 +22,7 @@ use crate::{error::Error, Result};
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, TryFromPrimitive, Deserialize, Serialize)]
 pub enum MessageType {
+    Bytes,
     Heartbeat,
     Disconnect,
     Connect,
@@ -48,8 +49,13 @@ pub enum MessageType {
 
     DataTransferRequest,
     DataTransferResponse,
+    TypedDataTransferRequest,
+    TypedDataTransferResponse,
+
     DataPullRequest,
     DataPullResponse,
+    TypedDataPullRequest,
+    TypedDataPullResponse,
 
     ScheduledDataTransferRequest,
     ScheduledDataTransferResponse,
@@ -65,7 +71,7 @@ pub enum MessageType {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Message {
     /// Describes what is stored within the payload
-    pub type_: MessageType,
+    pub type_: u8,
     /// Byte representation of the target message
     pub payload: Vec<u8>,
 }
@@ -76,10 +82,27 @@ where
     P: Serialize,
     P: Payload,
 {
-    let type_ = payload.type_();
-    let payload_bytes = pack_payload(payload, encoding)?;
-    let msg_bytes = prefix_with_msg_code(payload_bytes, type_);
-    Ok(msg_bytes)
+    match encoding {
+        Encoding::Bincode => {
+            let type_ = payload.type_();
+            let payload_bytes = pack_payload(payload, encoding)?;
+            let msg_bytes = prefix_with_msg_code(payload_bytes, type_);
+            Ok(msg_bytes)
+        }
+        #[cfg(feature = "msgpack_encoding")]
+        Encoding::MsgPack => {
+            let type_ = payload.type_();
+            let payload_bytes = pack_payload(payload, encoding)?;
+            let msg = Message {
+                type_: type_ as u8,
+                payload: payload_bytes,
+            };
+            let msg_bytes = pack(msg, encoding)?;
+            // let msg_bytes = prefix_with_msg_code(payload_bytes, type_);
+            Ok(msg_bytes)
+        }
+        _ => unimplemented!(),
+    }
 }
 
 impl Message {
@@ -93,7 +116,7 @@ impl Message {
         let msg_type = payload.type_();
         let bytes = pack_payload(payload, encoding)?;
         Ok(Message {
-            type_: msg_type,
+            type_: msg_type as u8,
             payload: bytes,
         })
     }
@@ -102,16 +125,17 @@ impl Message {
     pub fn from_bytes(mut bytes: Vec<u8>) -> Result<Message> {
         let type_ = bytes.remove(0);
         let msg: Message = Message {
-            type_: MessageType::try_from(type_)?,
+            type_: MessageType::try_from(type_)? as u8,
             payload: bytes,
         };
         Ok(msg)
     }
 
     /// Serializes into bytes.
-    pub fn to_bytes(self) -> Result<Vec<u8>> {
-        let bytes = prefix_with_msg_code(self.payload, self.type_);
-        Ok(bytes)
+    pub fn to_bytes(mut self) -> Result<Vec<u8>> {
+        // let bytes = prefix_with_msg_code(self.payload, self.type_);
+        self.payload.insert(0, self.type_ as u8);
+        Ok(self.payload)
     }
 
     /// Unpacks message payload into a payload struct of provided type.
@@ -161,6 +185,7 @@ pub fn unpack<'de, P: Deserialize<'de>>(bytes: &'de [u8], encoding: &Encoding) -
         Encoding::Bincode => bincode::deserialize(bytes)?,
         #[cfg(feature = "msgpack_encoding")]
         Encoding::MsgPack => {
+            // println!("{:?}", bytes);
             let mut de = rmp_serde::Deserializer::new(bytes);
             Deserialize::deserialize(&mut de)?
         }

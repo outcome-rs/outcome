@@ -8,13 +8,16 @@ use std::time::Duration;
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::error::{Error, Result};
-use crate::msg::{Message, MessageType};
+use crate::msg::{unpack, Message, MessageType};
 use crate::socket::{Encoding, SocketConfig, SocketEvent};
+use crate::{
+    error::{Error, Result},
+    sig::Signal,
+};
 
 /// Custom Tcp socket.
 pub struct TcpSocket {
-    config: SocketConfig,
+    pub config: SocketConfig,
     address: Option<SocketAddr>,
 
     connections: Vec<SocketAddr>,
@@ -33,8 +36,8 @@ impl TcpSocket {
     }
 
     pub fn bind_with_config(addr: &str, config: SocketConfig) -> Result<Self> {
-        let address = addr.parse().unwrap();
-        let mut listener = TcpListener::bind(address)?;
+        let input_addr: SocketAddr = addr.parse().unwrap();
+        let mut listener = TcpListener::bind(input_addr)?;
         listener
             .set_nonblocking(true)
             .expect("Cannot set non-blocking");
@@ -46,6 +49,8 @@ impl TcpSocket {
         //let receiver = channel::unbounder();
         let (out_sender, out_receiver) = channel();
         let (in_sender, in_receiver) = channel();
+
+        let addr = listener.local_addr().unwrap();
 
         let mut handler = ConnectionHandler {
             listener,
@@ -67,7 +72,7 @@ impl TcpSocket {
 
         Ok(Self {
             config,
-            address: Some(address),
+            address: Some(addr),
             connections: Vec::new(),
             poll_handle: Some(poll_handle),
             in_receiver,
@@ -123,8 +128,15 @@ impl TcpSocket {
 
     /// Waits for the next socket event, blocking until one is available.
     pub fn recv(&mut self) -> Result<(SocketAddr, SocketEvent)> {
-        let (addr, event) = self.in_receiver.recv().unwrap();
+        let (addr, event) = self
+            .in_receiver
+            .recv()
+            .map_err(|e| Error::Other(e.to_string()))?;
         self.handle_internally(&addr, &event);
+        match event {
+            SocketEvent::Disconnect => return Err(Error::HostUnreachable),
+            _ => (),
+        }
         Ok((addr, event))
     }
 
@@ -137,7 +149,22 @@ impl TcpSocket {
             let (addr, event) = self.recv()?;
             let msg = match event {
                 SocketEvent::Bytes(bytes) => return Ok((addr, Message::from_bytes(bytes)?)),
-                SocketEvent::Message(msg) => return Ok((addr, msg)),
+                // SocketEvent::Message(msg) => return Ok((addr, msg)),
+                _ => {
+                    self.event_backlog.push_back((addr, event));
+                    continue;
+                }
+            };
+        }
+    }
+
+    pub fn recv_sig(&mut self) -> Result<(SocketAddr, Signal)> {
+        loop {
+            let (addr, event) = self.recv()?;
+            let msg = match event {
+                SocketEvent::Bytes(bytes) => {
+                    return Ok((addr, Signal::from_bytes(&bytes, self.encoding())?))
+                }
                 _ => {
                     self.event_backlog.push_back((addr, event));
                     continue;
@@ -157,13 +184,62 @@ impl TcpSocket {
         Ok((addr, event))
     }
 
-    pub fn send(&mut self, bytes: Vec<u8>, addr: Option<SocketAddr>) -> Result<()> {
+    pub fn try_recv_msg(&mut self) -> Result<(SocketAddr, Message)> {
+        loop {
+            match self.try_recv() {
+                Ok((addr, socket_event)) => match socket_event {
+                    SocketEvent::Bytes(bytes) => return Ok((addr, Message::from_bytes(bytes)?)),
+                    // SocketEvent::Bytes(bytes) => {
+                    //     return Ok((addr, unpack(&bytes, self.encoding())?))
+                    // }
+                    _ => {
+                        self.event_backlog.push_back((addr, socket_event));
+                        continue;
+                    }
+                },
+                Err(_) => return Err(crate::Error::WouldBlock),
+            };
+        }
+    }
+
+    pub fn try_recv_sig(&mut self) -> Result<(SocketAddr, crate::sig::Signal)> {
+        loop {
+            // println!("try recv loop");
+            match self.try_recv() {
+                Ok((addr, event)) => match event {
+                    SocketEvent::Bytes(bytes) => {
+                        return Ok((
+                            addr,
+                            crate::sig::Signal::from_bytes(&bytes, &Encoding::Bincode)?,
+                        ))
+                    }
+                    _ => {
+                        trace!("expected bytes, got: {:?}", event);
+                        self.event_backlog.push_back((addr, event));
+                        continue;
+                    }
+                },
+                Err(_) => return Err(crate::Error::WouldBlock),
+            };
+        }
+        //let (addr, event) = match self.try_recv()? {
+        //=> return Ok((addr, Message::from_bytes(bytes)?)),
+        //_ => {
+        //self.event_backlog.push_back((addr, event));
+        //continue;
+        //}
+        //};
+        //self.handle_internally(&addr, &event);
+        //Ok((addr, event))
+    }
+
+    pub fn send(&self, bytes: Vec<u8>, addr: Option<SocketAddr>) -> Result<()> {
         self.out_sender
             .send((
                 addr.unwrap_or(*self.connections.first().unwrap()),
                 SocketEvent::Bytes(bytes),
             ))
-            .unwrap();
+            .map_err(|e| Error::Other(e.to_string()));
         Ok(())
     }
 
@@ -215,7 +291,11 @@ impl ConnectionHandler {
             let now = std::time::Instant::now();
             let delta_time = now - last_time;
             last_time = now;
-            self.manual_poll(delta_time);
+            //self.manual_poll(delta_time);
+            match self.manual_poll(delta_time) {
+                Ok(_) => (),
+                Err(e) => println!("manual_poll error: {:?}", e),
+            }
             match sleep_duration {
                 None => yield_now(),
                 Some(duration) => sleep(duration),
@@ -240,31 +320,47 @@ impl ConnectionHandler {
 
         // read incoming events
         for (addr, (stream, buffer)) in &mut self.connections {
-            let mut buf = [0; 1024];
-            let read_count = match stream.read(&mut buf) {
-                Ok(count) => count,
-                _ => 0,
-                // Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // continue;
-                // }
-                // Err(e) => {
-                // warn!("manual poll: io error: {}", e);
-                // continue;
-                // }
-            };
+            let mut data: Vec<u8> = Vec::new();
+            loop {
+                let mut buf = [0; 128000];
+                // let read_count = match stream.read(&mut buf) {
+                let read_count = match stream.read(&mut buf) {
+                    Ok(count) => count,
+                    _ => 0,
+                    // Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // continue;
+                    // }
+                    // Err(e) => {
+                    // warn!("manual poll: io error: {}", e);
+                    // continue;
+                    // }
+                };
 
-            //println!("read_count: {}", read_count);
-            if read_count > 0 {
-                buffer.extend(&buf[..read_count]);
+                //println!("read_count: {}", read_count);
+                if read_count > 0 {
+                    buffer.extend(&buf[..read_count]);
+                } else {
+                    break;
+                }
             }
 
             if buffer.len() > 4 {
                 let len = LittleEndian::read_u32(&buffer[0..=3]);
                 if buffer.len() >= len as usize + 4 {
-                    let event = Self::match_event(&buffer[4..len as usize + 4], addr)?;
-                    self.in_sender.send((*addr, event)).unwrap();
-                    //println!("{:?}", buffer);
-                    buffer.drain(..len as usize + 4);
+                    if let Ok(event) =
+                        bincode::deserialize::<SocketEvent>(&buffer[4..len as usize + 4])
+                    {
+                        // let event = Self::match_event(&buffer[4..len as usize + 4], addr)?;
+                        self.in_sender
+                            .send((*addr, event))
+                            .map_err(|e| Error::Other(e.to_string()))?;
+                        //println!("{:?}", buffer);
+                        // println!("buffer length: {}, starting drain...", len);
+                        buffer.drain(..len as usize + 4);
+                        // println!("finished drain");
+                    } else {
+                        continue;
+                    }
                 }
             }
         }
@@ -280,7 +376,9 @@ impl ConnectionHandler {
                         Ok(s) => s,
                         Err(e) => {
                             //warn!("{:?}", e);
-                            self.out_sender.send((address, event)).unwrap();
+                            self.out_sender
+                                .send((address, event))
+                                .map_err(|e| Error::Other(e.to_string()))?;
                             //self.out_buffer.push_back((address, event));
                             //return Ok(());
                             continue;
@@ -302,25 +400,26 @@ impl ConnectionHandler {
                 _ => (),
             }
 
-            let bytes = match event.clone() {
-                SocketEvent::Connect => Message {
-                    type_: MessageType::Connect,
-                    payload: Vec::new(),
-                }
-                .to_bytes()?,
-                SocketEvent::Disconnect => Message {
-                    type_: MessageType::Disconnect,
-                    payload: Vec::new(),
-                }
-                .to_bytes()?,
-                SocketEvent::Heartbeat => Message {
-                    type_: MessageType::Heartbeat,
-                    payload: Vec::new(),
-                }
-                .to_bytes()?,
-                SocketEvent::Bytes(b) => b,
-                _ => unimplemented!(),
-            };
+            // let bytes = match event.clone() {
+            //     SocketEvent::Connect => Message {
+            //         type_: MessageType::Connect,
+            //         payload: Vec::new(),
+            //     }
+            //     .to_bytes()?,
+            //     SocketEvent::Disconnect => Message {
+            //         type_: MessageType::Disconnect,
+            //         payload: Vec::new(),
+            //     }
+            //     .to_bytes()?,
+            //     SocketEvent::Heartbeat => Message {
+            //         type_: MessageType::Heartbeat,
+            //         payload: Vec::new(),
+            //     }
+            //     .to_bytes()?,
+            //     SocketEvent::Bytes(b) => b,
+            //     _ => unimplemented!(),
+            // };
+            let bytes = bincode::serialize(&event)?;
 
             let mut len_buf = [0; 4];
             LittleEndian::write_u32(&mut len_buf, bytes.len() as u32);
@@ -375,15 +474,21 @@ impl ConnectionHandler {
 
     fn match_event(bytes: &[u8], addr: &SocketAddr) -> Result<SocketEvent> {
         use num_enum::TryFromPrimitive;
-        let msg_kind: MessageType = MessageType::try_from(bytes.first().unwrap().clone()).unwrap();
-        let event = match msg_kind {
-            MessageType::Connect => SocketEvent::Connect,
-            MessageType::Disconnect => SocketEvent::Disconnect,
-            MessageType::Heartbeat => SocketEvent::Heartbeat,
-            //MessageKind::Timeout => SocketEvent::Timeout,
-            _ => SocketEvent::Message(Message::from_bytes(bytes.to_vec())?),
-        };
-        Ok(event)
+        if let Some(first) = bytes.first() {
+            // let msg_kind: MessageType = MessageType::try_from(first.clone())?;
+            // let prefix: SocketEventPrefix = SocketEventPrefix::try_from(first.clone())?;
+            // let event = match prefix {
+            //     SocketEventPrefix::Connect => SocketEvent::Connect,
+            //     SocketEventPrefix::Disconnect => SocketEvent::Disconnect,
+            //     SocketEventPrefix::Heartbeat => SocketEvent::Heartbeat,
+            //     SocketEventPrefix::Timeout => SocketEvent::Timeout,
+            //     SocketEventPrefix::Bytes => SocketEvent::Bytes(bytes.to_vec()),
+            // };
+            // Ok(event)
+            unimplemented!()
+        } else {
+            Err(Error::Other("match_event: no bytes in buffer".to_string()))
+        }
     }
 
     pub fn connections(&self) -> Vec<SocketAddr> {

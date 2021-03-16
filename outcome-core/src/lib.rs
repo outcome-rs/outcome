@@ -4,8 +4,9 @@
 //! encapsulates simulation state. [`Sim`] can be created from path to
 //! appropriate data such as scenario or snapshot. Once initialized it can be
 //! stepped through and serialized to file. Contents of both entities and the
-//! simulation model can be mutated at runtime. [`Sim`]s equivalent for
-//! distributed deployments is [`SimCentral`].
+//! simulation model can be mutated at runtime. [`Sim`]'s equivalent for
+//! distributed simulation is [`SimCentral`]. [`SimCentral`] provides a similar
+//! API to [`Sim`], while orchestrating multiple nodes "behind the scenes".
 //!
 //!
 //! # Networking
@@ -55,9 +56,9 @@
 //!
 //! For more information about the project see the
 //! [project website](https://theoutcomeproject.com). The
-//! [book](https://book.theoutcomeproject.com), currently a *work in progress*,
-//! aims to provide in-depth explanations for all the topics related to the
-//! project. It also includes tutorials and guides on how to use the software.
+//! [book](https://book.theoutcomeproject.com), aims to provide in-depth
+//! explanations for all the topics related to the project. It also includes
+//! tutorials and guides on how to use the provided software.
 //!
 //!
 //! [`Sim`]: sim/struct.Sim.html

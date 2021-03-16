@@ -31,7 +31,8 @@ impl Default for SocketConfig {
             type_: SocketType::Pair,
             encoding: Encoding::Bincode,
             try_timeout: None,
-            idle_timeout: Some(Duration::from_secs(5)),
+            //idle_timeout: Some(Duration::from_secs(5)),
+            idle_timeout: Some(Duration::from_secs(3)),
             heartbeat_interval: Some(Duration::from_secs(1)),
         }
     }
@@ -67,6 +68,28 @@ pub enum InnerSocket {
 }
 
 impl Socket {
+    pub fn transport(&self) -> Transport {
+        match &self.inner {
+            InnerSocket::SimpleTcp(socket) => Transport::Tcp,
+            #[cfg(feature = "laminar_transport")]
+            InnerSocket::Laminar(socket) => Transport::Laminar,
+            #[cfg(feature = "zmq_transport")]
+            InnerSocket::Zmq(socket) => Transport::Zmq,
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn config(&self) -> SocketConfig {
+        match &self.inner {
+            InnerSocket::SimpleTcp(socket) => socket.config,
+            #[cfg(feature = "laminar_transport")]
+            InnerSocket::Laminar(socket) => socket.config,
+            #[cfg(feature = "zmq_transport")]
+            InnerSocket::Zmq(socket) => socket.config,
+            _ => unimplemented!(),
+        }
+    }
+
     /// Creates and binds new socket to the given address using specific
     /// transport type.
     pub fn bind(addr: &str, transport: Transport) -> Result<Self> {
@@ -106,7 +129,7 @@ impl Socket {
 
     /// Like `bind_with_config` but uses localhost with a random port.
     pub fn bind_any_with_config(transport: Transport, config: SocketConfig) -> Result<Self> {
-        Self::bind_with_config("127.0.0.1:0", transport, config)
+        Self::bind_with_config("0.0.0.0:0", transport, config)
     }
 
     pub fn encoding(&self) -> &Encoding {
@@ -229,6 +252,7 @@ impl Socket {
             InnerSocket::Zmq(socket) => socket.recv_sig(),
             //#[cfg(feature = "messageio_socket")]
             //InnerSocket::Messageio(socket) => socket.recv(),
+            InnerSocket::SimpleTcp(sock) => sock.recv_sig(),
             _ => unimplemented!(),
         }
     }
@@ -249,38 +273,24 @@ impl Socket {
     /// Tries to receive the newest message from the socket without blocking.
     /// If no message is currently available returns an error.
     pub fn try_recv_msg(&mut self) -> Result<Message> {
-        let (addr, event) = self.try_recv()?;
-        let msg = match event {
-            SocketEvent::Bytes(bytes) => Message::from_bytes(bytes)?,
-            SocketEvent::Message(msg) => msg,
-            _ => {
-                return Err(crate::error::Error::Other(format!(
-                    "expected message, got event: {:?}",
-                    event
-                )))
-            }
+        let (addr, msg) = match &mut self.inner {
+            InnerSocket::SimpleTcp(ref mut socket) => socket.try_recv_msg()?,
+            #[cfg(feature = "laminar_transport")]
+            InnerSocket::Laminar(socket) => socket.try_recv_msg()?,
+            #[cfg(feature = "zmq_transport")]
+            InnerSocket::Zmq(socket) => socket.try_recv_msg()?,
+            _ => unimplemented!(),
         };
         Ok(msg)
     }
 
     pub fn try_recv_sig(&mut self) -> Result<(SocketAddr, Signal)> {
         match &mut self.inner {
-            //InnerSocket::SimpleTcp(ref mut socket) => socket.try_recv_sig(),
+            InnerSocket::SimpleTcp(socket) => socket.try_recv_sig(),
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => socket.try_recv_sig(),
             _ => unimplemented!(),
         }
-        //let (addr, event) = self.try_recv()?;
-        //let sig = match event {
-        //SocketEvent::Bytes(bytes) => Signal::from_bytes(&bytes, &self.config.encoding)?,
-        //_ => {
-        //return Err(crate::error::Error::Other(format!(
-        //"expected signal, got: {:?}",
-        //event
-        //)))
-        //}
-        //};
-        //Ok(sig)
     }
 
     /// Sends data over to a connected socket.
@@ -289,21 +299,25 @@ impl Socket {
     ///
     /// For socket types supporting multiple connections, the address of the
     /// target socket must be specified.
-    pub fn send(&mut self, bytes: Vec<u8>, addr: Option<SocketAddr>) -> Result<()> {
-        match &mut self.inner {
+    pub fn send(&self, bytes: Vec<u8>, addr: Option<SocketAddr>) -> Result<()> {
+        match &self.inner {
             InnerSocket::SimpleTcp(socket) => socket.send(bytes, addr),
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => socket.send(bytes),
             #[cfg(feature = "zmq_transport")]
             InnerSocket::Zmq(socket) => socket.send(bytes),
-            //#[cfg(feature = "messageio_socket")]
-            //InnerSocket::Messageio(socket) => socket.send(bytes),
             _ => unimplemented!(),
         }
     }
 
-    pub fn send_sig(&mut self, signal: Signal, addr: Option<SocketAddr>) -> Result<()> {
-        let bytes = signal.to_bytes(self.encoding())?;
+    pub fn send_sig(
+        &mut self,
+        signal: outcome::distr::Signal,
+        addr: Option<SocketAddr>,
+    ) -> Result<()> {
+        let sig = Signal::from(signal);
+        let bytes = sig.to_bytes(self.encoding())?;
+        trace!("sending {} byte signal", bytes.len());
         self.send(bytes, addr)
     }
 
@@ -321,7 +335,7 @@ impl Socket {
     // fn send_msg(&self, msg: Message) -> Result<()>;
 
     pub fn pack_send_msg_payload<P: Payload + Serialize>(
-        &mut self,
+        &self,
         payload: P,
         addr: Option<SocketAddr>,
     ) -> Result<()> {
@@ -331,11 +345,11 @@ impl Socket {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum SocketEvent {
     Bytes(Vec<u8>),
-    /// Depending on the transport, incoming bytes might get converted into
-    /// message structs.
+    /// Depending on the transport, incoming event might be in a `Message`
+    /// form.
     Message(Message),
     Heartbeat,
     Connect,
@@ -355,7 +369,7 @@ pub enum SocketType {
 
 // TODO websockets
 /// List of possible network transports.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Transport {
     /// Basic TCP transport built with rust's standard library
     Tcp,
@@ -384,7 +398,7 @@ impl Transport {
 }
 
 /// List of possible formats for encoding data sent over the network.
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Encoding {
     /// Fast binary format, useful for communicating directly between Rust apps
     Bincode,

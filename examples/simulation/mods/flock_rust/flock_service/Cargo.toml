@@ -8,5 +8,5 @@ edition = "2018"
 
 [dependencies]
 outcome-core = { path = "../../../../../outcome-core", features = ["machine_sandbox"] }
-outcome-net = { path = "../../../../../outcome-net", features = ["laminar_transport", "zmq_transport"] }
+outcome-net = { path = "../../../../../outcome-net", features = ["laminar_transport"] }
 anyhow = "1.0.38"
