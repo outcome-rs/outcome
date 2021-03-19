@@ -75,8 +75,10 @@ impl Sim {
     pub fn to_snapshot(&self, compress: bool) -> Result<Vec<u8>> {
         let mut data: Vec<u8> = bincode::serialize(&self).unwrap();
         #[cfg(feature = "lz4")]
-        if compress {
-            data = lz4::block::compress(&data, None, true)?;
+        {
+            if compress {
+                data = lz4::block::compress(&data, None, true)?;
+            }
         }
         Ok(data)
     }

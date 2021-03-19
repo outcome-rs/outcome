@@ -91,7 +91,7 @@ impl Coord {
             central,
             net,
             address: addr.to_string(),
-            id_pool: IdPool::new_ranged(0..u32::MAX),
+            id_pool: IdPool::new_ranged(0..u32::max_value()),
             // routing_table: Default::default(),
         };
         for worker_addr in &worker_addrs {

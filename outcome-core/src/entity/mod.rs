@@ -220,12 +220,14 @@ impl Entity {
         // let comp_uid = (IndexString::from(comp_name).unwrap(),);
 
         #[cfg(feature = "machine")]
-        if !self.comp_state.contains_key(&component) {
-            for trigger in &comp_model.triggers {
-                //                println!("trigger: {}", trigger);
-                let t = StringId::from(trigger).unwrap();
-                #[cfg(feature = "machine")]
-                self.comp_queue.get_mut(&t).unwrap().push(component);
+        {
+            if !self.comp_state.contains_key(&component) {
+                for trigger in &comp_model.triggers {
+                    //                println!("trigger: {}", trigger);
+                    let t = StringId::from(trigger).unwrap();
+                    #[cfg(feature = "machine")]
+                    self.comp_queue.get_mut(&t).unwrap().push(component);
+                }
             }
         }
 
