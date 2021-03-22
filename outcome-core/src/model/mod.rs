@@ -84,6 +84,12 @@ impl SimModel {
             id: ShortString::from(crate::DEFAULT_TRIGGER_EVENT).unwrap(),
         });
 
+        let mut mod_init_prefab = EntityPrefab {
+            name: StringId::from("_mod_init").unwrap(),
+            // name: StringId::from(&format!("_mod_init_{}", module.manifest.name)).unwrap(),
+            ..EntityPrefab::default()
+        };
+
         // iterate over scenario modules
         for module in &scenario.modules {
             // load from structured data
@@ -109,11 +115,6 @@ impl SimModel {
             // load from scripts
             #[cfg(feature = "machine_script")]
             {
-                let mut mod_init_prefab = EntityPrefab {
-                    name: StringId::from("_mod_init").unwrap(),
-                    ..EntityPrefab::default()
-                };
-
                 model.events.push(EventModel {
                     id: ShortString::from("_scr_init").unwrap(),
                 });
@@ -217,10 +218,9 @@ impl SimModel {
                     .insert(StringId::from("main").unwrap(), (0, commands.len()));
                 mod_init_prefab.components.push(comp_model.name);
                 model.components.push(comp_model);
-
-                model.entities.push(mod_init_prefab);
             }
         }
+        model.entities.push(mod_init_prefab);
 
         Ok(model)
     }
