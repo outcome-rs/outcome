@@ -159,7 +159,10 @@ const SCENARIO_MANIFEST_FILE: &str = "scenario.toml";
 const MODULE_MANIFEST_FILE: &str = "mod.toml";
 
 /// Name of the module directory within the scenario file tree.
-const SCENARIO_MODS_DIR_NAME: &str = "mods";
+const SCENARIOS_DIR_NAME: &str = "scenarios";
+
+/// Name of the module directory within the scenario file tree.
+const MODULES_DIR_NAME: &str = "mods";
 /// Module entry file name, not including the file extension.
 const MODULE_ENTRY_FILE_NAME: &str = "mod";
 

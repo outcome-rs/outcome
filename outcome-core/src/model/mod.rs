@@ -21,8 +21,8 @@ use crate::util;
 use crate::{arraystring, MedString, ShortString, StringId};
 use crate::{CompName, EntityName, EventName, Result, Var, VarName, VarType};
 use crate::{
-    MODULE_ENTRY_FILE_NAME, MODULE_MANIFEST_FILE, SCENARIO_MANIFEST_FILE, SCENARIO_MODS_DIR_NAME,
-    VERSION,
+    MODULES_DIR_NAME, MODULE_ENTRY_FILE_NAME, MODULE_MANIFEST_FILE, SCENARIOS_DIR_NAME,
+    SCENARIO_MANIFEST_FILE, VERSION,
 };
 
 #[cfg(feature = "machine_script")]
@@ -153,7 +153,7 @@ impl SimModel {
 
                 // create path to entry script
                 let mod_entry_file_path = PathBuf::new()
-                    .join(crate::SCENARIO_MODS_DIR_NAME)
+                    .join(crate::MODULES_DIR_NAME)
                     .join(&module.manifest.name)
                     .join(format!(
                         "{}{}",
@@ -415,29 +415,52 @@ pub struct Scenario {
 impl Scenario {
     /// Create a scenario model from a path reference to scenario manifest.
     pub fn from_path(path: PathBuf) -> Result<Scenario> {
-        let dir_path = path.parent().unwrap();
-        println!("scenario dir_path: {:?}", dir_path);
+        // resolve project root path
+        let mut dir_path = path.parent().ok_or(Error::Other(format!(
+            "unable to get parent of path: {}",
+            path.to_string_lossy()
+        )))?;
+        let stem = dir_path.file_stem().ok_or(Error::Other(format!(
+            "unable to get stem of path: {}",
+            path.to_string_lossy()
+        )))?;
+        if dir_path.is_dir() && stem == SCENARIOS_DIR_NAME {
+            dir_path = dir_path.parent().ok_or(Error::Other(format!(
+                "unable to get parent of path: {}",
+                path.to_string_lossy()
+            )))?;
+        } else {
+            warn!(
+                "scenarios are expected to be kept inside a dedicated \"{}\" directory",
+                SCENARIOS_DIR_NAME
+            )
+        }
+        info!("project root directory: {:?}", dir_path);
+
         // get the scenario manifest
         let scenario_manifest = ScenarioManifest::from_path(path.clone())?;
 
         // if the version requirement for the engine specified in
-        // the scenario manifest is not met throw a warning
+        // the scenario manifest is not met return an error
         if !VersionReq::from_str(&scenario_manifest.engine)?.matches(&Version::from_str(VERSION)?) {
-            error!("`outcome` version used by this program does not meet the version requirement \
-            specified in scenario manifest (\"engine\" entry), \
-            this is unacceptable (version of `outcome` used is: \"{}\", version requirement: \"{}\")",
-                  VERSION, &scenario_manifest.engine);
-            return Err(Error::Other("".to_string()));
+            error!(
+                "engine version does not meet the requirement specified in scenario manifest, \
+                current engine version: \"{}\", version requirement: \"{}\"",
+                VERSION, &scenario_manifest.engine
+            );
+            return Err(Error::Other(
+                "engine version does not match module requirement".to_string(),
+            ));
         }
         // get the map of mods to load from the manifest (only mods
         // listed there will be loaded)
-        let mods_to_load = scenario_manifest.mods.clone();
+        let mods_to_load = &scenario_manifest.mods;
         info!(
             "there are {} mods listed in the scenario manifest",
             &mods_to_load.len()
         );
         // get the path to scenario mods directory
-        let scenario_mods_path = dir_path.join(SCENARIO_MODS_DIR_NAME);
+        let scenario_mods_path = dir_path.join(MODULES_DIR_NAME);
         // found matching mods will be added to this vec
         let mut matching_mods: Vec<Module> = Vec::new();
         // this vec is for storing mod_not_found messages to print
@@ -449,9 +472,9 @@ impl Scenario {
         let mut all_mods_found = true;
         // try to find all the mods specified in the scenario
         // manifest
-        for mod_to_load in mods_to_load.to_owned() {
-            let mod_to_load_name = mod_to_load.name;
-            let mod_version_req = mod_to_load.version_req;
+        for mod_to_load in mods_to_load {
+            let mod_to_load_name = mod_to_load.name.clone();
+            let mod_version_req = mod_to_load.version_req.clone();
             let mut found_mod_match = false;
             // only the top directories within the mods directory are
             // considered
