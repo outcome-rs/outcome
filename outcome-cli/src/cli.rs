@@ -230,6 +230,13 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
                 .value_name("seconds")
                 .help("Server process will quit if it doesn't receive any messages within \
                 the specified time frame (seconds)"))
+            .arg(Arg::with_name("client-keep-alive")
+                .display_order(4)
+                .long("client-keep-alive")
+                .takes_value(true)
+                .value_name("seconds")
+                .help("Server process will remove client if it doesn't receive any messages \
+                 from that client the specified time frame (seconds)"))
             .arg(Arg::with_name("no-delay")
                 .display_order(5)
                 .long("no-delay")
@@ -607,7 +614,13 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         poll_wait: Duration::from_millis(1),
         accept_delay: Duration::from_millis(100),
 
-        client_keepalive: Some(Duration::from_secs(2)),
+        client_keepalive: match matches.value_of("client-keep-alive")
+            .map(|v| v.parse().unwrap()) {
+            None => Some(Duration::from_secs(2)),
+            Some(0) => None,
+            Some(v) => Some(Duration::from_secs(v)),
+        },
+
 
         use_auth,
         auth_pairs: vec![],
