@@ -15,13 +15,12 @@ use outcome::{Sim, SimModel};
 
 //TODO rewrite this func
 pub fn scenario(path: PathBuf, mem: bool, proc: bool) {
-    println!("Starting test...");
-    println!("Creating simulation instance from scenario...");
+    info!(
+        "starting test using scenario at path: {}",
+        path.to_string_lossy()
+    );
     let sim = Sim::from_scenario_at_path(path).unwrap();
     test_sim_struct(&sim);
-    if mem {
-        test_mem()
-    }
     test(sim, mem, proc);
 }
 
@@ -90,7 +89,7 @@ pub fn test_sim_struct(sim: &Sim) {
         total_simple_variables_count + total_list_variables_count + total_grid_variables_count;
     println!(
         "\n\
-         Current sim state\n\
+         Current sim state (step: {})\n\
          -----------------------------------------\n\
          Model entity count: {}\n\
          Model component count: {}\n\
@@ -101,7 +100,8 @@ pub fn test_sim_struct(sim: &Sim) {
          Stored variables count (all): {}\n\
          str={}, int={}, float={}, bool={}\n\
          str_list={}, int_list={}, float_list={}, bool_list={}\n\
-         str_grid={}, int_grid={}, float_grid={}, bool_grid={}",
+         str_grid={}, int_grid={}, float_grid={}, bool_grid={}\n",
+        sim.get_clock(),
         model_entity_count,
         model_component_count,
         total_entity_count,

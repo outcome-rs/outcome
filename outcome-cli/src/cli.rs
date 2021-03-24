@@ -6,40 +6,32 @@
 extern crate simplelog;
 
 use std::collections::HashMap;
-use std::fs;
 use std::fs::File;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
-use std::{env, thread};
+use std::{env, fs, thread};
 
 use anyhow::{Error, Result};
 use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
 use outcome::Sim;
-use outcome_net::{Coord, Server, ServerConfig, SimConnection, Worker};
-
-use self::simplelog::{Level, LevelPadding};
-use crate::init;
-use crate::interactive;
-use crate::test;
-use core::mem;
+use outcome_net::{CompressionPolicy, Coord, Server, ServerConfig, SimConnection, Worker};
+use simplelog::{Level, LevelPadding};
 
 #[cfg(feature = "watcher")]
 use notify::{RecommendedWatcher, Watcher};
-use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::util::{
+    find_project_root, format_elements_list, get_scenario_paths, get_snapshot_paths,
+};
+use crate::{init, interactive, test, util};
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 pub const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
 
-enum Verbosity {
-    Verbose,
-    Normal,
-    Quiet,
-}
-
-pub fn app<'a, 'b>() -> App<'a, 'b> {
+pub fn app_matches() -> ArgMatches<'static> {
     let mut app = App::new("outcome-cli")
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .version(VERSION)
@@ -50,72 +42,24 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
             .long("verbosity")
             .short("v")
             .takes_value(true)
+            .value_name("level")
             .default_value("info")
-            .value_name("verb")
             .global(true)
-            .help("Set the verbosity of the log output"))
-        //init subcommand
+            .help("Set the verbosity of the log output \
+            [possible values: debug, error, info, trace, warn]"))
+
+        // new
         .subcommand(SubCommand::with_name("new")
-            .setting(AppSettings::DisableHelpSubcommand)
-            .setting(AppSettings::SubcommandRequiredElseHelp)
+            .about("Create new project using a default template")
             .display_order(10)
-            .about("Create new scenario, module or experiment")
-            .subcommand(SubCommand::with_name("module")
-                .about("Initialize new module")
-                .arg(Arg::with_name("path")
-                    .required(true)
-                    .value_name("path"))
-                .arg(Arg::with_name("name")
-                    .help("Set the name for the new module (defaults to directory name)")
-                    .short("n")
-                    .long("name"))
-                .arg(Arg::with_name("template")
-                    .possible_values(&["barebones", "commented", "elaborate", "tutorial"])
-                    .takes_value(true)
-                    .default_value("commented")
-                    .help("Init with a template")
-                    .long("template")
-                    .short("t")))
-            .subcommand(SubCommand::with_name("scenario")
-                .about("Initialize new scenario")
-                .arg(Arg::with_name("path")
-                    .required(true)
-                    .value_name("path"))
-                .arg(Arg::with_name("name")
-                    .help("Set the name for the new scenario (defaults to directory name)")
-                    .short("n")
-                    .long("name"))
-                .arg(Arg::with_name("template")
-                    .possible_values(&["commented", "tutorial"])
-                    .takes_value(true)
-                    .default_value("commented")
-                    .help("Init with a template")
-                    .long("template")
-                    .short("t")))
-            .subcommand(SubCommand::with_name("proof")
-                .about("Initialize new proof")
-                .arg(Arg::with_name("path")
-                    .required(true)
-                    .value_name("path"))
-                .arg(Arg::with_name("name")
-                    .help("Set the name for the new proof (defaults to directory name)")
-                    .short("n")
-                    .long("name"))
-                .arg(Arg::with_name("template")
-                    .possible_values(&["commented"])
-                    .takes_value(true)
-                    .default_value("commented")
-                    .help("Init with a template")
-                    .long("template")
-                    .short("t")
-                )
-            )
+            .arg(Arg::with_name("name")
+                .required(true))
         )
 
-        // test subcommand
+        // test
         .subcommand(SubCommand::with_name("test")
-            .display_order(12)
             .about("Test for memory requirements and average processing speed")
+            .display_order(12)
             .arg(Arg::with_name("path")
                 .value_name("path")
                 .required(true)
@@ -131,26 +75,33 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
                 .short("p"))
         )
 
-        // run subcommand
+        // run
         .subcommand(SubCommand::with_name("run")
-            // .setting(AppSettings::DisableHelpSubcommand)
-            .display_order(20)
             .about("Run simulation from scenario, snapshot or experiment")
-            // Note: If there are no arguments supplied \
-            //     the program will look for a scenario, snapshot or proof \
-            //     (in that order) in the current working directory.")
+            .display_order(20)
+            .long_about("Run simulation from scenario, snapshot or experiment.\n\
+                If there are no arguments supplied the program will look for a scenario,\n\
+                snapshot or proof (in that order) in the current working directory.")
             .arg(Arg::with_name("path")
                 .value_name("path"))
+            .arg(Arg::with_name("scenario")
+                .long("scenario")
+                .short("s")
+                .help("Start new simulation run using a scenario manifest file"))
+            .arg(Arg::with_name("snapshot")
+                .long("snapshot")
+                .short("n")
+                .help("Start new simulation run using a snapshot file"))
             .arg(Arg::with_name("interactive")
                 .default_value("true")
                 .short("i")
                 .long("interactive"))
-            .arg(Arg::with_name("iconfig")
+            .arg(Arg::with_name("icfg")
                 .takes_value(true)
                 .value_name("path")
                 .default_value("./interactive.yaml")
-                .long("iconfig")
-                .help("specify path to interactive config file"))
+                .long("icfg")
+                .help("specify path to interactive mode configuration file"))
             .arg(Arg::with_name("watch")
                 .long("watch")
                 .value_name("on-change")
@@ -158,114 +109,90 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
                 .possible_values(&["restart", "update"])
                 .help("Watch project directory for changes"))
 
-            .subcommand(SubCommand::with_name("scenario")
-                .about("Run simulation from a scenario")
-                .arg(Arg::with_name("interactive")
-                    .default_value("true")
-                    .short("i")
-                    .long("interactive"))
-                .arg(Arg::with_name("path")
-                    .value_name("scenario-path"))
-                .arg(Arg::with_name("iconfig")
-                    .takes_value(true)
-                    .value_name("path")
-                    .default_value("./interactive.yaml")
-                    .long("iconfig")
-                    .help("specify path to interactive config file"))
-            )
-            .subcommand(SubCommand::with_name("snapshot")
-                .about("Run simulation from a snapshot")
-                .arg(Arg::with_name("interactive")
-                    .default_value("true")
-                    .short("i")
-                    .long("interactive"))
-                .arg(Arg::with_name("path")
-                    .value_name("snapshot-path"))
-                .arg(Arg::with_name("iconfig")
-                    .takes_value(true)
-                    .value_name("path")
-                    .default_value("./interactive.yaml")
-                    .long("iconfig")
-                    .help("specify path to interactive config file"))
-            )
         )
 
 
-        // server subcommand
+        // server
         .subcommand(SubCommand::with_name("server")
-            .display_order(21)
             .about("Start a server")
             .long_about("Start a server\n\n\
             NOTE: data sent between client and server is not encrypted, connection \n\
             is not secure! Passwords are used, but they are more of a convenience than a \n\
             serious security measure.")
+            .display_order(21)
             .arg(Arg::with_name("scenario")
+                .long("scenario")
+                .short("s")
                 .display_order(1)
                 .required(false)
-                .long("scenario")
                 .value_name("scenario-path"))
             .arg(Arg::with_name("snapshot")
-                .display_order(1)
-                .required(false)
                 .long("snapshot")
-                .value_name("snapshot-path"))
-            .arg(Arg::with_name("ip-address")
                 .display_order(2)
                 .required(false)
-                .long("ip")
-                .help("Set the ip address of the server, together with port (e.g. 127.0.0.1:9123)")
-                .default_value("127.0.0.1:9123")
-                .value_name("ip-address"))
-            .arg(Arg::with_name("password")
+                .value_name("snapshot-path"))
+            .arg(Arg::with_name("address")
+                .long("address")
+                .short("a")
+                .help("Set the address of the server")
                 .display_order(3)
-                .takes_value(true)
-                .long("password")
-                .short("p")
-                .help("Set the password used for new client authentication"))
+                .required(false)
+                .default_value("127.0.0.1:9123")
+                .value_name("address"))
             .arg(Arg::with_name("keep-alive")
-                .display_order(4)
                 .long("keep-alive")
                 .short("k")
-                .takes_value(true)
-                .value_name("seconds")
-                .help("Server process will quit if it doesn't receive any messages within \
-                the specified time frame (seconds)"))
-            .arg(Arg::with_name("client-keep-alive")
                 .display_order(4)
-                .long("client-keep-alive")
+                .help("Server process will quit if it doesn't receive any messages within \
+                the specified time frame (seconds)")
                 .takes_value(true)
-                .value_name("seconds")
+                .value_name("seconds"))
+            .arg(Arg::with_name("client-keep-alive")
+                .long("client-keep-alive")
                 .help("Server process will remove client if it doesn't receive any messages \
-                 from that client the specified time frame (seconds)"))
-            .arg(Arg::with_name("no-delay")
+                 from that client the specified time frame (seconds)")
                 .display_order(5)
-                .long("no-delay")
-                .short("n")
-                .help("Set to true to disable Nagle's algorithm and decrease overall latency \
-                for messages."))
-            .arg(Arg::with_name("use-compression")
+                .takes_value(true)
+                .value_name("seconds"))
+            .arg(Arg::with_name("compress")
+                .long("compress")
+                .help("Use lz4 compression based on selected policy")
                 .display_order(6)
-                .long("use-compression")
-                .short("c")
-                .help("Flag specifying whether lz4 compression should be used to compress \
-                all messages. With compression on all incoming messages have to be compressed"))
+                .takes_value(true)
+                .value_name("compression-policy")
+                .possible_values(&["all", "bigger_than_[n_bytes]"]))
             .arg(Arg::with_name("cluster")
+                .long("cluster")
+                .short("c")
+                .help("Run the sim in cluster mode, using multiple worker nodes instead of a single machine")
                 .display_order(100)
                 .takes_value(true)
-                .value_name("coordinator-ip")
-                .long("cluster")
-                .help("Run the sim in cluster mode, using multiple worker nodes instead of a single machine."))
+                .value_name("coordinator-address"))
             .arg(Arg::with_name("workers")
+                .long("workers")
+                .short("w")
+                .help("List of cluster workers' addresses, only applicable if `--cluster` option is also present")
                 .display_order(101)
                 .takes_value(true)
-                .value_name("worker-ip-addresses")
-                .long("workers")
-                .help("List of cluster workers' addresses. Only applicable if `--cluster` option is also present."))
+                .value_name("worker-addresses"))
+            .arg(Arg::with_name("encodings")
+                .long("encodings")
+                .short("e")
+                .help("List of supported encodings")
+                .takes_value(true)
+                .value_name("encodings-list")
+                .default_value("bincode"))
+            .arg(Arg::with_name("transports")
+                .long("transports")
+                .short("t")
+                .help("List of supported transports")
+                .takes_value(true)
+                .value_name("transports-list")
+                .default_value("tcp"))
         )
 
-        // client subcommand
+        // client
         .subcommand(SubCommand::with_name("client")
-            .display_order(22)
             .about("Start an interactive client session")
             .long_about("Start an interactive client session.\n\n\
             Establishes a client connection to a server at specified address, \n\
@@ -274,79 +201,90 @@ pub fn app<'a, 'b>() -> App<'a, 'b> {
             NOTE: Data sent between client and server is not encrypted, \n\
             connection is not secure! Passwords are used, but they are more of \n\
             a convenience than a serious security measure.")
+            .display_order(22)
             .arg(Arg::with_name("server-addr")
-                .required(true)
                 .long("server")
                 .short("s")
-                .value_name("address")
-                .help("Address of the server, together with port (e.g. 127.0.0.1:9999)"))
+                .help("Address of the server")
+                .required(true)
+                .value_name("address"))
             .arg(Arg::with_name("client-addr")
                 .long("address")
+                .help("Address of this client")
+                .value_name("address"))
+            .arg(Arg::with_name("auth")
+                .long("auth")
                 .short("a")
-                .value_name("address")
-                .help("Address of this client, together with port (e.g. 127.0.0.1:9999)"))
-            .arg(Arg::with_name("password")
-                .long("password")
-                .takes_value(true)
-                .short("p")
-                .help("Password used for authentication"))
-            .arg(Arg::with_name("iconfig")
-                .long("iconfig")
+                .help("Authentication pair used when connecting to server \
+                [example value: user,password]")
+                .takes_value(true))
+            .arg(Arg::with_name("icfg")
+                .long("icfg")
+                .help("Path to interactive config file")
                 .takes_value(true)
                 .value_name("path")
-                .default_value("./interactive.yaml")
-                .help("Path to interactive config file"))
+                .default_value("./interactive.yaml"))
             .arg(Arg::with_name("name")
-                .takes_value(true)
                 .long("name")
-                .value_name("string")
-                .help("Name for the client"))
+                .short("n")
+                .help("Name for the client")
+                .takes_value(true)
+                .value_name("string"))
             .arg(Arg::with_name("blocking")
                 .long("blocking")
                 .short("b")
-                .help("Sets the client as blocking, requiring it to explicitly agree to advance simulation")
+                .help("Sets the client as blocking, requiring it to explicitly \
+                agree to step simulation forward")
             )
-            .arg(Arg::with_name("compression")
-                .long("compression")
+            .arg(Arg::with_name("compress")
+                .long("compress")
                 .short("c")
+                .help("Sets whether outgoing messages should be compressed, \
+                and based on what policy [possible values: all, bigger_than_n, data, none]")
                 .takes_value(true)
                 .value_name("policy")
-                .default_value("none")
-                .possible_values(&["all", "only_data", "only_larger_than:[bytes]", "none"])
-                .help("What outgoing messages should be compressed"))
+                .default_value("none"))
+            .arg(Arg::with_name("heartbeat")
+                .long("heartbeat")
+                .help("Set the heartbeat frequency in heartbeat per n seconds")
+                .takes_value(true)
+                .value_name("secs")
+                .default_value("1"))
+            .arg(Arg::with_name("encoding")
+                .long("encoding")
+                .short("e")
+                .help("Encoding used when connecting to server")
+                .default_value("bincode"))
+            .arg(Arg::with_name("transport")
+                .long("transport")
+                .short("t")
+                .help("Transport used when connecting to server")
+                .default_value("tcp"))
         )
 
-        // worker subcommand
+        // TODO add more options for worker
+        // worker
         .subcommand(SubCommand::with_name("worker")
-            .display_order(23)
             .about("Start a worker node")
-            .arg(Arg::with_name("ip")
-                .required(false)
-                .long("ip")
-                .help("Set the ip address for the worker, together with port")
-                .value_name("ip-address"))
+            .display_order(23)
+            .arg(Arg::with_name("address")
+                .long("address")
+                .help("Set the address for the worker")
+                .value_name("address"))
             .arg(Arg::with_name("coord")
-                .takes_value(true)
                 .long("coord")
                 .short("c")
-                .help("Set the address of the cluster coordinator")
-                .value_name("address"))
-            .arg(Arg::with_name("passwd")
+                .help("Address of the cluster coordinator to connect to")
                 .takes_value(true)
-                .long("passwd")
-                .short("p")
-                .help("Set the password used for new client authentication"))
+                .value_name("address"))
         );
 
-    app
-}
-
-pub fn init() -> ArgMatches<'static> {
-    app().get_matches()
+    app.get_matches()
 }
 
 /// Runs based on specified subcommand.
 pub fn start(matches: ArgMatches) -> Result<()> {
+    setup_log_verbosity(&matches);
     match matches.subcommand() {
         ("new", Some(m)) => start_new(m),
         ("test", Some(m)) => start_test(m),
@@ -358,29 +296,10 @@ pub fn start(matches: ArgMatches) -> Result<()> {
     }
 }
 
-// Initiate new content structure template based on input args
 fn start_new(matches: &ArgMatches) -> Result<()> {
-    // get the current `new` subcommand type t and it's matches m
-    let (subcmd, m) = match matches.subcommand() {
-        (t, Some(m)) => (t, m),
-        _ => return Err(Error::msg(String::from("Failed to get init subcommand"))),
-    };
+    let name = matches.value_of("name").unwrap();
 
-    // get the data from matches, panic if can't get the data from matches for some reason
-    let sub_matches = matches
-        .subcommand_matches(subcmd)
-        .expect(&format!("Failed to get \"{}\" subcommand matches", subcmd));
-    let module_path = sub_matches
-        .value_of("path")
-        .expect(&format!("Failed to get {} path", subcmd));
-    let module_template = sub_matches
-        .value_of("template")
-        .expect(&format!("Failed to get {} template", subcmd));
-
-    // execute the init, raise any errors that may arise
-    if let Err(e) = init::init_at_path(subcmd, module_path, module_template) {
-        return Err(Error::msg(e));
-    }
+    unimplemented!();
 
     Ok(())
 }
@@ -401,193 +320,219 @@ fn start_test(matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+/// Starts a new simulation run, using a scenario or a snapshot file.
+///
+/// # Resolving ambiguity
+///
+/// If an explicit option for loading either scenario or snapshot is not
+/// provided, this function chooses which one is more appropriate based on
+/// directory structure and file name analysis.
+///
+/// If the path argument is not provided, this function will scan the project
+/// directory and print possible choices to the user.
 fn start_run(matches: &ArgMatches) -> Result<()> {
-    match matches.subcommand() {
-        ("scenario", Some(m)) => return start_run_scenario(m),
-        ("snapshot", Some(m)) => return start_run_snapshot(m),
-        // by default run scenario
-        _ => return start_run_scenario(matches),
-    };
-    Ok(())
-}
-
-fn start_run_scenario(matches: &ArgMatches) -> Result<()> {
     let mut path = env::current_dir()?;
     match matches.value_of("path") {
         Some(p_str) => {
             let p = PathBuf::from(p_str);
+
+            // if the argument provides a simple name, use it in combination
+            // with project root
+            if matches.is_present("snapshot") {
+                if !p_str.contains("/") {
+                    let root = find_project_root(path.clone(), 4)?;
+                    let available = get_snapshot_paths(root).unwrap();
+                    for snap_path in &available {
+                        if snap_path.file_stem().unwrap() == p_str {
+                            return start_run_snapshot(snap_path.clone(), matches);
+                        }
+                    }
+                    return Err(Error::msg(format!(
+                        "snapshot not found in project: {}, available snapshots: {}",
+                        p_str,
+                        format_elements_list(&available)
+                    )));
+                }
+            } else {
+                if !p_str.contains("/") && !p_str.ends_with(".toml") {
+                    let root = find_project_root(path, 4)?;
+                    let available = get_scenario_paths(root).unwrap();
+                    for scenario_path in &available {
+                        if scenario_path.file_stem().unwrap() == p_str {
+                            return start_run_scenario(scenario_path.clone(), matches);
+                        }
+                    }
+                    return Err(Error::msg(format!(
+                        "scenario not found in project: {}, available scenarios: {}",
+                        p_str,
+                        format_elements_list(&available)
+                    )));
+                }
+            }
+
+            // if provided path is relative, append it to current working directory
             if p.is_relative() {
                 path = path.join(p);
-            } else {
+            }
+            // otherwise if it's absolute then just set it as the path
+            else {
                 path = p;
             }
         }
+        // choose what to do if no path was provided
         None => {
-            println!("path arg not provided");
+            let root = find_project_root(path.clone(), 4)?;
+            if matches.is_present("scenario") && matches.is_present("snapshot") {
+                return Err(Error::msg("choose to run either scenario or snapshot"));
+            } else if matches.is_present("snapshot") {
+                let available = get_snapshot_paths(root)?;
+                if available.len() == 1 {
+                    return start_run_snapshot(available[0].clone(), matches);
+                } else if available.len() > 0 {
+                    return Err(Error::msg(format!(
+                        "choose one of the available snapshots: {}",
+                        format_elements_list(&available)
+                    )));
+                } else {
+                    return Err(Error::msg(format!("no snapshots available in project",)));
+                }
+            } else {
+                let available = get_scenario_paths(root)?;
+                if available.len() == 1 {
+                    return start_run_scenario(available[0].clone(), matches);
+                } else {
+                    return Err(Error::msg(format!(
+                        "choose one of the available scenarios: {}",
+                        format_elements_list(&available)
+                    )));
+                }
+                return Err(Error::msg("must provide path to scenario manifest file"));
+            }
         }
     }
+
     path = path.canonicalize().unwrap_or(path);
 
-    setup_log_verbosity(matches);
+    if matches.is_present("scenario") {
+        return start_run_scenario(path, matches);
+    } else if matches.is_present("snapshot") {
+        return start_run_snapshot(path, matches);
+    } else {
+        if path.is_file() {
+            // decide whether the path looks more like scenario or snapshot
+            if let Some(ext) = path.extension() {
+                if ext == "toml" {
+                    return start_run_scenario(path, matches);
+                }
+            }
+            return start_run_snapshot(path, matches);
+        }
+        // path is provided but it's a directory
+        else {
+            let root = find_project_root(path.clone(), 4)?;
+            let scenario_paths = get_scenario_paths(path.clone())?;
+            if scenario_paths.len() == 1 {
+                return start_run_scenario(scenario_paths[0].clone(), matches);
+            } else if scenario_paths.len() > 0 {
+                return Err(Error::msg(format!(
+                    "choose one of the available scenarios: {}",
+                    format_elements_list(&scenario_paths)
+                )));
+            } else {
+                return Err(Error::msg("no scenarios found"));
+            }
+            return Err(Error::msg("failed to find scenarios"));
+        }
+    }
 
+    Ok(())
+}
+
+fn start_run_scenario(path: PathBuf, matches: &ArgMatches) -> Result<()> {
     if matches.is_present("interactive") {
-        // println!("Running interactive session using scenario at: {:?}", path);
-        // let sim = outcome::Sim::from_scenario_at_path(path.clone())?;
+        info!("Running interactive session using scenario at: {:?}", path);
 
         let config_path = matches
-            .value_of("iconfig")
+            .value_of("icfg")
             .unwrap_or(interactive::CONFIG_FILE)
             .to_string();
 
-        #[cfg(feature = "watcher")]
-        {
-            let watch_path = path.parent().unwrap().to_owned();
-            // let driver = interactive::SimDriver::Local(sim);
-            let change_detected = Arc::new(Mutex::new(false));
-            let change_detected_clone = change_detected.clone();
-            let mut watcher: RecommendedWatcher = Watcher::new_immediate(
-                move |res: Result<notify::Event, notify::Error>| match res {
-                    Ok(event) => {
-                        debug!("change detected: {:?}", event);
-                        *change_detected_clone.lock().unwrap() = true;
-                    }
-                    Err(e) => {
-                        error!("watch error: {:?}", e);
-                        *change_detected_clone.lock().unwrap() = true;
-                    }
-                },
-            )?;
-            watcher.watch(watch_path, notify::RecursiveMode::Recursive)?;
+        let mut on_change = None;
 
-            let on_change = match matches.value_of("watch") {
-                Some("restart") => Some(interactive::OnChange {
-                    trigger: change_detected.clone(),
-                    action: interactive::OnChangeAction::Restart,
-                }),
-                Some("update") => Some(interactive::OnChange {
-                    trigger: change_detected.clone(),
-                    action: interactive::OnChangeAction::UpdateModel,
-                }),
-                Some(_) | None => None,
-            };
+        if matches.is_present("watch") {
+            #[cfg(feature = "watcher")]
+            {
+                let watch_path = find_project_root(path.clone(), 4)?;
+                info!(
+                    "watching changes at project path: {}",
+                    watch_path.to_string_lossy()
+                );
+                // let driver = interactive::SimDriver::Local(sim);
+                let change_detected = Arc::new(Mutex::new(false));
+                let change_detected_clone = change_detected.clone();
+                let mut watcher: RecommendedWatcher =
+                    Watcher::new_immediate(move |res: Result<notify::Event, notify::Error>| {
+                        match res {
+                            Ok(event) => {
+                                debug!("change detected: {:?}", event);
+                                *change_detected_clone.lock().unwrap() = true;
+                            }
+                            Err(e) => {
+                                error!("watch error: {:?}", e);
+                                *change_detected_clone.lock().unwrap() = true;
+                            }
+                        }
+                    })?;
+                watcher.watch(watch_path, notify::RecursiveMode::Recursive)?;
 
-            interactive::start(
-                interactive::InterfaceType::Scenario(path.to_string_lossy().to_string()),
-                &config_path,
-                on_change,
-            )?;
+                on_change = match matches.value_of("watch") {
+                    Some("restart") => Some(interactive::OnChange {
+                        trigger: change_detected.clone(),
+                        action: interactive::OnChangeAction::Restart,
+                    }),
+                    Some("update") => Some(interactive::OnChange {
+                        trigger: change_detected.clone(),
+                        action: interactive::OnChangeAction::UpdateModel,
+                    }),
+                    Some(_) | None => None,
+                };
+            }
+
+            #[cfg(not(feature = "watcher"))]
+            {
+                warn!("tried to use watcher, but that feature is not enabled")
+            }
         }
-        #[cfg(not(feature = "watcher"))]
+
         interactive::start(
             interactive::InterfaceType::Scenario(path.to_string_lossy().to_string()),
             &config_path,
-            None,
+            on_change,
         )?;
-
-        // let mut changed = change_detected.lock().unwrap();
-        // if !*changed {
-        //     drop(changed);
-        // }
-        // let mut changed = change_detected.lock().unwrap();
-        // if *changed && matches.value_of("watch") == Some("restart") {
-        //     // restart
-        //     *changed = false;
-        //     println!("\n\n-------\n");
-        //     continue;
-        // } else {
-        //     // quit
-        //     break;
-        // }
-        // }
     }
     Ok(())
 }
-fn start_run_snapshot(matches: &ArgMatches) -> Result<()> {
-    setup_log_verbosity(matches);
-    let mut path = env::current_dir()?;
-    match matches.value_of("path") {
-        Some(p_str) => {
-            let p = PathBuf::from(p_str);
-            if p.is_relative() {
-                path = path.join(p);
-            } else {
-                path = p;
-            }
-        }
-        None => {
-            println!("path arg not found");
-        }
-    }
-    // path = path.canonicalize().unwrap_or(path);
-    println!("Running interactive session using snapshot at: {:?}", path);
+
+fn start_run_snapshot(path: PathBuf, matches: &ArgMatches) -> Result<()> {
+    info!("Running interactive session using snapshot at: {:?}", path);
     if matches.is_present("interactive") {
-        use self::simplelog::{Config, LevelFilter, TermLogger};
-        let mut config_builder = simplelog::ConfigBuilder::new();
-        let logger_conf = config_builder
-            .set_time_level(LevelFilter::Error)
-            .set_target_level(LevelFilter::Debug)
-            .set_location_level(LevelFilter::Trace)
-            .build();
-        TermLogger::init(
-            LevelFilter::Debug,
-            logger_conf,
-            simplelog::TerminalMode::Mixed,
-        );
-        // first try uncompressed, then compressed
-        // TODO match errors properly
-        // let sim =
-        //     Sim::from_snapshot_at(&path, true).unwrap_or(Sim::from_snapshot_at(&path, false)?);
-
-        // let sim = match Sim::from_snapshot_at(&path, false) {
-        //     Ok(s) => s,
-        //     Err(_) => match Sim::from_snapshot_at(&path, true) {
-        //         Ok(ss) => ss,
-        //         Err(_) => return Err("fail".to_string()),
-        //     },
-        // };
-
-        // let sim = Sim::from_snapshot_at(&path)?;
-        // let driver = interactive::SimDriver::Local(sim);
-        //TODO
         interactive::start(
             interactive::InterfaceType::Snapshot(path.to_string_lossy().to_string()),
-            matches
-                .value_of("iconfig")
-                .unwrap_or(interactive::CONFIG_FILE),
+            matches.value_of("icfg").unwrap_or(interactive::CONFIG_FILE),
             None,
         );
     }
     Ok(())
 }
 
-/// Starts a new server based on the passed arguments.
 fn start_server(matches: &ArgMatches) -> Result<()> {
-    setup_log_verbosity(matches);
-
-    let server_address = match matches.value_of("ip-address") {
+    let server_address = match matches.value_of("address") {
         Some(addr) => addr,
         None => unimplemented!(),
     };
 
-    let mut use_auth = matches.is_present("password");
-
-    let passwd_list = match matches.value_of("password") {
-        //TODO support multiple passwords separated by ','
-        Some(passwd_str) => vec![String::from(passwd_str)],
-        None => Vec::new(),
-    };
-
-    if use_auth && passwd_list.len() == 0 {
-        println!("Disabling authentication because there were no passwords provided.");
-        use_auth = false;
-    } else if !use_auth && passwd_list.len() > 0 {
-        use_auth = true;
-    }
-
-    println!("listening for new clients on: {}", server_address);
-
     if let Some(cluster_addr) = matches.value_of("cluster") {
-        println!("listening for new workers on: {}", &cluster_addr);
+        info!("listening for new workers on: {}", &cluster_addr);
     }
 
     let config = ServerConfig {
@@ -600,12 +545,12 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
             None => "It's a server alright.".to_string(),
         },
         self_keepalive: match matches.value_of("keep-alive") {
-                Some(millis) => match millis.parse::<usize>() {
+            Some(millis) => match millis.parse::<usize>() {
                 Ok(ka) => match ka {
                     // 0 means keep alive forever
                     0 => None,
                     _ => Some(Duration::from_millis(ka as u64)),
-                }
+                },
                 Err(e) => panic!("failed parsing keep-alive (millis) value: {}", e),
             },
             // nothing means keep alive forever
@@ -614,27 +559,44 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         poll_wait: Duration::from_millis(1),
         accept_delay: Duration::from_millis(100),
 
-        client_keepalive: match matches.value_of("client-keep-alive")
-            .map(|v| v.parse().unwrap()) {
+        client_keepalive: match matches
+            .value_of("client-keep-alive")
+            .map(|v| v.parse().unwrap())
+        {
             None => Some(Duration::from_secs(2)),
             Some(0) => None,
             Some(v) => Some(Duration::from_secs(v)),
         },
 
-
         use_auth,
-        auth_pairs: vec![],
         use_compression: matches.is_present("use-compression"),
-
-        ..Default::default()
-        // cluster: matches.value_of("cluster").map(|s| s.to_string()),
-        // workers: match matches.value_of("workers") {
-        //     Some(workers_str) => workers_str
-        //         .split(",")
-        //         .map(|s| s.to_string())
-        //         .collect::<Vec<String>>(),
-        //     None => Vec::new(),
-        // },
+        auth_pairs: vec![],
+        transports: match matches.value_of("transports") {
+            Some(trans) => {
+                let split = trans.split(',').collect::<Vec<&str>>();
+                let mut transports = Vec::new();
+                for transport_str in split {
+                    if !transport_str.is_empty() {
+                        transports.push(outcome_net::Transport::from_str(transport_str)?);
+                    }
+                }
+                transports
+            }
+            None => Vec::new(),
+        },
+        encodings: match matches.value_of("encodings") {
+            Some(enc) => {
+                let split = enc.split(',').collect::<Vec<&str>>();
+                let mut encodings = Vec::new();
+                for encoding_str in split {
+                    if !encoding_str.is_empty() {
+                        encodings.push(outcome_net::Encoding::from_str(encoding_str)?);
+                    }
+                }
+                encodings
+            }
+            None => Vec::new(),
+        },
     };
 
     let worker_addrs = match matches.value_of("workers") {
@@ -645,12 +607,6 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         None => Vec::new(),
     };
 
-    // let scenario_path = match matches.value_of("scenario") {
-    //     Some(path) => path.to_string(),
-    //     None => unimplemented!(),
-    // };
-
-    // TODO
     let sim_instance = match matches.value_of("cluster") {
         Some(addr) => {
             if let Some(scenario_path) = matches.value_of("scenario") {
@@ -684,7 +640,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
     })
-    .expect("Error setting Ctrl-C handler");
+    .expect("error setting ctrlc handler");
 
     server.start_polling(running)?;
     println!("Initiating graceful shutdown...");
@@ -699,17 +655,26 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
 }
 
 fn start_client(matches: &ArgMatches) -> Result<()> {
-    setup_log_verbosity(matches);
     let mut client = outcome_net::Client::new_with_config(
         matches.value_of("public-addr").map(|s| s.to_string()),
         outcome_net::ClientConfig {
             name: matches.value_of("name").unwrap_or("cli-client").to_string(),
+            heartbeat: match matches.value_of("heartbeat") {
+                Some(h) => Some(Duration::from_secs(h.parse()?)),
+                None => None,
+            },
             is_blocking: matches.is_present("blocking"),
+            compress: CompressionPolicy::from_str(matches.value_of("compress").unwrap())?,
             //matches.is_present("compress"),
-            ..Default::default()
+            encodings: vec![outcome_net::Encoding::from_str(
+                matches.value_of("encoding").unwrap(),
+            )?],
+            transports: vec![outcome_net::Transport::from_str(
+                matches.value_of("transport").unwrap(),
+            )?],
         },
     )?;
-    println!("created new client");
+
     client.connect(
         matches
             .value_of("server-addr")
@@ -717,20 +682,17 @@ fn start_client(matches: &ArgMatches) -> Result<()> {
             .ok_or(Error::msg("server adddress must be provided"))?,
         matches.value_of("password").map(|s| s.to_string()),
     )?;
+
     interactive::start(
-        //interactive::SimDriver::Remote(client),
         interactive::InterfaceType::Remote(client),
-        matches
-            .value_of("iconfig")
-            .unwrap_or(interactive::CONFIG_FILE),
+        matches.value_of("icfg").unwrap_or(interactive::CONFIG_FILE),
         None,
     );
     Ok(())
 }
 
 fn start_worker(matches: &ArgMatches) -> Result<()> {
-    setup_log_verbosity(matches);
-    let my_address = match matches.value_of("ip") {
+    let my_address = match matches.value_of("address") {
         Some(addr) => addr,
         // None => outcome_net::cluster::worker::WORKER_ADDRESS,
         None => unimplemented!(),
@@ -748,9 +710,6 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
         use_auth = true;
     }
 
-    // unimplemented!();
-    // let listener = TcpListener::bind(my_address).expect("failed to bind listener");
-    // let mut worker_arc = Arc::new(Mutex::new(Worker::new(my_address)));
     println!("Now listening on {}", my_address);
 
     let mut worker = Worker::new(my_address)?;
@@ -765,54 +724,11 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
         }
     }
     worker.handle_coordinator()?;
-    // first connection is made by the coordinator
-    // thread::spawn(move || {
-
-    // worker_arc
-    //     .lock()
-    //     .unwrap()
-    //     .as_mut()
-    //     .unwrap()
-    //     .handle_coordinator();
-
-    // });
-
-    // listener.set_nonblocking(true);
-    //
-    // let mut counter = 0;
-    // let listener_accept_count = 1000;
-    // loop {
-    //     counter += 1;
-    //     if counter == listener_accept_count {
-    //         let worker = worker_mutex.clone();
-    //         //println!("do other things");
-    //         counter = 0;
-    //         //            thread::sleep(Duration::from_millis(2000));
-    //         sleep(Duration::from_millis(1));
-    //
-    //         match listener.accept() {
-    //             Ok((stream, addr)) => {
-    //                 stream.set_read_timeout(Some(Duration::from_secs(1)));
-    //                 thread::spawn(move || {
-    //                     handle_comrade(worker.clone(), stream);
-    //                     //                        serv.lock().unwrap().prune_clients();
-    //                 });
-    //                 //                    stream.set_nonblocking(true);
-    //             }
-    //             Err(e) => {
-    //                 if e.kind() == ErrorKind::WouldBlock {
-    //                     //...
-    //                 } else {
-    //                     println!("couldn't get client: {:?}", e);
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
 
     Ok(())
 }
 
+/// Sets up logging based on settings from the matches.
 fn setup_log_verbosity(matches: &ArgMatches) {
     use self::simplelog::{Config, LevelFilter, TermLogger};
     let level_filter = match matches.value_of("verbosity") {

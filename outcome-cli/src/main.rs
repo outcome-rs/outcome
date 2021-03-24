@@ -18,13 +18,19 @@ pub mod cli;
 pub mod init;
 pub mod interactive;
 pub mod test;
+mod util;
 
 use colored::*;
 
 fn main() {
     // Run the program based on user input
-    match cli::start(cli::init()) {
+    match cli::start(cli::app_matches()) {
         Ok(_) => (),
-        Err(e) => println!("{}{}\n\nCaused by:\n{}", "error: ".red(), e, e.root_cause()),
+        Err(e) => {
+            println!("{}{}", "error: ".red(), e);
+            if e.root_cause().to_string() != e.to_string() {
+                println!("Caused by:\n{}", e.root_cause())
+            }
+        }
     }
 }

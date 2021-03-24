@@ -12,6 +12,7 @@ use crate::msg::{
 use crate::socket::{Encoding, Socket, SocketConfig, SocketType, Transport};
 use crate::{error::Error, Result};
 
+#[derive(Debug)]
 pub enum CompressionPolicy {
     /// Compress all outgoing traffic
     Everything,
@@ -23,6 +24,31 @@ pub enum CompressionPolicy {
     Nothing,
 }
 
+impl CompressionPolicy {
+    pub fn from_str(s: &str) -> Result<Self> {
+        if s.starts_with("bigger_than_") || s.starts_with("larger_than_") {
+            let split = s.split('_').collect::<Vec<&str>>();
+            let number = split[2]
+                .parse::<usize>()
+                .map_err(|e| Error::Other(e.to_string()))?;
+            return Ok(Self::LargerThan(number));
+        }
+        let c = match s {
+            "all" | "everything" => Self::Everything,
+            "data" | "only_data" => Self::OnlyDataTransfers,
+            "none" | "nothing" => Self::Nothing,
+            _ => {
+                return Err(Error::Other(format!(
+                    "failed parsing compression policy from string: {}",
+                    s
+                )))
+            }
+        };
+        Ok(c)
+    }
+}
+
+#[derive(Debug)]
 pub struct ClientConfig {
     /// Self-assigned name
     pub name: String,
@@ -112,9 +138,15 @@ impl Client {
     }
 
     /// Connects to server at the given address.
+    ///
+    /// # Redirection
+    ///
+    /// In it's response to client registration message, the server can specify
+    /// at what address the target two-way connection shall take place. This
+    /// prompts the client to reconnect at that new address.
     pub fn connect(&mut self, addr: String, password: Option<String>) -> Result<()> {
-        println!("public_addr: {:?}", self.public_addr);
-        println!("attempting to dial server at: {}", addr);
+        debug!("client public_addr: {:?}", self.public_addr);
+        info!("dialing server at: {}", addr);
 
         self.connection.connect(&addr)?;
 
@@ -127,7 +159,6 @@ impl Client {
             },
             None,
         )?;
-        println!("dialed server at: {}", addr);
 
         let resp: RegisterClientResponse = self
             .connection
@@ -135,35 +166,18 @@ impl Client {
             .1
             .unpack_payload(self.connection.encoding())?;
 
-        println!("{:?}", resp);
+        debug!("got response from server: {:?}", resp);
 
-        self.connection.disconnect(None)?;
-
-        //let mut temp_client = Socket::bind("127.0.0.1:8819", Transport::SimpleTcp)?;
-        //temp_client.connect(&addr);
-        //temp_client.pack_send_msg_payload(RegisterClientRequest {
-        //name: self.config.name.clone(),
-        //addr: self.public_addr.clone(),
-        //is_blocking: self.config.is_blocking,
-        //passwd: password,
-        //})?;
-        //println!("dialed server at: {}", addr);
-
-        //let resp: RegisterClientResponse = temp_client
-        //.recv_msg()?
-        //.unpack_payload(&temp_client.config.encoding)?;
-
-        //println!("{:?}", resp);
-
-        //temp_client.disconnect("")?;
-        match resp.redirect.as_str() {
-            "" => (),
-            _ => self.connection.connect(&resp.redirect)?,
+        // perform redirection if server specified an alternative address
+        if !resp.redirect.is_empty() {
+            self.connection.disconnect(None)?;
+            self.connection.connect(&resp.redirect)?;
         }
-        match resp.error.as_str() {
-            "" => (),
-            _ => return Err(Error::Other(resp.error)),
-        };
+
+        if !resp.error.is_empty() {
+            return Err(Error::Other(resp.error));
+        }
+
         self.connected = true;
 
         Ok(())

@@ -106,6 +106,8 @@ pub use coord::Coord;
 pub use server::{Server, ServerConfig, SimConnection};
 pub use worker::Worker;
 
+pub use socket::Encoding;
 pub use socket::SocketEvent;
+pub use socket::Transport;
 
 pub use error::{Error, Result};

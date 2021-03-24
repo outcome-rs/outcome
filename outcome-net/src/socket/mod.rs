@@ -1,8 +1,10 @@
 use crate::msg::{msg_bytes_from_payload, Message, Payload};
 use crate::sig::Signal;
-use crate::Result;
+use crate::{Error, Result};
 use serde::Serialize;
+use std::convert::TryFrom;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::str::FromStr;
 use std::time::Duration;
 
 #[cfg(feature = "laminar_transport")]
@@ -388,6 +390,23 @@ pub enum Transport {
 }
 
 impl Transport {
+    pub fn from_str(s: &str) -> Result<Self> {
+        let t = match s {
+            "tcp" => Transport::Tcp,
+            #[cfg(feature = "zmq_transport")]
+            "zmq" => Transport::Zmq,
+            #[cfg(feature = "laminar_transport")]
+            "laminar" => Transport::Laminar,
+            _ => {
+                return Err(Error::Other(format!(
+                    "failed parsing transport from string: {}",
+                    s
+                )))
+            }
+        };
+        Ok(t)
+    }
+
     /// Checks if laminar transport is available, otherwise falls back on tcp.
     pub fn prefer_laminar() -> Self {
         #[cfg(feature = "laminar_transport")]
@@ -408,4 +427,21 @@ pub enum Encoding {
     /// Very common but more verbose format
     #[cfg(feature = "json_encoding")]
     Json,
+}
+
+impl Encoding {
+    pub fn from_str(s: &str) -> Result<Self> {
+        let e = match s {
+            "bincode" => Self::Bincode,
+            #[cfg(feature = "msgpack_encoding")]
+            "msgpack" | "messagepack" | "MessagePack" => Self::MsgPack,
+            _ => {
+                return Err(Error::Other(format!(
+                    "failed parsing encoding from string: {}",
+                    s
+                )))
+            }
+        };
+        Ok(e)
+    }
 }
