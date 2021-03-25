@@ -7,8 +7,6 @@
 //! remote mode will use a `Client` connected to an `outcome` server.
 //! `Client` interface from the `outcome-net` crate is used.
 
-#![allow(unused)]
-
 extern crate toml;
 
 mod compl;
@@ -18,20 +16,20 @@ mod remote;
 #[cfg(feature = "img_print")]
 mod img_print;
 
-use std::io;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{fs, thread};
+use std::{fs, io, thread};
 
 use anyhow::Result;
 use linefeed::inputrc::parse_text;
 use linefeed::{Interface, Prompter, ReadResult};
-//use notify::Watcher;
 
 use outcome::{Address, Sim, SimModel};
+use outcome_net::msg::TurnAdvanceResponse;
 use outcome_net::{Client, SocketEvent};
 
 use self::compl::MainCompleter;
@@ -60,6 +58,7 @@ pub struct Config {
     #[serde(default)]
     pub prompt_vars: Vec<String>,
 }
+
 impl Config {
     fn new() -> Config {
         Config {
@@ -170,6 +169,16 @@ pub enum OnChangeAction {
     UpdateModel,
 }
 
+pub struct OnSignal {
+    pub trigger: Arc<AtomicBool>,
+    pub action: OnSignalAction,
+}
+
+pub enum OnSignalAction {
+    Custom,
+    Quit,
+}
+
 pub enum InterfaceType {
     Scenario(String),
     Snapshot(String),
@@ -178,9 +187,10 @@ pub enum InterfaceType {
 
 /// Variant without the external change trigger.
 pub fn start_simple(_type: InterfaceType, config_path: &str) -> Result<()> {
-    start(_type, config_path, None)
+    start(_type, config_path, None, None)
 }
 
+// TODO signal handling
 /// Entry point for the interactive interface.
 ///
 /// # Introducing runtime changes
@@ -190,7 +200,12 @@ pub fn start_simple(_type: InterfaceType, config_path: &str) -> Result<()> {
 /// supporting a "watch" mode where changes to project files result in
 /// triggering actions such as restarting the simulation using newly
 /// introduced changes.
-pub fn start(_type: InterfaceType, config_path: &str, on_change: Option<OnChange>) -> Result<()> {
+pub fn start(
+    _type: InterfaceType,
+    config_path: &str,
+    on_change: Option<OnChange>,
+    on_signal: Option<OnSignal>,
+) -> Result<()> {
     let path = match &_type {
         InterfaceType::Scenario(path) => Some(path.clone()),
         InterfaceType::Snapshot(path) => Some(path.clone()),
@@ -214,16 +229,8 @@ pub fn start(_type: InterfaceType, config_path: &str, on_change: Option<OnChange
             }
         }
 
-        //let mut sim_driver = match _type {
-        //InterfaceType::Scenario(path) => SimDriver::Local(Sim::from_scenario_at(&path)?),
-        //InterfaceType::Snapshot(path) => SimDriver::Local(Sim::from_snapshot_at(&path)?),
-        //InterfaceType::Remote(client) => SimDriver::Remote(client),
-        //_ => unimplemented!(),
-        //};
-
         let interface = Arc::new(Interface::new("interactive")?);
-        //let driver_arc = Arc::new(Mutex::new(sim_driver));
-        //interface.set_completer(Arc::new(MainCompleter));
+
         interface.set_completer(Arc::new(MainCompleter {
             driver: driver_arc.clone(),
         }));
@@ -265,76 +272,114 @@ pub fn start(_type: InterfaceType, config_path: &str, on_change: Option<OnChange
 
         use linefeed::Signal;
         use std::time::Duration;
+        let mut do_run = false;
         let mut do_run_loop = false;
+        let mut do_run_freq = None;
+        let mut last_time_insta = std::time::Instant::now();
+        let mut just_left_loop = false;
+
         let mut run_loop_count = 0;
+
         interface.set_report_signal(Signal::Interrupt, true);
         interface.set_report_signal(Signal::Break, true);
         interface.set_report_signal(Signal::Quit, true);
+
         // start main loop
         loop {
-            // this is a loop used for the "safer" version of `run` command
-            // (basically it listens for a signal while it's processing so
-            // you can go back to the prompt at any moment)
-            if do_run_loop {
-                let mut driver = driver_arc.lock().unwrap();
-                // let model = model_arc.lock().unwrap();
-                //thread.spawn()
-                if run_loop_count > 0 {
-                    match driver.deref_mut() {
-                        SimDriver::Local(ref mut sim) => sim.step().unwrap(),
-                        SimDriver::Remote(client) => {
-                            client.server_step_request(1)?;
-                        }
-                    }
-                    run_loop_count -= 1;
-                    //                let r = match interface.lock_reader().
-                    let read_result =
-                        match interface.read_line_step(Some(Duration::from_micros(10))) {
-                            Ok(res) => match res {
-                                Some(r) => r,
-                                None => continue,
-                            },
-                            Err(e) => continue,
-                        };
-                    //                match interface.read_line_step(Some(Duration::from_millis(1))).unwrap() {
-                    match read_result {
-                        // handle quitting using signals and eof
-                        ReadResult::Signal(Signal::Break) => {
-                            do_run_loop = false;
-                            run_loop_count = 0;
-                            //                        interface.cancel_read_line();
-                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
-                        }
-                        ReadResult::Signal(Signal::Interrupt) => {
-                            //                        interface.cancel_read_line();
-                            do_run_loop = false;
-                            run_loop_count = 0;
-                            //                        interface.cancel_read_line();
-                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
-                        }
-                        ReadResult::Eof => {
-                            do_run_loop = false;
-                            run_loop_count = 0;
-                            //                        interface.cancel_read_line();
-                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
+            // check for incoming network events
+            let mut driver = driver_arc.lock().unwrap();
+            match driver.deref_mut() {
+                SimDriver::Remote(ref mut client) => match client.connection.try_recv() {
+                    Ok((addr, event)) => match event {
+                        SocketEvent::Disconnect => {
+                            println!("\nServer terminated the connection...");
+                            break 'outer;
                         }
                         _ => (),
+                    },
+                    _ => (),
+                },
+                _ => (),
+            }
+
+            if do_run_loop || do_run_freq.is_some() {
+                if let Some(hz) = do_run_freq {
+                    let target_delta_time = Duration::from_secs(1) / hz;
+                    let time_now = std::time::Instant::now();
+                    let delta_time = time_now - last_time_insta;
+                    if delta_time >= target_delta_time {
+                        last_time_insta = time_now;
+                        do_run = true;
+                    } else {
+                        do_run = false;
                     }
-                //                interface.lock_reader();
-                } else {
-                    do_run_loop = false;
-                    run_loop_count = 0;
-                    interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
                 }
+
+                if do_run_loop {
+                    if run_loop_count <= 0 {
+                        do_run = false;
+                        do_run_loop = false;
+                        run_loop_count = 0;
+                    } else {
+                        run_loop_count -= 1;
+                        do_run = true;
+                    }
+                }
+
+                // let mut driver = driver_arc.lock().unwrap();
+
+                if do_run {
+                    match driver.deref_mut() {
+                        SimDriver::Local(ref mut sim) => {
+                            sim.step()?;
+                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
+                        }
+                        SimDriver::Remote(client) => {
+                            let msg = client.server_step_request(1)?;
+                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
+                        }
+                    }
+
+                    if let Some(on_sig) = &on_signal {
+                        if on_sig.trigger.load(Ordering::SeqCst) {
+                            on_sig.trigger.store(false, Ordering::SeqCst);
+                            do_run_freq = None;
+                            do_run_loop = false;
+                            continue;
+                        }
+                    }
+
+                    // if let Ok(res) = interface.read_line_step(Some(Duration::from_micros(1))) {
+                    //
+                    // } else {
+                    //     continue;
+                    // }
+                    let read_result = match interface.read_line_step(Some(Duration::from_micros(1)))
+                    {
+                        Ok(res) => match res {
+                            Some(r) => r,
+                            None => continue,
+                        },
+                        Err(e) => continue,
+                    };
+                    match read_result {
+                        _ => {
+                            do_run = false;
+                            do_run_freq = None;
+                            do_run_loop = false;
+                            run_loop_count = 0;
+                            continue;
+                        }
+                    }
+                }
+
                 continue;
             }
 
             if let Some(res) = interface.read_line_step(Some(Duration::from_millis(300)))? {
                 match res {
                     ReadResult::Input(line) => {
-                        let mut driver = driver_arc.lock().unwrap();
-                        // let model = model_arc.lock().unwrap();
-                        //                interface.set_prompt(create_prompt(&sim, &config).as_str())?;
+                        // let mut driver = driver_arc.lock().unwrap();
 
                         if !line.trim().is_empty() {
                             interface.add_history_unique(line.clone());
@@ -345,7 +390,7 @@ pub fn start(_type: InterfaceType, config_path: &str, on_change: Option<OnChange
                             "run" => {
                                 do_run_loop = true;
                                 run_loop_count = args.parse::<i32>().unwrap();
-                                interface.set_prompt("")?;
+                                // interface.set_prompt("")?;
                             }
                             //TODO implement using clock int (it was using data string format before)
                             "run-until" => {
@@ -371,6 +416,10 @@ pub fn start(_type: InterfaceType, config_path: &str, on_change: Option<OnChange
                             //TODO
                             "runf-until" => {
                                 unimplemented!();
+                            }
+                            "run-freq" => {
+                                let hz = args.parse::<usize>().unwrap_or(10);
+                                do_run_freq = Some(hz as u32);
                             }
                             "test" => {
                                 let secs = args.parse::<usize>().unwrap_or(2);
@@ -604,7 +653,7 @@ show_list               {show_list}
 
                             _ => println!("couldn't recognize input: {:?}", line),
                         }
-                        if !do_run_loop {
+                        if do_run_freq.is_none() && !do_run_loop {
                             interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
                         }
                         std::mem::drop(driver);
@@ -614,7 +663,15 @@ show_list               {show_list}
                     | ReadResult::Signal(Signal::Interrupt)
                     | ReadResult::Eof => {
                         interface.cancel_read_line();
+                        // if do_run_freq.is_none() && !do_run_loop {
                         break 'outer;
+                        // }
+                        do_run = false;
+                        do_run_freq = None;
+                        do_run_loop = false;
+                        run_loop_count = 0;
+                        interface.cancel_read_line();
+                        // interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
                     }
                     _ => (),
                 }
@@ -646,22 +703,6 @@ show_list               {show_list}
                     }
                 }
             }
-
-            // check for incoming network events
-            let mut driver = driver_arc.lock().unwrap();
-            match driver.deref_mut() {
-                SimDriver::Remote(ref mut client) => match client.connection.try_recv() {
-                    Ok((addr, event)) => match event {
-                        SocketEvent::Disconnect => {
-                            println!("\nServer terminated the connection...");
-                            break 'outer;
-                        }
-                        _ => (),
-                    },
-                    _ => (),
-                },
-                _ => (),
-            }
         }
 
         if let SimDriver::Remote(client) = &mut driver_arc.lock().unwrap().deref_mut() {
@@ -685,6 +726,7 @@ static APP_COMMANDS: &[(&str, &str)] = &[
     ("run", "Run a number of simulation ticks (hours), takes in an integer number"),
     ("runf", "Similar to `run` but doesn't listen to interupt signals, `f` stands for \"fast\" \
         (it's faster, but you will have to wait until it's finished processing)"),
+    ("run-freq", "Run simulation at a constant pace, using the provided frequency"),
     ("test", "Run quick mem+proc test. Takes in a number of secs to run the average processing speed test (default=2)"),
     ("ls", "List simple variables (no lists or grids). Takes in a string argument, returns only vars that contain that string in their address"),
     ("snap", "Export current sim state to snapshot file. Takes a path to target file, relative to where endgame is running."),

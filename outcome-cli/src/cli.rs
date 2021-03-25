@@ -23,6 +23,7 @@ use simplelog::{Level, LevelPadding};
 #[cfg(feature = "watcher")]
 use notify::{RecommendedWatcher, Watcher};
 
+use crate::interactive::{OnSignal, OnSignalAction};
 use crate::util::{
     find_project_root, format_elements_list, get_scenario_paths, get_snapshot_paths,
 };
@@ -504,10 +505,22 @@ fn start_run_scenario(path: PathBuf, matches: &ArgMatches) -> Result<()> {
             }
         }
 
+        // run a loop allowing signal handling
+        let triggered = Arc::new(AtomicBool::new(false));
+        let r = triggered.clone();
+        ctrlc::set_handler(move || {
+            r.store(true, Ordering::SeqCst);
+        })
+        .expect("error setting ctrlc handler");
+
         interactive::start(
             interactive::InterfaceType::Scenario(path.to_string_lossy().to_string()),
             &config_path,
             on_change,
+            Some(OnSignal {
+                trigger: triggered,
+                action: OnSignalAction::Custom,
+            }),
         )?;
     }
     Ok(())
@@ -519,6 +532,7 @@ fn start_run_snapshot(path: PathBuf, matches: &ArgMatches) -> Result<()> {
         interactive::start(
             interactive::InterfaceType::Snapshot(path.to_string_lossy().to_string()),
             matches.value_of("icfg").unwrap_or(interactive::CONFIG_FILE),
+            None,
             None,
         );
     }
@@ -568,7 +582,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
             Some(v) => Some(Duration::from_secs(v)),
         },
 
-        use_auth,
+        use_auth: false,
         use_compression: matches.is_present("use-compression"),
         auth_pairs: vec![],
         transports: match matches.value_of("transports") {
@@ -683,10 +697,22 @@ fn start_client(matches: &ArgMatches) -> Result<()> {
         matches.value_of("password").map(|s| s.to_string()),
     )?;
 
+    // run a loop allowing signal handling
+    let triggered = Arc::new(AtomicBool::new(false));
+    let r = triggered.clone();
+    ctrlc::set_handler(move || {
+        r.store(true, Ordering::SeqCst);
+    })
+    .expect("error setting ctrlc handler");
+
     interactive::start(
         interactive::InterfaceType::Remote(client),
         matches.value_of("icfg").unwrap_or(interactive::CONFIG_FILE),
         None,
+        Some(OnSignal {
+            trigger: triggered,
+            action: OnSignalAction::Custom,
+        }),
     );
     Ok(())
 }
