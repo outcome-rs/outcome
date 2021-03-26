@@ -14,6 +14,7 @@ use crate::msg::*;
 use crate::{Coord, Worker};
 
 //use crate::coord::CoordNetwork;
+use crate::service::Service;
 use crate::socket::{Encoding, Socket, SocketConfig, SocketEvent, SocketType, Transport};
 use crate::{error::Error, Result};
 use fnv::FnvHashMap;
@@ -174,6 +175,8 @@ pub struct Server {
     time_since_last_msg: Duration,
     /// Time since last new client connection accepted
     time_since_last_accept: Duration,
+
+    pub services: Vec<Service>,
 }
 
 impl Server {
@@ -234,7 +237,24 @@ impl Server {
             uptime: Default::default(),
             time_since_last_msg: Default::default(),
             time_since_last_accept: Default::default(),
+            services: vec![],
         }
+    }
+
+    pub fn initialize(&mut self) -> Result<()> {
+        match &mut self.sim {
+            SimConnection::Local(sim) => {
+                // start the service processes
+                for service_model in &sim.model.services {
+                    info!("starting service: {}", service_model.name);
+                    let service = Service::start_from_model(service_model.clone())?;
+                    self.services.push(service);
+                }
+            }
+            _ => (),
+        }
+
+        Ok(())
     }
 
     // TODO allow for client reconnect using the same server-side connection
@@ -256,6 +276,12 @@ impl Server {
                     self_keepalive.as_millis() as u32,
                 ));
             }
+        }
+
+        // TODO implement time setting for monitoring every n-th poll
+        // monitor services
+        for service in &mut self.services {
+            service.monitor();
         }
 
         // handle new incoming clients
@@ -323,9 +349,18 @@ impl Server {
         Ok(())
     }
 
+    /// This function handles shutdown cleanup, like killing spawned services.
+    pub fn cleanup(&mut self) -> Result<()> {
+        for service in &mut self.services {
+            service.stop();
+        }
+        Ok(())
+    }
+
     /// Start a polling loop.
     ///
     /// Allows for remote termination.
+    ///
     pub fn start_polling(&mut self, running: Arc<AtomicBool>) -> Result<()> {
         loop {
             // terminate loop if the `running` bool gets flipped to false

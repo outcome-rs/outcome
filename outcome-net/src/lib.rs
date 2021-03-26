@@ -83,6 +83,19 @@ extern crate log;
 
 extern crate outcome_core as outcome;
 
+pub use client::{Client, ClientConfig, CompressionPolicy};
+pub use coord::Coord;
+pub use error::{Error, Result};
+pub use server::{Server, ServerConfig, SimConnection};
+pub use socket::Encoding;
+pub use socket::SocketEvent;
+pub use socket::Transport;
+#[cfg(feature = "transport_nng")]
+pub(crate) use transport::nng::*;
+#[cfg(feature = "transport_zmq")]
+pub(crate) use transport::zmq::*;
+pub use worker::Worker;
+
 pub mod msg;
 
 mod sig;
@@ -92,22 +105,7 @@ mod client;
 mod coord;
 mod error;
 mod server;
+mod service;
 mod socket;
 mod util;
 mod worker;
-
-#[cfg(feature = "transport_nng")]
-pub(crate) use transport::nng::*;
-#[cfg(feature = "transport_zmq")]
-pub(crate) use transport::zmq::*;
-
-pub use client::{Client, ClientConfig, CompressionPolicy};
-pub use coord::Coord;
-pub use server::{Server, ServerConfig, SimConnection};
-pub use worker::Worker;
-
-pub use socket::Encoding;
-pub use socket::SocketEvent;
-pub use socket::Transport;
-
-pub use error::{Error, Result};

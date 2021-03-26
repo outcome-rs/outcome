@@ -61,6 +61,7 @@ pub struct SimModel {
     pub data: Vec<DataEntry>,
     pub data_files: Vec<DataFileEntry>,
     pub data_imgs: Vec<DataImageEntry>,
+    pub services: Vec<ServiceModel>,
 }
 
 impl SimModel {
@@ -76,6 +77,7 @@ impl SimModel {
             data: Vec::new(),
             data_files: Vec::new(),
             data_imgs: Vec::new(),
+            services: Vec::new(),
         };
 
         // add hardcoded content
@@ -92,6 +94,11 @@ impl SimModel {
 
         // iterate over scenario modules
         for module in &scenario.modules {
+            // services
+            for module_service in &module.manifest.services {
+                model.services.push(module_service.clone());
+            }
+
             // load from structured data
             #[cfg(feature = "yaml")]
             {
@@ -634,7 +641,7 @@ pub struct ModuleManifest {
     pub reqs: Vec<String>,
 
     pub libs: Vec<ModuleLib>,
-    pub services: Vec<ModuleService>,
+    pub services: Vec<ServiceModel>,
 
     // optional
     /// Free-form module name
@@ -711,24 +718,36 @@ impl ModuleManifest {
             let mut executable_path = None;
             let mut project_path = None;
             let mut managed = true;
-            let mut args_string = None;
+            let mut args = Vec::new();
 
             if let Some(table) = service_value.as_table() {
                 for (name, value) in table {
                     match name.as_str() {
-                        "executable" | "path" => executable_path = Some(value.to_string()),
+                        "executable" | "path" => {
+                            executable_path =
+                                Some(value.to_string()[1..value.to_string().len() - 1].to_string())
+                        }
                         "project" => project_path = Some(value.to_string()),
+                        "args" => {
+                            if let Some(arr) = value.as_array() {
+                                args = arr.iter().map(|v| v.to_string()).collect();
+                            }
+                        }
                         _ => (),
                     }
                 }
             } else if let Some(s) = service_value.as_str() {
-                executable_path = Some(s.to_string());
+                executable_path = Some(s[1..s.len() - 1].to_string());
             }
-            let service = ModuleService {
-                executable: executable_path,
+
+            let service = ServiceModel {
+                name: service_name,
+                executable: Some(
+                    path.join(PathBuf::from_str(executable_path.unwrap().as_str()).unwrap()),
+                ),
                 project: project_path,
                 managed,
-                args: args_string,
+                args,
             };
             services.push(service);
         }
@@ -785,15 +804,17 @@ pub struct ModuleLib {
 
 /// Service declared by a module.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleService {
+pub struct ServiceModel {
+    /// Unique name for the service
+    pub name: String,
     /// Path to executable relative to module root
-    executable: Option<String>,
+    pub executable: Option<PathBuf>,
     /// Path to buildable project
-    project: Option<String>,
+    pub project: Option<String>,
     /// Defines the nature of the service
-    managed: bool,
+    pub managed: bool,
     /// Arguments string passed to the executable
-    args: Option<String>,
+    pub args: Vec<String>,
 }
 
 /// Module model.

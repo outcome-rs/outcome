@@ -219,9 +219,9 @@ impl Coord {
         Ok(())
     }
 
-    // TODO support less frequent polling of the greeter socket
     /// Polls for messages coming from workers and processes them accordingly.
     pub fn manual_poll(&mut self) -> Result<()> {
+        // TODO support less frequent polling of the greeter socket
         if let Ok(msg) = &self.net.greeter.try_recv_msg() {
             match MessageType::try_from(msg.type_)? {
                 MessageType::IntroduceWorkerToCoordRequest => {

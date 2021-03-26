@@ -647,6 +647,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     };
 
     let mut server = Server::new_with_config(server_address, config, sim_instance);
+    server.initialize()?;
 
     // run a loop allowing graceful shutdown
     let running = Arc::new(AtomicBool::new(true));
@@ -662,6 +663,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         client.connection.disconnect(None);
     }
     server.manual_poll()?;
+    server.cleanup()?;
 
     thread::sleep(Duration::from_secs(1));
 

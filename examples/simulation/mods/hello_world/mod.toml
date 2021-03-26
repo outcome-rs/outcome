@@ -3,3 +3,9 @@ name = "hello_world"
 description = "Barebones hello world module."
 version = "0.1.0"
 engine = "*"
+
+[services.hello_service]
+path = "hello_service/target/release/hello_service"
+instancing = "one_per_worker"
+#instancing = "one_globally"
+args = ["--managed"]

@@ -75,6 +75,13 @@ extern crate log;
 #[macro_use]
 extern crate fasteval;
 
+// reexports
+pub use address::Address;
+pub use error::Result;
+pub use model::SimModel;
+pub use sim::Sim;
+pub use var::{Var, VarType};
+
 pub mod address;
 pub mod arraystring;
 pub mod distr;
@@ -145,13 +152,6 @@ pub const FEATURE_NAME_MACHINE_COMPLETE: &str = "machine_complete";
 pub const FEATURE_MACHINE_COMPLETE: bool = false;
 #[cfg(feature = "machine_complete")]
 pub const FEATURE_MACHINE_COMPLETE: bool = true;
-
-// reexports
-pub use address::Address;
-pub use error::Result;
-pub use model::SimModel;
-pub use sim::Sim;
-pub use var::{Var, VarType};
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
