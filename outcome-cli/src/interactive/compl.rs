@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use linefeed::complete::{Completer, Completion};
 use linefeed::terminal::Terminal;
-use linefeed::{Interface, Prompter, ReadResult};
-use outcome::{Sim, SimModel};
+use linefeed::Prompter;
+use outcome::Sim;
 
 use super::{SimDriver, APP_COMMANDS, CFG_VARS};
 use std::ops::Deref;

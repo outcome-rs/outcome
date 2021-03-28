@@ -1,30 +1,22 @@
-extern crate outcome_core as outcome;
-
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::{ErrorKind, Write};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use outcome::{Address, Sim, SimModel, VarType};
+use fnv::FnvHashMap;
+use id_pool::IdPool;
+use outcome::{arraystring, Address, Sim, SimModel, StringId, VarType};
 
 use crate::msg::*;
-use crate::{Coord, Worker};
-
-//use crate::coord::CoordNetwork;
 use crate::service::Service;
 use crate::socket::{Encoding, Socket, SocketConfig, SocketEvent, SocketType, Transport};
 use crate::{error::Error, Result};
-use fnv::FnvHashMap;
-use id_pool::IdPool;
-use outcome_core::{arraystring, StringId};
-use std::convert::{TryFrom, TryInto};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread::{current, sleep};
+use crate::{Coord, Worker};
 
 pub const SERVER_ADDRESS: &str = "0.0.0.0:9124";
 pub const GREETER_ADDRESS: &str = "0.0.0.0:9123";
@@ -1013,24 +1005,23 @@ impl Server {
                 *sim_instance.get_var_mut(&addr)?.as_bool_list_mut()? = var;
             }
             #[cfg(feature = "outcome/grids")]
-            for (address, var) in data.string_grids {
-                let addr = Address::from_str(&address)?;
-                *sim_instance.get_var_mut(&addr)?.as_str_grid_mut()? = var;
-            }
-            #[cfg(feature = "outcome/grids")]
-            for (address, var) in data.int_grids {
-                let addr = Address::from_str(&address)?;
-                *sim_instance.get_var_mut(&addr)?.as_int_grid_mut()? = var;
-            }
-            #[cfg(feature = "outcome/grids")]
-            for (address, var) in data.float_grids {
-                let addr = Address::from_str(&address)?;
-                *sim_instance.get_var_mut(&addr)?.as_float_grid_mut()? = var;
-            }
-            #[cfg(feature = "outcome/grids")]
-            for (address, var) in data.bool_grids {
-                let addr = Address::from_str(&address)?;
-                *sim_instance.get_var_mut(&addr)?.as_bool_grid_mut()? = var;
+            {
+                for (address, var) in data.string_grids {
+                    let addr = Address::from_str(&address)?;
+                    *sim_instance.get_var_mut(&addr)?.as_str_grid_mut()? = var;
+                }
+                for (address, var) in data.int_grids {
+                    let addr = Address::from_str(&address)?;
+                    *sim_instance.get_var_mut(&addr)?.as_int_grid_mut()? = var;
+                }
+                for (address, var) in data.float_grids {
+                    let addr = Address::from_str(&address)?;
+                    *sim_instance.get_var_mut(&addr)?.as_float_grid_mut()? = var;
+                }
+                for (address, var) in data.bool_grids {
+                    let addr = Address::from_str(&address)?;
+                    *sim_instance.get_var_mut(&addr)?.as_bool_grid_mut()? = var;
+                }
             }
         }
 

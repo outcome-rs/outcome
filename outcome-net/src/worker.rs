@@ -1,15 +1,9 @@
-#![allow(dead_code)]
-
-extern crate outcome_core as outcome;
-
-use std::io::prelude::*;
 use std::io::{ErrorKind, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
+use std::thread;
 use std::time::Duration;
-use std::{io, thread};
 
 use serde::{Deserialize, Serialize};
 
@@ -174,11 +168,7 @@ impl Worker {
         let addr_stem = self.addr.split(":").collect::<Vec<&str>>()[0];
         let socket_addr = format!("{}:0", addr_stem);
 
-        //let addr_stem = self.addr.split(":").collect::<Vec<&str>>()[0];
-        //let laminar_addr = format!("{}:6223", addr_stem);
-        //let mut coord = Socket::bind(&laminar_addr, Transport::Laminar)?;
         let soc_config = SocketConfig {
-            // idle_timeout: None,
             ..Default::default()
         };
         let mut coord = Socket::bind_any_with_config(Transport::Tcp, soc_config)?;
@@ -197,95 +187,19 @@ impl Worker {
 
         self.network.coord = Some(coord);
 
-        // self.driver.connect_to_coord(&req.ip_addr, resp)?;
-
-        // self.driver.establish_coord_conn();
-        // let req: IntroduceCoordRequest = self
-        //     .driver
-        //     .msg_read_central()
-        //     .unwrap()
-        //     .unpack_payload()
-        //     .unwrap();
-        //
-        // println!("{:?}", req);
-
-        // let ou =
-        // let msg = match local_worker.lock().unwrap().driver.read() {
-        //     Ok(m) => m,
-        //     Err(e) => {
-        //         println!("failed registration: read_message error: {}", e);
-        //         return;
-        //     }
-        // };
-        // println!("{:?}", msg);
-        // let req: IntroduceCoordRequest = unpack_payload(&msg.payload, false, None).unwrap();
-
-        // let mut out_stream = TcpStream::connect(req.ip_addr).unwrap();
-        // let resp = IntroduceCoordResponse {
-        //     error: "".to_string(),
-        // };
-        // send_message(message_from_payload(resp, false), &mut out_stream, None);
-        // println!("sent response");
-
         loop {
             // sleep a little to make this thread less expensive
-            sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(10));
 
             if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
                 self.handle_signal(sig.into_inner())?;
             } else {
-                // println!("in loop");
                 continue;
             }
         }
     }
 }
 
-/// Handles first message from a fellow worker.
-fn handle_message_new_comrade(
-    worker_arc: Arc<Mutex<Worker>>,
-    buf: &mut Vec<u8>,
-    mut stream: TcpStream,
-) -> Option<Comrade> {
-    unimplemented!();
-    ////    println!("{:?}", buf);
-    //    let mut msg = match unpack_message(buf.to_vec()) {
-    //        Some(m) => m,
-    //        None => return None,
-    //    };
-    ////    println!("unpacked message");
-    //    let rwr: IntroduceCoordRequest = match unpack_payload(&msg.payload, false, Some(msg.payload_size)) {
-    //        Some(r) => r,
-    //        None => return None,
-    //    };
-    ////    println!("unpacked payload");
-    //    println!("{:?}", rwr.clone());
-    //
-    //    let mut server = worker_arc.lock().unwrap();
-    //
-    ////    if !server.passwd_list.contains(&rcr.passwd) {
-    ////        println!("new client failed password auth!");
-    ////        return None;
-    ////    }
-    //
-    //    let comrade = Comrade {
-    //        name: rwr.name,
-    //        ip_addr: stream.peer_addr().unwrap(),
-    //        passwd: rwr.passwd,
-    //        stream: Some(stream.try_clone().unwrap()),
-    //    };
-    //    let mut error: String = String::new();
-    //    if let Err(e) = server.register_comrade(comrade.try_clone().unwrap()) {
-    //        error = e;
-    //    }
-    //    let resp = IntroduceCoordResponse {
-    ////        clients: Vec::new(),
-    //        error,
-    //    };
-    //
-    //    send_message(message_from_payload(resp, false), &mut stream, None);
-    //    Some(comrade)
-}
 impl Worker {
     fn handle_signal(&mut self, sig: Signal) -> Result<()> {
         debug!("handling signal: {:?}", sig);
@@ -295,11 +209,6 @@ impl Worker {
             Signal::StartProcessStep(event_queue) => {
                 let sim_node = self.sim_node.as_mut().unwrap();
                 sim_node.step(&mut self.network, &event_queue)?;
-                // self.sim_node.as_mut().unwrap().step(self, &event_queue)?;
-                // self.network
-                //     .driver
-                //     .coord
-                //     .send(crate::sig::Signal::from(Signal::ProcessStepFinished).to_bytes()?)?
             }
             Signal::DataRequestAll => self.handle_sig_data_request_all()?,
             Signal::SpawnEntities(entities) => self.handle_sig_spawn_entities(entities)?,
@@ -308,6 +217,7 @@ impl Worker {
 
         Ok(())
     }
+
     //TODO include event_queue in the initialization process?
     fn handle_sig_initialize_node(&mut self, model: SimModel) -> Result<()> {
         let mut node = SimNode::from_model(&model)?;
@@ -515,17 +425,11 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
 impl outcome::distr::NodeCommunication for WorkerNetwork {
     fn sig_read_central(&mut self) -> outcome::Result<Signal> {
         if let Some(coord) = &mut self.coord {
-            //let (addr, sig) = self.coord.as_mut().unwrap().recv_sig().unwrap();
             let sig = match coord.recv_sig() {
                 Ok((addr, sig)) => sig,
                 Err(e) => return Err(outcome::error::Error::Other(e.to_string())),
             };
             Ok(sig.into_inner())
-            //match coord.recv_sig() {
-            //Ok((addr, sig)) => return Ok(
-            //if let Ok((addr, sig)) = coord.recv_sig() {
-            //return Ok(sig.into_inner());
-            //}
         } else {
             Err(outcome::error::Error::Other("no coord".to_string()))
         }
@@ -567,36 +471,3 @@ impl outcome::distr::NodeCommunication for WorkerNetwork {
         unimplemented!()
     }
 }
-
-// pub fn handle_distr_msg_request(payload: Vec<u8>, worker_arc: Arc<Mutex<Worker>>) -> Result<()> {
-//     println!("handling distr msg request");
-//     let distr_msg_req: SignalRequest = unpack_payload(&payload, false, None)?;
-//     let mut worker = worker_arc.lock().map_err(|e| Error::Other(e.to_string()))?;
-//     match distr_msg_req.signal {
-//         // Signal::InitializeNode((model, entities)) => {
-//         //     println!("{:?}", entities);
-//         //     let node = SimNode::from_model(&model, &entities).unwrap();
-//         //     worker.sim_node = Some(node);
-//         //     let resp = SignalResponse {
-//         //         distr_msg: Signal::EndOfMessages,
-//         //     };
-//         //     send_message(message_from_payload(resp, false), &mut stream_out, None).unwrap();
-//         // }
-//         Signal::StartProcessStep(event_queue) => {
-//             let mut node = worker.sim_node.as_mut().unwrap();
-//             // let entity_node_map = HashMap::new();
-//             // TODO
-//             // let mut addr_book = HashMap::new();
-//             // addr_book.insert(
-//             //     "0".to_string(),
-//             //     TcpStreamConnection {
-//             //         stream_in: stream_in.try_clone().unwrap(),
-//             //         stream_out: stream_out.try_clone().unwrap(),
-//             //     },
-//             // );
-//             // node.step(&entity_node_map, &mut addr_book);
-//         }
-//         _ => unimplemented!(),
-//     }
-//     Ok(())
-// }

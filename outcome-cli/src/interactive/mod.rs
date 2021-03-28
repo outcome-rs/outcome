@@ -19,17 +19,15 @@ mod img_print;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{fs, io, thread};
 
 use anyhow::Result;
 use linefeed::inputrc::parse_text;
-use linefeed::{Interface, Prompter, ReadResult};
+use linefeed::{Interface, ReadResult};
 
-use outcome::{Address, Sim, SimModel};
-use outcome_net::msg::TurnAdvanceResponse;
+use outcome::Sim;
 use outcome_net::{Client, SocketEvent};
 
 use self::compl::MainCompleter;
@@ -290,7 +288,7 @@ pub fn start(
             let mut driver = driver_arc.lock().unwrap();
             match driver.deref_mut() {
                 SimDriver::Remote(ref mut client) => match client.connection.try_recv() {
-                    Ok((addr, event)) => match event {
+                    Ok((_, event)) => match event {
                         SocketEvent::Disconnect => {
                             println!("\nServer terminated the connection...");
                             break 'outer;

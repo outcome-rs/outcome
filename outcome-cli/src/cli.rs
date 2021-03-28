@@ -1,24 +1,17 @@
 //! Application definition.
 
-#![allow(dead_code)]
-#![allow(unused)]
-
 extern crate simplelog;
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{ErrorKind, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc, Mutex};
-use std::thread::sleep;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use std::time::Duration;
-use std::{env, fs, thread};
+use std::{env, thread};
 
 use anyhow::{Error, Result};
-use clap::{App, AppSettings, Arg, ArgGroup, ArgMatches, SubCommand};
+use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use outcome::Sim;
 use outcome_net::{CompressionPolicy, Coord, Server, ServerConfig, SimConnection, Worker};
-use simplelog::{Level, LevelPadding};
 
 #[cfg(feature = "watcher")]
 use notify::{RecommendedWatcher, Watcher};
@@ -27,7 +20,7 @@ use crate::interactive::{OnSignal, OnSignalAction};
 use crate::util::{
     find_project_root, format_elements_list, get_scenario_paths, get_snapshot_paths,
 };
-use crate::{init, interactive, test, util};
+use crate::{interactive, test};
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 pub const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
@@ -299,10 +292,7 @@ pub fn start(matches: ArgMatches) -> Result<()> {
 
 fn start_new(matches: &ArgMatches) -> Result<()> {
     let name = matches.value_of("name").unwrap();
-
     unimplemented!();
-
-    Ok(())
 }
 
 fn start_test(matches: &ArgMatches) -> Result<()> {
@@ -463,6 +453,7 @@ fn start_run_scenario(path: PathBuf, matches: &ArgMatches) -> Result<()> {
         if matches.is_present("watch") {
             #[cfg(feature = "watcher")]
             {
+                use std::sync::Mutex;
                 let watch_path = find_project_root(path.clone(), 4)?;
                 info!(
                     "watching changes at project path: {}",
@@ -662,7 +653,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     for (client_id, client) in &mut server.clients {
         client.connection.disconnect(None);
     }
-    server.manual_poll()?;
+    // server.manual_poll()?;
     server.cleanup()?;
 
     thread::sleep(Duration::from_secs(1));
@@ -758,7 +749,7 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
 
 /// Sets up logging based on settings from the matches.
 fn setup_log_verbosity(matches: &ArgMatches) {
-    use self::simplelog::{Config, LevelFilter, TermLogger};
+    use self::simplelog::{LevelFilter, TermLogger};
     let level_filter = match matches.value_of("verbosity") {
         Some(s) => match s {
             "0" | "none" => LevelFilter::Off,
