@@ -36,7 +36,6 @@ pub type ClientId = u32;
 /// High-level representation of a simulation interface.
 pub enum SimConnection {
     Local(Sim),
-    //ClusterCoord(Arc<Mutex<Coord>>, Arc<Mutex<CoordNetwork>>),
     ClusterCoord(Coord),
     ClusterWorker(Worker),
 }
@@ -74,6 +73,7 @@ pub struct Client {
     pub order_id_pool: IdPool,
 }
 
+/// Configuration settings for server.
 pub struct ServerConfig {
     /// Name of the server
     pub name: String,

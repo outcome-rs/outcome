@@ -4,6 +4,7 @@ use thiserror::Error;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
+/// Enumeration of errors that may occur during network operations.
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("would block")]

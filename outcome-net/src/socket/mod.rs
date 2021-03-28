@@ -347,6 +347,7 @@ impl Socket {
     }
 }
 
+/// Variant event type that is to be sent across the network sockets.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum SocketEvent {
     Bytes(Vec<u8>),

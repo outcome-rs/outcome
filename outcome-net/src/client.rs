@@ -12,6 +12,7 @@ use crate::msg::{
 use crate::socket::{Encoding, Socket, SocketConfig, SocketType, Transport};
 use crate::{error::Error, Result};
 
+/// List of available compression policies for outgoing messages.
 #[derive(Debug)]
 pub enum CompressionPolicy {
     /// Compress all outgoing traffic
@@ -48,6 +49,7 @@ impl CompressionPolicy {
     }
 }
 
+/// Configuration settings for client.
 #[derive(Debug)]
 pub struct ClientConfig {
     /// Self-assigned name

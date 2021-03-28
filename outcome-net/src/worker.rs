@@ -3,32 +3,27 @@
 extern crate outcome_core as outcome;
 
 use std::io::prelude::*;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::{io, thread};
-
-//use rmp_serde::{Deserializer, Serializer};
-use serde::{Deserialize, Serialize};
-
-use std::io::ErrorKind;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
+use std::{io, thread};
 
-use outcome::Sim;
+use serde::{Deserialize, Serialize};
 
 use crate::msg::coord_worker::{
     IntroduceCoordRequest, IntroduceCoordResponse, IntroduceWorkerToCoordRequest,
     IntroduceWorkerToCoordResponse,
 };
 use crate::msg::*;
+use crate::socket::{Encoding, Socket, SocketConfig, Transport};
 use crate::transport::{SocketInterface, WorkerDriverInterface};
 use crate::util::tcp_endpoint;
 use crate::{error::Error, sig, Result};
 
-use crate::socket::{Encoding, Socket, SocketConfig, Transport};
+use outcome::Sim;
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
 use outcome_core::{
     arraystring, Address, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType,
@@ -41,9 +36,11 @@ pub const WORKER_ADDRESS: &str = "0.0.0.0:5922";
 /// Network-unique identifier for a single worker
 pub type WorkerId = u32;
 
-/// Represents a single cluster node, connected to and controlled by
-/// the cluster coordinator. `Worker`s are also connected to each other, either
-/// directly or not, depending on network topology used.
+/// Represents a single cluster node.
+///
+/// `Worker`s are connected to, and orchestrated by, a cluster coordinator.
+/// They are also connected to each other, either directly or not, depending
+/// on network topology used.
 ///
 /// # Usage details
 ///
