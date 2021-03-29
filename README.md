@@ -38,10 +38,7 @@ whether it's multiplayer game worlds, organic city simulations, or scientific
 calculations, is still not a simple task. Especially when it comes to
 distributing them across multiple machines in a dynamic way. 
 
-This project can be seen as a (very) minimalistic re-envisioning of the
-[HLA standard](https://en.wikipedia.org/wiki/High_Level_Architecture) for
-distributed (federated) simulations, with a significantly lower barrier to
-entry. Scalable, user-friendly distributed simulation remains a largely
+Scalable, user-friendly distributed simulation remains a largely
 unexplored territory, with only a handful of closed-source
 [commercial](https://hadean.com/) [solutions](https://improbable.io/)
 available. `outcome` is an attempt to change that.
