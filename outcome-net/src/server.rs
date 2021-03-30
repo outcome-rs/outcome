@@ -14,9 +14,12 @@ use outcome::{arraystring, Address, Sim, SimModel, StringId, VarType};
 
 use crate::msg::*;
 use crate::service::Service;
+// use crate::sig::Signal;
+
 use crate::socket::{Encoding, Socket, SocketConfig, SocketEvent, SocketType, Transport};
 use crate::{error::Error, Result};
 use crate::{Coord, Worker};
+use outcome::distr::{NodeCommunication, Signal};
 
 pub const SERVER_ADDRESS: &str = "0.0.0.0:9124";
 pub const GREETER_ADDRESS: &str = "0.0.0.0:9123";
@@ -233,17 +236,64 @@ impl Server {
         }
     }
 
-    pub fn initialize(&mut self) -> Result<()> {
+    /// Initializes services based on the available model.
+    ///
+    /// # New services with model changes
+    ///
+    /// Can be called repeatedly to initialize services following model
+    /// changes.
+    pub fn initialize_services(&mut self) -> Result<()> {
         match &mut self.sim {
             SimConnection::Local(sim) => {
                 // start the service processes
                 for service_model in &sim.model.services {
-                    info!("starting service: {}", service_model.name);
-                    let service = Service::start_from_model(service_model.clone())?;
-                    self.services.push(service);
+                    if self
+                        .services
+                        .iter()
+                        .find(|s| s.name == service_model.name)
+                        .is_none()
+                    {
+                        info!("starting service: {}", service_model.name);
+                        let service = Service::start_from_model(
+                            service_model.clone(),
+                            self.greeters
+                                .first()
+                                .unwrap()
+                                .last_endpoint()
+                                .unwrap()
+                                .to_string(),
+                        )?;
+                        self.services.push(service);
+                    }
                 }
             }
-            _ => (),
+            SimConnection::ClusterWorker(worker) => {
+                if let Some(node) = &worker.sim_node {
+                    for service_model in &node.model.services {
+                        if self
+                            .services
+                            .iter()
+                            .find(|s| s.name == service_model.name)
+                            .is_none()
+                        {
+                            info!("starting service: {}", service_model.name);
+                            let service = Service::start_from_model(
+                                service_model.clone(),
+                                self.greeters
+                                    .first()
+                                    .unwrap()
+                                    .last_endpoint()
+                                    .unwrap()
+                                    .to_string(),
+                            )?;
+                            self.services.push(service);
+                        }
+                    }
+                }
+            }
+            SimConnection::ClusterCoord(coord) => {
+                // warn!("not starting any services since it's a coordinator-backed server");
+            }
         }
 
         Ok(())
@@ -269,6 +319,9 @@ impl Server {
                 ));
             }
         }
+
+        // initialize services that might be missing
+        self.initialize_services();
 
         // TODO implement time setting for monitoring every n-th poll
         // monitor services
@@ -312,6 +365,11 @@ impl Server {
             coord.manual_poll()?;
         }
 
+        // handle worker poll if applicable
+        if let SimConnection::ClusterWorker(worker) = &mut self.sim {
+            worker.manual_poll()?;
+        }
+
         // handle events from clients
         let client_ids: Vec<u32> = self.clients.keys().cloned().collect();
         for client_id in client_ids {
@@ -352,7 +410,6 @@ impl Server {
     /// Start a polling loop.
     ///
     /// Allows for remote termination.
-    ///
     pub fn start_polling(&mut self, running: Arc<AtomicBool>) -> Result<()> {
         loop {
             // terminate loop if the `running` bool gets flipped to false
@@ -437,7 +494,13 @@ impl Server {
                 furthest_step: match &self.sim {
                     SimConnection::Local(sim) => sim.get_clock(),
                     SimConnection::ClusterCoord(coord) => coord.central.get_clock(),
-                    _ => unimplemented!(),
+                    SimConnection::ClusterWorker(worker) => {
+                        if let Some(node) = &worker.sim_node {
+                            node.clock
+                        } else {
+                            unimplemented!()
+                        }
+                    }
                 },
                 scheduled_dts: Default::default(),
                 order_store: Default::default(),
@@ -637,7 +700,13 @@ impl Server {
         let model_scenario = match &self.sim {
             SimConnection::Local(sim) => sim.model.scenario.clone(),
             SimConnection::ClusterCoord(coord) => coord.central.model.scenario.clone(),
-            _ => unimplemented!(),
+            SimConnection::ClusterWorker(worker) => {
+                if let Some(node) = &worker.sim_node {
+                    node.model.scenario.clone()
+                } else {
+                    unimplemented!()
+                }
+            }
         };
         let resp = StatusResponse {
             name: self.config.name.clone(),
@@ -649,7 +718,7 @@ impl Server {
             current_tick: match &self.sim {
                 SimConnection::Local(sim) => sim.get_clock(),
                 SimConnection::ClusterCoord(coord) => coord.central.get_clock(),
-                _ => unimplemented!(),
+                SimConnection::ClusterWorker(worker) => worker.sim_node.as_ref().unwrap().clock,
             },
             scenario_name: model_scenario.manifest.name.clone(),
             scenario_title: model_scenario
@@ -721,6 +790,9 @@ impl Server {
         };
         let mut data_pack = TypedSimDataPack::empty();
         match &mut self.sim {
+            SimConnection::Local(sim_instance) => {
+                handle_data_transfer_request_local(&dtr, sim_instance, client)?
+            }
             SimConnection::ClusterCoord(coord) => {
                 let mut collection = Vec::new();
                 match dtr.transfer_type.as_str() {
@@ -764,10 +836,50 @@ impl Server {
                     _ => unimplemented!(),
                 }
             }
-            SimConnection::Local(sim_instance) => {
-                handle_data_transfer_request_local(&dtr, sim_instance, client)?
+            SimConnection::ClusterWorker(worker) => {
+                //TODO
+                // categorize worker connection to the cluster, whether it's only connected
+                // to the coordinator, to coord and to all workers, or some other way
+                worker.network.sig_send_central(Signal::DataRequestAll)?;
+
+                // for (worker_id, worker) in &mut worker.network.comrades {
+                //     let (_, sig) = worker.connection.recv_sig()?;
+                //     match sig.into_inner() {
+                //         outcome::distr::Signal::DataResponse(data) => {
+                //             collection.extend(data)
+                //         }
+                //         _ => unimplemented!(),
+                //     }
+                // }
+
+                let resp = worker.network.sig_read_central()?;
+                if let Signal::DataResponse(data_vec) = resp {
+                    let mut data_pack = VarSimDataPack::default();
+                    for (addr, var) in data_vec {
+                        data_pack
+                            .vars
+                            .insert((addr.entity, addr.component, addr.var_id), var);
+                    }
+                    for (entity_id, entity) in &worker.sim_node.as_ref().unwrap().entities {
+                        for ((comp_name, var_name), var) in &entity.storage.map {
+                            data_pack.vars.insert(
+                                (
+                                    outcome::EntityName::from(&entity_id.to_string()).unwrap(),
+                                    *comp_name,
+                                    *var_name,
+                                ),
+                                var.clone(),
+                            );
+                        }
+                    }
+
+                    let response = DataTransferResponse {
+                        data: Some(TransferResponseData::Var(data_pack)),
+                        error: String::new(),
+                    };
+                    client.connection.pack_send_msg_payload(response, None)?;
+                }
             }
-            _ => unimplemented!(),
         };
 
         Ok(())
@@ -868,84 +980,119 @@ impl Server {
         {
             let use_compression = self.config.use_compression.clone();
             // let sim_model = server.sim_model.clone();
-            let mut sim_instance = match &mut self.sim {
-                SimConnection::Local(sim) => sim,
-                SimConnection::ClusterCoord(coord) => unimplemented!(),
-                SimConnection::ClusterWorker(worker) => unimplemented!(),
+            match &mut self.sim {
+                SimConnection::Local(sim) => {
+                    //TODO
+                    let dpr: DataPullRequest = msg.unpack_payload(client.connection.encoding())?;
+                    match dpr.data {
+                        PullRequestData::Typed(data) => {
+                            //TODO handle errors
+                            for (address, var) in data.strings {
+                                let addr = Address::from_str(&address)?;
+                                *sim.get_var_mut(&addr)?.as_str_mut()? = var;
+                            }
+                            for (address, var) in data.ints {
+                                let addr = Address::from_str(&address)?;
+                                *sim.get_var_mut(&addr)?.as_int_mut()? = var;
+                            }
+                            for (address, var) in data.floats {
+                                let addr = Address::from_str(&address[1..])?;
+                                *sim.get_var_mut(&addr)?.as_float_mut()? = var;
+                            }
+                            for (address, var) in data.bools {
+                                let addr = Address::from_str(&address)?;
+                                *sim.get_var_mut(&addr)?.as_bool_mut()? = var;
+                            }
+                            for (address, var) in data.string_lists {
+                                let addr = Address::from_str(&address)?;
+                                *sim.get_var_mut(&addr)?.as_str_list_mut()? = var;
+                            }
+                            for (address, var) in data.int_lists {
+                                let addr = Address::from_str(&address)?;
+                                *sim.get_var_mut(&addr)?.as_int_list_mut()? = var;
+                            }
+                            for (address, var) in data.float_lists {
+                                let addr = Address::from_str(&address)?;
+                                *sim.get_var_mut(&addr)?.as_float_list_mut()? = var;
+                            }
+                            for (address, var) in data.bool_lists {
+                                let addr = Address::from_str(&address)?;
+                                *sim.get_var_mut(&addr)?.as_bool_list_mut()? = var;
+                            }
+
+                            #[cfg(feature = "outcome/grids")]
+                            {
+                                for (address, var) in data.string_grids {
+                                    let addr = Address::from_str(&address)?;
+                                    *sim.get_var_mut(&addr)?.as_str_grid_mut()? = var;
+                                }
+                                for (address, var) in data.int_grids {
+                                    let addr = Address::from_str(&address)?;
+                                    *sim.get_var_mut(&addr)?.as_int_grid_mut()? = var;
+                                }
+                                for (address, var) in data.float_grids {
+                                    let addr = Address::from_str(&address)?;
+                                    *sim.get_var_mut(&addr)?.as_float_grid_mut()? = var;
+                                }
+                                for (address, var) in data.bool_grids {
+                                    let addr = Address::from_str(&address)?;
+                                    *sim.get_var_mut(&addr)?.as_bool_grid_mut()? = var;
+                                }
+                            }
+                        }
+                        PullRequestData::Var(data) => {
+                            for ((ent, comp, var), v) in data.vars {
+                                // let addr = Address::from_str(&k)?;
+                                *sim.entities
+                                    .get_mut(&ent.parse().unwrap())
+                                    .unwrap()
+                                    .storage
+                                    .map
+                                    .get_mut(&(comp, var))
+                                    .unwrap() = v;
+                                // sim_instance * sim_instance.get_var_mut(&addr)? = v;
+                            }
+                        }
+                        PullRequestData::VarOrdered(order_idx, data) => {
+                            if let Some(order) = client.order_store.get(&order_idx) {
+                                if data.vars.len() != order.len() {
+                                    warn!("PullRequestData::VarOrdered: var list length doesn't match ({} vs {})", data.vars.len(), order.len());
+                                    panic!();
+                                }
+                                for (n, addr) in order.iter().enumerate() {
+                                    *sim.get_var_mut(addr)? = data.vars[n].clone();
+                                }
+                            }
+                        }
+                    }
+                }
+                SimConnection::ClusterCoord(coord) => {
+                    // TODO
+                }
+                SimConnection::ClusterWorker(worker) => {
+                    //TODO
+                    let dpr: DataPullRequest = msg.unpack_payload(client.connection.encoding())?;
+                    match dpr.data {
+                        PullRequestData::Var(data) => {
+                            for ((ent, comp, var), v) in data.vars {
+                                // let addr = Address::from_str(&k)?;
+                                if let Some(sim_node) = worker.sim_node.as_mut() {
+                                    if let Some(ent) =
+                                        sim_node.entities.get_mut(&ent.parse().unwrap())
+                                    {
+                                        if let Some(var) = ent.storage.map.get_mut(&(comp, var)) {
+                                            *var = v;
+                                        }
+                                    }
+                                }
+
+                                // sim_instance * sim_instance.get_var_mut(&addr)? = v;
+                            }
+                        }
+                        _ => unimplemented!(),
+                    }
+                }
             };
-            //TODO
-            let dpr: DataPullRequest = msg.unpack_payload(client.connection.encoding())?;
-            match dpr.data {
-                PullRequestData::Typed(data) => {
-                    //TODO handle errors
-                    for (address, var) in data.strings {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_str_mut()? = var;
-                    }
-                    for (address, var) in data.ints {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_int_mut()? = var;
-                    }
-                    for (address, var) in data.floats {
-                        let addr = Address::from_str(&address[1..])?;
-                        *sim_instance.get_var_mut(&addr)?.as_float_mut()? = var;
-                    }
-                    for (address, var) in data.bools {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_bool_mut()? = var;
-                    }
-                    for (address, var) in data.string_lists {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_str_list_mut()? = var;
-                    }
-                    for (address, var) in data.int_lists {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_int_list_mut()? = var;
-                    }
-                    for (address, var) in data.float_lists {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_float_list_mut()? = var;
-                    }
-                    for (address, var) in data.bool_lists {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_bool_list_mut()? = var;
-                    }
-                    #[cfg(feature = "outcome/grids")]
-                    for (address, var) in data.string_grids {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_str_grid_mut()? = var;
-                    }
-                    #[cfg(feature = "outcome/grids")]
-                    for (address, var) in data.int_grids {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_int_grid_mut()? = var;
-                    }
-                    #[cfg(feature = "outcome/grids")]
-                    for (address, var) in data.float_grids {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_float_grid_mut()? = var;
-                    }
-                    #[cfg(feature = "outcome/grids")]
-                    for (address, var) in data.bool_grids {
-                        let addr = Address::from_str(&address)?;
-                        *sim_instance.get_var_mut(&addr)?.as_bool_grid_mut()? = var;
-                    }
-                }
-                PullRequestData::Var(data) => {
-                    //
-                }
-                PullRequestData::VarOrdered(order_idx, data) => {
-                    if let Some(order) = client.order_store.get(&order_idx) {
-                        if data.vars.len() != order.len() {
-                            warn!("PullRequestData::VarOrdered: var list length doesn't match ({} vs {})", data.vars.len(), order.len());
-                            panic!();
-                        }
-                        for (n, addr) in order.iter().enumerate() {
-                            *sim_instance.get_var_mut(addr)? = data.vars[n].clone();
-                        }
-                    }
-                }
-            }
         }
         let resp = DataPullResponse {
             error: String::new(),
@@ -1046,7 +1193,7 @@ impl Server {
             let current_tick = match &self.sim {
                 SimConnection::Local(s) => s.get_clock(),
                 SimConnection::ClusterCoord(c) => c.central.clock,
-                _ => unimplemented!(),
+                SimConnection::ClusterWorker(w) => w.sim_node.as_ref().unwrap().clock,
             };
             trace!("current_tick before: {}", current_tick);
             let mut common_furthest_tick = current_tick + 99999;
@@ -1136,6 +1283,7 @@ impl Server {
 
                         // let network = &coord_lock.network;
                         // let central = &mut coord_lock.central;
+                        for (worker_id, worker) in &coord.net.workers {}
                         coord.central.step_network(&mut coord.net, event_queue);
                         // coord_lock
                         //     .central
@@ -1148,7 +1296,31 @@ impl Server {
                         // }
                         //coord.main.step(&coord.entity_node_map, &mut addr_book);
                     }
-                    _ => unimplemented!(),
+                    SimConnection::ClusterWorker(worker) => {
+                        // let mut event_queue = coord.central.event_queue.clone();
+                        // let step_event_name = arraystring::new_unchecked("step");
+                        // if !event_queue.contains(&step_event_name) {
+                        //     event_queue.push(step_event_name);
+                        // }
+                        // coord.central.event_queue.clear();
+                        // coord.central.step_network(&mut coord.net, event_queue);
+                        // coord.central.clock += 1;
+
+                        worker
+                            .network
+                            .sig_send_central(outcome::distr::Signal::WorkerReady)?;
+                        worker
+                            .network
+                            .sig_send_central(outcome::distr::Signal::WorkerRequestProcessStep)?;
+                        //
+                        // let resp = TurnAdvanceResponse {
+                        //     error: String::new(),
+                        // };
+                        // trace!("Didn't block");
+                        // let client = self.clients.get_mut(client_id).unwrap();
+                        // client.connection.pack_send_msg_payload(resp, None)?;
+                        // return Ok(());
+                    }
                 };
             }
 
@@ -1235,27 +1407,29 @@ fn handle_data_transfer_request_local(
     let model = &sim_instance.model;
     match request.transfer_type.as_str() {
         "Full" => {
-            let mut data_pack = TypedSimDataPack::empty();
+            let mut data_pack = VarSimDataPack::default();
             for (entity_uid, entity) in &sim_instance.entities {
                 for ((comp_name, var_id), v) in entity.storage.map.iter() {
-                    if v.is_float() {
-                        data_pack.floats.insert(
-                            format!(
-                                ":{}:{}:{}:{}",
-                                entity_uid,
-                                comp_name,
-                                VarType::Float.to_str(),
-                                var_id
-                            ),
-                            // comp_name.to_string(),
-                            *v.as_float().unwrap(),
-                        );
-                    }
+                    data_pack.vars.insert(
+                        // format!(
+                        //     "{}:{}:{}:{}",
+                        //     entity_uid,
+                        //     comp_name,
+                        //     v.get_type().to_str(),
+                        //     var_id
+                        // ),
+                        (
+                            arraystring::new_truncate(&entity_uid.to_string()),
+                            *comp_name,
+                            *var_id,
+                        ),
+                        v.clone(),
+                    );
                 }
             }
 
             let response = DataTransferResponse {
-                data: Some(TransferResponseData::Typed(data_pack)),
+                data: Some(TransferResponseData::Var(data_pack)),
                 error: String::new(),
             };
             client.connection.pack_send_msg_payload(response, None)

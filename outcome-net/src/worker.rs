@@ -187,20 +187,34 @@ impl Worker {
 
         self.network.coord = Some(coord);
 
-        loop {
-            // sleep a little to make this thread less expensive
-            thread::sleep(Duration::from_millis(10));
+        // loop {
+        //     // sleep a little to make this thread less expensive
+        //     thread::sleep(Duration::from_millis(10));
+        //
+        //     if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
+        //         self.handle_signal(sig.into_inner())?;
+        //     } else {
+        //         continue;
+        //     }
+        // }
+        self.manual_poll()?;
 
-            if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
-                self.handle_signal(sig.into_inner())?;
-            } else {
-                continue;
-            }
-        }
+        Ok(())
     }
 }
 
 impl Worker {
+    pub fn manual_poll(&mut self) -> Result<()> {
+        loop {
+            if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
+                self.handle_signal(sig.into_inner())?;
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn handle_signal(&mut self, sig: Signal) -> Result<()> {
         debug!("handling signal: {:?}", sig);
 

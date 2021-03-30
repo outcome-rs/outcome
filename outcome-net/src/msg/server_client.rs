@@ -194,7 +194,7 @@ pub struct VarSimDataPackOrdered {
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct VarSimDataPack {
-    pub vars: HashMap<String, outcome::Var>,
+    pub vars: HashMap<(outcome::EntityName, outcome::CompName, outcome::VarName), outcome::Var>,
 }
 
 /// Structure holding all data organized based on data types.

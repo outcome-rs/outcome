@@ -273,7 +273,7 @@ impl SimCentral {
                     Signal::EndOfMessages | Signal::ProcessStepFinished => {
                         do_nodes.remove(node_counter);
                     }
-                    _ => unimplemented!(),
+                    _ => warn!("unimplemented: received signal: {:?}", signal),
                 },
                 Err(e) => match e {
                     Error::WouldBlock => continue,

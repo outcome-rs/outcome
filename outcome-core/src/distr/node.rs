@@ -263,18 +263,20 @@ impl SimNode {
                 }
                 // TODO currently rewrites the whole model with the received data
                 Signal::UpdateModel(model) => {
-                    info!("signal: update model");
+                    debug!("signal: update model");
                     self.model = model;
-                    info!("update model finished");
+                    trace!("update model finished");
                 }
                 Signal::EndOfMessages => {
-                    info!("signal: end of messages, breaking loop");
+                    debug!("signal: end of messages, breaking loop");
                     break;
                 }
                 _ => (),
             }
         }
-        info!("sending signal process step finished");
+        self.clock += 1;
+
+        debug!("sending signal process step finished");
         network.sig_send_central(Signal::ProcessStepFinished);
         trace!("sim_node finished send central ext cmd requests");
 

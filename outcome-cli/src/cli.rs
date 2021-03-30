@@ -638,7 +638,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     };
 
     let mut server = Server::new_with_config(server_address, config, sim_instance);
-    server.initialize()?;
+    server.initialize_services()?;
 
     // run a loop allowing graceful shutdown
     let running = Arc::new(AtomicBool::new(true));
@@ -743,6 +743,29 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
         }
     }
     worker.handle_coordinator()?;
+
+    // TODO get server address
+    let mut server = Server::new("127.0.0.1:8123", SimConnection::ClusterWorker(worker));
+    server.initialize_services()?;
+
+    // run a loop allowing graceful shutdown
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("error setting ctrlc handler");
+
+    server.start_polling(running);
+
+    println!("Initiating graceful shutdown...");
+    for (client_id, client) in &mut server.clients {
+        client.connection.disconnect(None);
+    }
+    // server.manual_poll()?;
+    server.cleanup()?;
+
+    thread::sleep(Duration::from_secs(1));
 
     Ok(())
 }

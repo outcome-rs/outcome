@@ -14,7 +14,7 @@ use std::{io, thread};
 use fnv::FnvHashMap;
 use id_pool::IdPool;
 
-use outcome::distr::{Signal, SimCentral, SimNode};
+use outcome::distr::{CentralCommunication, Signal, SimCentral, SimNode};
 use outcome::{distr, EntityId, SimModel};
 
 use crate::error::{Error, Result};
@@ -37,6 +37,10 @@ pub struct Worker {
     pub address: String,
     pub entities: Vec<EntityId>,
     pub connection: Socket,
+    /// Relays information about worker synchronization situation. Workers
+    /// that are also servers can block processing of further steps if any of
+    /// their connected clients blocks.
+    pub is_blocking_step: bool,
 }
 
 /// Encapsulation of coordinator's networking capabilities.
@@ -124,6 +128,7 @@ impl Coord {
             address: worker_addr.to_string(),
             entities: vec![],
             connection: socket,
+            is_blocking_step: true,
         };
         self.net.workers.insert(id, worker);
         Ok(id)
@@ -265,10 +270,39 @@ impl Coord {
             }
         }
 
+        let mut do_step = false;
         for (worker_id, mut worker) in &mut self.net.workers {
             if let Ok((addr, sig)) = worker.connection.try_recv_sig() {
-                debug!("{:?}", sig);
+                match sig.into_inner() {
+                    Signal::WorkerReady => {
+                        worker.is_blocking_step = false;
+                    }
+                    Signal::WorkerNotReady => {
+                        worker.is_blocking_step = true;
+                        do_step = false;
+                    }
+                    Signal::WorkerRequestProcessStep => {
+                        do_step = true;
+                    }
+                    Signal::DataRequestAll => {
+                        debug!("got signal from worker {}: DataRequestAll ", worker_id);
+                        worker
+                            .connection
+                            .send_sig(Signal::DataResponse(Vec::new()), None)?;
+                    }
+                    signal => debug!("{:?}", signal),
+                }
             }
+        }
+        if do_step {
+            let mut event_queue = self.central.event_queue.clone();
+            let step_event_name = outcome::arraystring::new_unchecked("step");
+            if !event_queue.contains(&step_event_name) {
+                event_queue.push(step_event_name);
+            }
+            self.central.event_queue.clear();
+            self.central.step_network(&mut self.net, event_queue);
+            self.central.clock += 1;
         }
         Ok(())
     }

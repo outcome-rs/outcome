@@ -44,6 +44,10 @@ pub enum Signal {
     /// Request node to start processing step, includes event_queue vec
     StartProcessStep(Vec<StringId>),
 
+    WorkerRequestProcessStep,
+    WorkerReady,
+    WorkerNotReady,
+
     /// Shutdown imminent
     ShuttingDown,
 
