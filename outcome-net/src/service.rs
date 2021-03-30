@@ -2,10 +2,91 @@ use std::io::Read;
 use std::process;
 use std::time::{Duration, Instant};
 
+use crate::{Error, Result};
 use outcome::model::ServiceModel;
-use outcome::Result;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
+
+/// Describes all possible types of managed services.
+///
+/// # Portability problems
+///
+/// Some services may be unable to run on some architectures. At the same time
+/// they may be required for processing entities of certain types.
+///
+/// One solution to this problem is tying specific services to certain entity
+/// types. As the runtime understands what services can be run on what
+/// machines, it can prevent spawning of certain types of entities on specific
+/// nodes.
+///
+/// Another solution is writing "less-local" services, that also mutate remote
+/// entities in addition to locally stored ones.
+pub enum ManagedServiceType {
+    /// Expected to exist on all entity-handling nodes
+    Universal,
+    /// Expected to exist on all nodes where at least one entity of certain
+    /// type currently lives, entity type is specified as list of components
+    EntityTypeBound(Vec<String>),
+    /// Expected to exist only on the coord server
+    CoordBound,
+    /// Expected to exist on specific workers by id
+    WorkersBound(Vec<u32>),
+    /// Expected to exist on a number of most performant machines
+    MostPerformant(u32),
+}
+
+impl ManagedServiceType {
+    pub fn new(s: &String, args: Option<&String>) -> Result<Self> {
+        let s_ = match s.to_lowercase().as_str() {
+            "universal" => Self::Universal,
+            "coordbound" | "coord_bound" => Self::CoordBound,
+            "entitytypebound" | "entitytype" | "entity_type" => match args {
+                Some(a) => {
+                    let string_args = a.split(',').map(|s| s.to_string()).collect::<Vec<String>>();
+                    Self::EntityTypeBound(string_args)
+                }
+                None => {
+                    return Err(Error::Other(format!(
+                        "service type {} requires additional argument",
+                        s
+                    )))
+                }
+            },
+            "workersbound" | "workers_bound" | "workers" => match args {
+                Some(a) => {
+                    let mut ids = Vec::new();
+                    for str in a.split(',') {
+                        ids.push(str.parse().unwrap());
+                    }
+                    Self::WorkersBound(ids)
+                }
+                None => {
+                    return Err(Error::Other(format!(
+                        "service type {} requires additional argument",
+                        s
+                    )))
+                }
+            },
+            "mostperformant" | "most_performant" | "performance" => match args {
+                Some(a) => Self::MostPerformant(a.parse().unwrap()),
+                None => {
+                    return Err(Error::Other(format!(
+                        "service type {} requires additional argument",
+                        s
+                    )))
+                }
+            },
+            _ => {
+                return Err(Error::Other(format!(
+                    "failed parsing service type from string: {}",
+                    s
+                )))
+            }
+        };
+        Ok(s_)
+    }
+}
 
 /// Managed client connected to local or remote server.
 ///
@@ -14,7 +95,13 @@ use std::path::PathBuf;
 /// Service is monitored by it's parent process, who's collecting output and
 /// metrics, and checking if the service is alive. If a service process
 /// crashes, there will be an attempt to restart it.
+///
+/// # Services as clients
+///
+/// Services are handled on the server level because, as clients, they require
+/// a connection to server to function properly.
 pub struct Service {
+    pub type_: ManagedServiceType,
     /// Project-wide unique name of the service
     pub name: String,
     /// Path to service binary
@@ -28,6 +115,7 @@ pub struct Service {
     started_at: Instant,
     /// Address of the service client
     address: Option<SocketAddr>,
+    server_address: SocketAddr,
 
     /// Cumulative log for stdout
     pub std_out_log: String,
@@ -35,7 +123,7 @@ pub struct Service {
 
 // TODO support compiling rust services from path to src using cargo
 impl Service {
-    pub fn start_from_model(model: ServiceModel) -> Result<Self> {
+    pub fn start_from_model(model: ServiceModel, server_addr: String) -> Result<Self> {
         let bin_path = if let Some(executable_path) = &model.executable {
             executable_path
         } else if let Some(src_path) = model.project {
@@ -45,17 +133,24 @@ impl Service {
         };
 
         let mut cmd = process::Command::new(model.executable.as_ref().unwrap());
+        cmd.arg(server_addr.clone());
         cmd.args(&model.args);
         let started_at = Instant::now();
         let child = cmd.spawn()?;
 
         let service = Self {
+            type_: if let Some(t) = model.type_ {
+                ManagedServiceType::new(&t, model.type_args.as_ref())?
+            } else {
+                ManagedServiceType::Universal
+            },
             name: model.name.clone(),
             bin_path: bin_path.to_path_buf(),
             args: model.args.clone(),
             handle: child,
             started_at,
             address: None,
+            server_address: SocketAddr::from_str(&server_addr).unwrap(),
             std_out_log: "".to_string(),
         };
 
@@ -91,6 +186,7 @@ impl Service {
             self.handle.kill()?;
         }
         self.handle = process::Command::new(&self.bin_path)
+            .arg(self.server_address.to_string())
             .args(&self.args)
             .spawn()?;
         self.started_at = Instant::now();

@@ -717,12 +717,27 @@ impl ModuleManifest {
         for (service_name, service_value) in deser_manifest.services {
             let mut executable_path = None;
             let mut project_path = None;
+            let mut type_ = None;
+            let mut type_args = None;
             let mut managed = true;
             let mut args = Vec::new();
 
             if let Some(table) = service_value.as_table() {
                 for (name, value) in table {
                     match name.as_str() {
+                        "type" | "type_" | "policy" => {
+                            if let Some(v) = value.as_str() {
+                                type_ = Some(v.to_string());
+                            } else if let Some(table_) = value.as_table() {
+                                for (name_, value_) in table_ {
+                                    match name_.as_str() {
+                                        "name" => type_ = Some(value_.to_string()),
+                                        "args" => type_args = Some(value_.to_string()),
+                                        _ => (),
+                                    }
+                                }
+                            }
+                        }
                         "executable" | "path" => {
                             executable_path =
                                 Some(value.to_string()[1..value.to_string().len() - 1].to_string())
@@ -742,6 +757,8 @@ impl ModuleManifest {
 
             let service = ServiceModel {
                 name: service_name,
+                type_: None,
+                type_args: None,
                 executable: Some(
                     path.join(PathBuf::from_str(executable_path.unwrap().as_str()).unwrap()),
                 ),
@@ -807,6 +824,8 @@ pub struct ModuleLib {
 pub struct ServiceModel {
     /// Unique name for the service
     pub name: String,
+    pub type_: Option<String>,
+    pub type_args: Option<String>,
     /// Path to executable relative to module root
     pub executable: Option<PathBuf>,
     /// Path to buildable project
