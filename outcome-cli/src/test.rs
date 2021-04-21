@@ -56,7 +56,7 @@ pub fn test_sim_struct(sim: &Sim) {
     for ent in sim.get_entities() {
         for (_, var) in ent.storage.map.iter() {
             match var.get_type() {
-                outcome::VarType::Str => total_str_variables_count += 1,
+                outcome::VarType::String => total_str_variables_count += 1,
                 outcome::VarType::Int => total_int_variables_count += 1,
                 outcome::VarType::Float => total_float_variables_count += 1,
                 outcome::VarType::Bool => total_bool_variables_count += 1,

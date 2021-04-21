@@ -131,12 +131,12 @@ impl ForIn {
         let len = match iter_target {
             Var::Int(num) => *num as usize,
             Var::Float(num) => *num as usize,
-            Var::StrList(list) => list.len(),
+            Var::StringList(list) => list.len(),
             Var::IntList(list) => list.len(),
             Var::FloatList(list) => list.len(),
             Var::BoolList(list) => list.len(),
             #[cfg(feature = "grids")]
-            Var::StrGrid(list) => list.len(),
+            Var::StringGrid(list) => list.len(),
             _ => 0,
         };
 
@@ -189,7 +189,7 @@ impl ForIn {
                             .unwrap()
                             .as_int_mut()
                         {
-                            *int_var = iteration as i64;
+                            *int_var = iteration as crate::Int;
                         }
                     }
                     VarType::IntList => {

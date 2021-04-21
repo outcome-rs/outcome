@@ -21,80 +21,14 @@ use rlua::Lua;
 
 pub use storage::StorageIndex;
 
-// impl CompCollection {
-//     pub fn get(&self, key: &CompId) -> Option<&Component> {
-//         self.map.get(key)
-//     }
-//     pub fn get_mut(&mut self, key: &CompId) -> Option<&mut Component> {
-//         self.map.get_mut(key)
-//     }
-//     pub fn attach(
-//         &mut self,
-//         model: &SimModel,
-//         storage: &mut Storage,
-//         comp_name: &StringId,
-//     ) -> Result<()> {
-//         let comp_model = model
-//             .get_component(comp_name)
-//             .ok_or(Error::NoComponentModel(comp_name.to_string()))?;
-//         let new_comp = Component::from_model(comp_model)?;
-//         for var_model in &comp_model.vars {
-//             storage.insert(
-//                 &comp_name,
-//                 &var_model.id,
-//                 &var_model.type_,
-//                 &var_model.default,
-//             );
-//         }
-//
-//         //// ignore components that don't have any states
-//         //// (besides the built-in 'none' state)
-//         //// TODO
-//         // if comp_model.logic.states.len() >= 0 {
-//         // let comp_uid = (IndexString::from(comp_name).unwrap(),);
-//
-//         if !self.map.contains_key(comp_name) {
-//             self.map.insert(*comp_name, new_comp);
-//             for trigger in &comp_model.triggers {
-//                 //                println!("trigger: {}", trigger);
-//                 let t = StringId::from(trigger).unwrap();
-//                 #[cfg(feature = "machine")]
-//                 self.queue.get_mut(&t).unwrap().push(*comp_name);
-//             }
-//         }
-//
-//         Ok(())
-//     }
-//     pub fn detach(
-//         &mut self,
-//         storage: &mut Storage,
-//         comp_name: &CompId,
-//         comp_model: &ComponentModel,
-//     ) {
-//         storage.remove_comp_vars(comp_name, comp_model);
-//
-//         // find and remove references to component from all the
-//         // queues for different events
-//         #[cfg(feature = "machine")]
-//         for (q, v) in &mut self.queue {
-//             let n = match v.iter().position(|c| c == comp_name) {
-//                 Some(p) => p,
-//                 None => continue,
-//             };
-//             v.remove(n);
-//         }
-//
-//         //        self.queue.iter_mut().map(|(_,v)|
-//         // v.remove_item(&comp_uid));
-//         self.map.remove(comp_name);
-//     }
-// }
-
 /// Basic building block of the simulation state.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Entity {
     /// All data associated with the entity is stored here
     pub storage: Storage,
+
+    /// List of attached components
+    pub components: Vec<CompName>,
 
     /// Current state of each component-tied state machine
     #[cfg(feature = "machine")]
@@ -112,12 +46,7 @@ pub struct Entity {
 
 /// Contains all the non-serializable constructs stored on an entity instance.
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct EntityNonSer {
-    #[cfg(feature = "machine_lua")]
-    pub lua_state: Option<Arc<Mutex<Lua>>>,
-    #[cfg(feature = "machine_dynlib")]
-    pub libs: Option<BTreeMap<String, libloading::Library>>,
-}
+pub struct EntityNonSer {}
 
 impl Entity {
     /// Creates a new entity using the prefab model.
@@ -175,6 +104,7 @@ impl Entity {
     pub fn empty() -> Self {
         Entity {
             storage: Storage::default(),
+            components: vec![],
             #[cfg(feature = "machine")]
             comp_state: Default::default(),
             #[cfg(feature = "machine")]
@@ -186,6 +116,8 @@ impl Entity {
     pub fn attach(&mut self, component: CompName, model: &SimModel) -> Result<()> {
         let comp_model = model.get_component(&component)?;
         debug!("attaching component: {:?}", comp_model);
+
+        self.components.push(component);
 
         for var_model in &comp_model.vars {
             self.storage.insert(
@@ -235,6 +167,9 @@ impl Entity {
     }
 
     pub fn detach(&mut self, comp_name: &CompName, sim_model: &SimModel) -> Result<()> {
+        if let Ok(idx) = self.components.binary_search(comp_name) {
+            self.components.remove(idx);
+        }
         self.storage
             .remove_comp_vars(comp_name, sim_model.get_component(comp_name)?);
 

@@ -24,7 +24,6 @@ use crate::machine::cmd::flow::component::ComponentBlock;
 use crate::machine::cmd::Command;
 use crate::machine::error::{Error, ErrorKind, Result};
 use crate::machine::{CallInfo, CallStackVec, CommandPrototype, ComponentCallInfo};
-use crate::var::VarType::Str;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterVar {
@@ -179,6 +178,41 @@ impl Extend {
     }
     pub fn execute_loc(&self) -> CommandResult {
         CommandResult::ExecCentralExt(CentralRemoteCommand::Extend(self.clone()))
+    }
+}
+
+/// Register an entity prefab, specifying a name and a set of components.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterEvent {
+    /// Name of the event
+    name: StringId,
+}
+
+impl RegisterEvent {
+    pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
+        Ok(Self {
+            name: arraystring::new_truncate(&args[0]),
+        })
+    }
+
+    pub fn execute_loc(&self) -> Vec<CommandResult> {
+        debug!("registering event");
+        vec![
+            CommandResult::ExecCentralExt(CentralRemoteCommand::RegisterEvent(Self {
+                name: self.name,
+            })),
+            CommandResult::Continue,
+        ]
+    }
+
+    pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
+        sim.add_event(self.name)?;
+        Ok(())
+    }
+
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+        unimplemented!();
+        Ok(())
     }
 }
 

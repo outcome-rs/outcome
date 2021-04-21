@@ -9,8 +9,8 @@ engine = "*"
 flock = { path = "./flock_dynlib/target/release/libflock_dynlib.so" }
 
 [services.flock_service]
-path = "./flock_service/target/release/flock_service"
-instancing = "one_per_worker"
-#instancing = "one_globally"
+path = "flock_service/target/release/flock_service"
+policy = "universal"
+#policy = { name = "EntityType", args = "flock_member" }
 managed = true
 args = "--managed"

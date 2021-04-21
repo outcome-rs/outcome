@@ -92,7 +92,7 @@ impl Eval {
                 }
             };
             // println!("position:x value: {}", xval);
-            ns.insert(arg_name.to_string(), val);
+            ns.insert(arg_name.to_string(), val as f64);
         }
 
         // let val = fasteval::ez_eval(&self.expr, &mut ns).unwrap();
@@ -107,7 +107,7 @@ impl Eval {
             // *target = crate::Var::fr
             // let v = crate::Var::Float(val as crate::Float);
             // println!("newly created var::float: {:?}", v);
-            *target = Var::Float(val);
+            *target = Var::Float(val as crate::Float);
         }
 
         // match self.out {

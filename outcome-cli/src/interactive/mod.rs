@@ -28,9 +28,11 @@ use linefeed::inputrc::parse_text;
 use linefeed::{Interface, ReadResult};
 
 use outcome::Sim;
-use outcome_net::{Client, SocketEvent};
+use outcome_net::{Client, SocketEvent, SocketEventType};
 
 use self::compl::MainCompleter;
+use outcome_net::msg::SpawnEntitiesRequest;
+use std::time::Instant;
 
 // TODO switch to use toml instead of yaml
 pub const CONFIG_FILE: &str = "interactive.yaml";
@@ -287,16 +289,19 @@ pub fn start(
             // check for incoming network events
             let mut driver = driver_arc.lock().unwrap();
             match driver.deref_mut() {
-                SimDriver::Remote(ref mut client) => match client.connection.try_recv() {
-                    Ok((_, event)) => match event {
-                        SocketEvent::Disconnect => {
-                            println!("\nServer terminated the connection...");
-                            break 'outer;
-                        }
+                SimDriver::Remote(ref mut client) => {
+                    client.connection.manual_poll();
+                    match client.connection.try_recv() {
+                        Ok((_, event)) => match event.type_ {
+                            SocketEventType::Disconnect => {
+                                println!("\nServer terminated the connection...");
+                                break 'outer;
+                            }
+                            _ => (),
+                        },
                         _ => (),
-                    },
-                    _ => (),
-                },
+                    }
+                }
                 _ => (),
             }
 
@@ -419,6 +424,41 @@ pub fn start(
                                 let hz = args.parse::<usize>().unwrap_or(10);
                                 do_run_freq = Some(hz as u32);
                             }
+                            "runf-hz" => {
+                                let hz = args.parse::<usize>().unwrap_or(10);
+                                let mut last = Instant::now();
+                                loop {
+                                    if Instant::now() - last
+                                        < Duration::from_millis(1000 / hz as u64)
+                                    {
+                                        std::thread::sleep(Duration::from_millis(1));
+                                        continue;
+                                    }
+                                    if let Some(on_sig) = &on_signal {
+                                        if on_sig.trigger.load(Ordering::SeqCst) {
+                                            on_sig.trigger.store(false, Ordering::SeqCst);
+                                            do_run_freq = None;
+                                            do_run_loop = false;
+                                            break;
+                                        }
+                                    }
+                                    last = Instant::now();
+                                    match driver.deref_mut() {
+                                        SimDriver::Local(ref mut sim) => {
+                                            sim.step()?;
+                                            interface.set_prompt(
+                                                create_prompt(&mut driver, &config).as_str(),
+                                            )?;
+                                        }
+                                        SimDriver::Remote(client) => {
+                                            let msg = client.server_step_request(1)?;
+                                            interface.set_prompt(
+                                                create_prompt(&mut driver, &config).as_str(),
+                                            )?;
+                                        }
+                                    }
+                                }
+                            }
                             "test" => {
                                 let secs = args.parse::<usize>().unwrap_or(2);
                                 match driver.deref_mut() {
@@ -450,6 +490,28 @@ pub fn start(
                                     println!("{:?}", data);
                                 }
                             },
+                            // spawn entity
+                            "spawn" => {
+                                let split = args.split(" ").collect::<Vec<&str>>();
+                                match driver.deref_mut() {
+                                    SimDriver::Remote(client) => {
+                                        client.connection.send_payload(
+                                            SpawnEntitiesRequest {
+                                                entity_prefabs: vec![split[0].to_string()],
+                                                entity_names: vec![split[1].to_string()],
+                                            },
+                                            None,
+                                        )?;
+                                        client.connection.recv_msg()?;
+                                    }
+                                    SimDriver::Local(sim) => {
+                                        sim.spawn_entity(
+                                            Some(&outcome::StringId::from(split[0]).unwrap()),
+                                            Some(outcome::StringId::from(split[1]).unwrap()),
+                                        )?;
+                                    }
+                                }
+                            }
                             // Write an uncompressed snapshot to disk.
                             "snap" => {
                                 if args.contains(" ") {
@@ -702,7 +764,6 @@ show_list               {show_list}
                 }
             }
         }
-
         if let SimDriver::Remote(client) = &mut driver_arc.lock().unwrap().deref_mut() {
             println!("Disconnecting...");
             client.disconnect();

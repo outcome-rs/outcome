@@ -145,6 +145,7 @@ pub enum Command {
     Spawn(Spawn),
 
     // register
+    RegisterEvent(register::RegisterEvent),
     RegisterEntityPrefab(register::RegisterEntityPrefab),
     RegisterComponent(register::RegisterComponent),
     RegisterTrigger(register::RegisterTrigger),
@@ -193,6 +194,9 @@ impl Command {
             "extend" => Ok(Command::Extend(register::Extend::new(args, location)?)),
 
             // register one-liners
+            "event" => Ok(Command::RegisterEvent(register::RegisterEvent::new(
+                args, location,
+            )?)),
             "entity" | "prefab" => Ok(Command::RegisterEntityPrefab(
                 register::RegisterEntityPrefab::new(args, location)?,
             )),
@@ -358,6 +362,7 @@ pub enum CentralRemoteCommand {
     RegisterTrigger(register::RegisterTrigger),
     RegisterVar(register::RegisterVar),
     RegisterEntityPrefab(register::RegisterEntityPrefab),
+    RegisterEvent(register::RegisterEvent),
 
     Extend(register::Extend),
     Invoke(Invoke),

@@ -219,7 +219,7 @@ impl<'a> UserData for ProcHandle<'a> {
                 let s = uid_str.rsplitn(3, "/").collect::<Vec<&str>>()[1];
                 let vt = VarType::from_str(s).unwrap();
                 match vt {
-                    VarType::Str => {
+                    VarType::String => {
                         *ent_storage.get_str_mut(&var_euid).unwrap() =
                             String::from(ctx.coerce_string(val).unwrap().unwrap().to_str().unwrap())
                     }
@@ -279,7 +279,7 @@ impl<'a> UserData for ProcHandle<'a> {
             let s = uid_str.rsplitn(3, "/").collect::<Vec<&str>>()[1];
             let vt = VarType::from_str(s).unwrap();
             match vt {
-                VarType::Str => Ok(ctx
+                VarType::String => Ok(ctx
                     .pack(ent_storage.get_str(&var_euid).unwrap().clone())
                     .unwrap()),
                 VarType::Int => Ok(ctx.pack(*ent_storage.get_int(&var_euid).unwrap()).unwrap()),
@@ -350,7 +350,7 @@ impl LuaCall {
                 let mut args_lua = ctx.create_table().unwrap();
                 for (arg_key, arg_addr) in &self.args {
                     match arg_addr.var_type.unwrap() {
-                        VarType::Str => args_lua
+                        VarType::String => args_lua
                             .set(
                                 arg_key.to_owned(),
                                 ctx.pack(
@@ -416,7 +416,7 @@ impl LuaCall {
             match self.pipe_out {
                 Some(addr) => {
                     match addr.var_type.unwrap() {
-                        VarType::Str => match ctx.unpack(res_val) {
+                        VarType::String => match ctx.unpack(res_val) {
                             Ok(v) => *storage.get_str_mut(&addr.storage_index()).unwrap() = v,
                             Err(e) => error!("pipe failed: {}", e),
                         },

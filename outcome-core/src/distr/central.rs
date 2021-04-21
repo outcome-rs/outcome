@@ -7,10 +7,15 @@ use std::sync::{Arc, Mutex};
 
 use rand::prelude::SliceRandom;
 
-use crate::distr::{CentralCommunication, DistributionPolicy, NodeCommunication, Signal};
+use crate::distr::{
+    CentralCommunication, DistributionPolicy, NodeCommunication, NodeId, Signal, TaskId,
+};
 use crate::error::{Error, Result};
 use crate::model::Scenario;
-use crate::{arraystring, Address, EntityId, EntityName, ShortString, SimModel, StringId, Var};
+use crate::{
+    arraystring, Address, EntityId, EntityName, EventName, PrefabName, ShortString, SimModel,
+    StringId, Var,
+};
 
 #[cfg(feature = "machine")]
 use crate::machine::{cmd::CentralRemoteCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
@@ -18,6 +23,7 @@ use crate::machine::{cmd::CentralRemoteCommand, cmd::Command, cmd::ExtCommand, E
 use rayon::prelude::*;
 
 use crate::entity::Entity;
+use crate::snapshot::Snapshot;
 use fnv::FnvHashMap;
 use id_pool::IdPool;
 
@@ -36,18 +42,18 @@ use id_pool::IdPool;
 pub struct SimCentral {
     pub model: SimModel,
     pub clock: usize,
-    pub event_queue: Vec<StringId>,
+    pub event_queue: Vec<EventName>,
 
     /// Default distribution policy for entities. Note that entities can be
     /// assigned custom individual policies that override it.
     pub distribution_policy: DistributionPolicy,
 
-    pub node_entities: FnvHashMap<u32, Vec<EntityId>>,
+    pub node_entities: FnvHashMap<NodeId, Vec<EntityId>>,
     // pub entity_node_routes: FnvHashMap<>
     pub entities_idx: FnvHashMap<EntityName, EntityId>,
     entity_idpool: IdPool,
 
-    ent_spawn_queue: FnvHashMap<u32, Vec<(EntityId, Option<EntityName>, Option<EntityName>)>>,
+    ent_spawn_queue: FnvHashMap<NodeId, Vec<(EntityId, Option<PrefabName>, Option<EntityName>)>>,
     pub model_changes_queue: SimModel,
 }
 
@@ -63,7 +69,7 @@ impl SimCentral {
         if !self.ent_spawn_queue.is_empty() {
             for (k, v) in &self.ent_spawn_queue {
                 warn!("node: {:?}, spawn: {:?}", k, v);
-                comms.send_sig_to_node(*k, Signal::SpawnEntities(v.clone()))?;
+                comms.send_sig_to_node(*k, 0, Signal::SpawnEntities(v.clone()))?;
             }
             self.ent_spawn_queue.clear();
         }
@@ -252,7 +258,7 @@ impl SimCentral {
         debug!("starting processing step");
 
         // tell nodes to start processing next step
-        network.broadcast_sig(Signal::StartProcessStep(event_queue))?;
+        network.broadcast_sig(0, Signal::StartProcessStep(event_queue))?;
         debug!("sent `StartProcessStep` signal to all nodes");
 
         debug!("starting reading incoming signals");
@@ -265,7 +271,7 @@ impl SimCentral {
         while !do_nodes.is_empty() {
             let node = do_nodes.get(node_counter).unwrap();
             match network.try_recv_sig_from(*node) {
-                Ok(signal) => match signal {
+                Ok((task_id, signal)) => match signal {
                     #[cfg(feature = "machine")]
                     Signal::ExecuteCentralExtCmd(cmd) => cext_cmds.lock().unwrap().push(cmd),
                     #[cfg(feature = "machine")]
@@ -273,7 +279,7 @@ impl SimCentral {
                     Signal::EndOfMessages | Signal::ProcessStepFinished => {
                         do_nodes.remove(node_counter);
                     }
-                    _ => warn!("unimplemented: received signal: {:?}", signal),
+                    _ => debug!("unimplemented: received signal: {:?}", signal),
                 },
                 Err(e) => match e {
                     Error::WouldBlock => continue,
@@ -294,14 +300,14 @@ impl SimCentral {
             //TODO
             cext_cmd.execute_distr(self, &context.ent, &context.comp);
         }
-        network.broadcast_sig(Signal::UpdateModel(self.model.clone()));
+        network.broadcast_sig(0, Signal::UpdateModel(self.model.clone()));
         self.flush_queue(network)?;
 
-        network.broadcast_sig(Signal::EndOfMessages)?;
+        network.broadcast_sig(0, Signal::EndOfMessages)?;
         // network.sig_broadcast(Signal::EndOfMessages)?;
         loop {
             std::thread::sleep(std::time::Duration::from_millis(8));
-            if let Ok((_, s)) = network.try_recv_sig() {
+            if let Ok((_, _, s)) = network.try_recv_sig() {
                 match s {
                     Signal::ProcessStepFinished => break,
                     _ => (),
@@ -314,79 +320,17 @@ impl SimCentral {
         Ok(())
     }
 
-    ///// TODO
-    //pub fn step<E: Sized + DistrError, C: Connection<E> + Sized + Sync + Send>(
-    //&mut self,
-    //entity_node_map: &HashMap<EntityUid, String>,
-    //mut addr_book: &mut HashMap<String, C>,
-    //) {
-    //println!("sim_central start processing step");
-    //// `pre` phase
+    pub fn init_snapshot_download<N: CentralCommunication>(
+        &mut self,
+        network: &mut N,
+    ) -> Result<TaskId> {
+        debug!("starting downloading snapshot");
 
-    //// tell nodes to start processing step
-    //for (node, mut conn) in addr_book.iter_mut() {
-    //conn.send_signal(Signal::StartProcessStep(self.event_queue.clone()));
-    //}
-    //println!("sim_central finished tell nodes to start processing step");
-    //// nodes start their processing routines]
-    //// nodes start exchanging data
+        let task_id = network.request_task_id()?;
+        // tell nodes to send their snapshots
+        network.broadcast_sig(task_id, Signal::SnapshotRequest)?;
+        debug!("sent `StartProcessStep` signal to all nodes");
 
-    //// `loc` phase
-    //// entities on different nodes get into processing on their own
-    //// entities start sending central_ext commands our way
-
-    //// `post` phase
-    //let mut cext_cmds = Arc::new(Mutex::new(Vec::new()));
-    //// let mut cext_cmds = Vec::new();
-    ////        for (node, (ci, co)) in addr_book {
-    //addr_book
-    //.par_iter_mut()
-    //.for_each(|(node, conn): (&String, &mut C)| {
-    ////            thread::spawn(|| {
-    //// println!("start loop");
-    //let mut msg_count = 0;
-    //loop {
-    //let msg = match conn.read_signal() {
-    //Ok(m) => m,
-    //Err(e) => return,
-    //// Err(e) => match &e {
-    ////     DistrError::WouldBlock => {
-    ////         println!("{:?}", e);
-    ////         return;
-    ////     }
-    ////     DistrError::Other(s) => {
-    ////         println!("{:?}", e);
-    ////         return;
-    ////     }
-    ////     _ => return,
-    //// },
-    //};
-    //msg_count += 1;
-    //// println!("{}: {:?}", msg_count, msg);
-    //match msg {
-    //Signal::ProcessStepFinished => return,
-    //Signal::EndOfMessages => {
-    //println!("end of messages");
-    //return;
-    //}
-    //Signal::ExecuteCentralExtCmd(cmd) => cext_cmds.lock().unwrap().push(cmd),
-    //// Signal::ExecuteCentralExtCmd(cmd) => {
-    ////     cext_cmds.push(cmd);
-    ////     continue;
-    //// }
-    //_ => println!("unimplemented distrmsg"),
-    //}
-    //}
-    //});
-    //println!("sim_central finished reading cext cmds");
-    //// let cc = cext_cmds.lock().unwrap();
-    //for (context, cext_cmd) in cext_cmds.lock().unwrap().iter() {
-    //// println!("{:?}", cext_cmd);
-    ////TODO
-    //// cext_cmd.execute(self, &context.ent_uid, &context.comp_uid);
-    //}
-    //println!("sim_central finished executing cext cmds");
-
-    //self.clock += 1;
-    //}
+        Ok(task_id)
+    }
 }

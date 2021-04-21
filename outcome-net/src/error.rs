@@ -15,8 +15,20 @@ pub enum Error {
     TimedOut,
     #[error("host unreachable")]
     HostUnreachable,
+    #[error("socket not connected")]
+    SocketNotConnected,
+    #[error("socket not bound to address")]
+    SocketNotBoundToAddress,
+    #[error("wrong socket address type")]
+    WrongSocketAddressType,
+
     #[error("other: {0}")]
     Other(String),
+
+    #[error("failed parsing address: {0}")]
+    AddrParseError(#[from] std::net::AddrParseError),
+    #[error("transport unavailable: {0}")]
+    TransportUnavailable(String),
 
     #[error("no activity for {0} milliseconds, terminating server")]
     ServerKeepaliveLimitReached(u32),
@@ -24,6 +36,9 @@ pub enum Error {
     #[error("data store disconnected")]
     Disconnect(#[from] std::io::Error),
 
+    #[cfg(feature = "laminar_transport")]
+    #[error("laminar error")]
+    LaminarError(#[from] laminar::ErrorKind),
     #[cfg(feature = "nng_transport")]
     #[error("nng error")]
     NngError(#[from] nng::Error),
@@ -35,7 +50,7 @@ pub enum Error {
     BincodeError(#[from] bincode::Error),
 
     #[cfg(feature = "msgpack_encoding")]
-    #[error("rmp_serde decode error")]
+    #[error("rmp_serde decode error: {0}")]
     RmpsDecodeError(#[from] rmp_serde::decode::Error),
     #[cfg(feature = "msgpack_encoding")]
     #[error("rmp_serde encode error")]

@@ -126,7 +126,7 @@ impl LocalAddress {
 }
 
 /// Globally unique reference to simulation variable.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub struct Address {
     pub entity: EntityName,
     pub component: CompName,
@@ -154,7 +154,7 @@ impl Address {
     }
     pub fn to_string(&self) -> String {
         format!(
-            ":{}:{}:{}:{}",
+            "{}:{}:{}:{}",
             self.entity,
             self.component,
             self.var_type.to_str(),

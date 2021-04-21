@@ -18,10 +18,11 @@ use rlua::Lua;
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::error::Error;
-use crate::model::{DataEntry, DataImageEntry, Scenario};
-use crate::{arraystring, model, EntityName, Result, SimModel, Var, VarType};
+use crate::model::{DataEntry, DataImageEntry, EventModel, Scenario};
+use crate::{arraystring, model, EntityName, EventName, Result, SimModel, Var, VarType};
 use crate::{EntityId, StringId};
 use fnv::FnvHashMap;
+use id_pool::IdPool;
 
 /// Local (non-distributed) simulation instance object.
 ///
@@ -55,14 +56,23 @@ pub struct Sim {
     /// Number of steps that have been processed so far
     pub(crate) clock: usize,
     /// Global queue of events waiting for execution
-    pub event_queue: Vec<StringId>,
+    pub event_queue: Vec<EventName>,
 
     /// All entities that exist within the simulation are stored here
     pub entities: FnvHashMap<EntityId, Entity>,
     /// Map of string indexes for entities (string indexes are optional)
-    pub entities_idx: FnvHashMap<StringId, EntityId>,
+    pub entity_idx: FnvHashMap<EntityName, EntityId>,
     /// Pool of integer identifiers for entities
-    entity_idpool: id_pool::IdPool,
+    pub entity_pool: IdPool,
+
+    /// Lua state for selected entities
+    #[cfg(feature = "machine_lua")]
+    #[serde(skip)]
+    pub entity_lua_state: FnvHashMap<EntityId, Arc<Mutex<Lua>>>,
+    /// Loaded dynamic libraries by name
+    #[cfg(feature = "machine_dynlib")]
+    #[serde(skip)]
+    pub libs: BTreeMap<String, libloading::Library>,
 }
 
 /// Snapshot functionality.
@@ -173,8 +183,8 @@ impl Sim {
             clock: 0,
             event_queue: Vec::new(),
             entities: FnvHashMap::default(),
-            entities_idx: FnvHashMap::default(),
-            entity_idpool: id_pool::IdPool::new(),
+            entity_idx: FnvHashMap::default(),
+            entity_pool: id_pool::IdPool::new(),
         };
 
         // TODO load dynlibs
@@ -240,7 +250,7 @@ impl Sim {
         &mut self,
         prefab: Option<&StringId>,
         name: Option<StringId>,
-    ) -> Result<()> {
+    ) -> Result<EntityId> {
         trace!("starting spawn_entity");
 
         trace!("creating new entity");
@@ -251,13 +261,13 @@ impl Sim {
         trace!("done");
 
         trace!("getting new_uid from pool");
-        let new_uid = self.entity_idpool.request_id().unwrap();
+        let new_uid = self.entity_pool.request_id().unwrap();
         trace!("done");
 
         trace!("inserting entity");
         if let Some(n) = &name {
-            if !self.entities_idx.contains_key(n) {
-                self.entities_idx.insert(*n, new_uid);
+            if !self.entity_idx.contains_key(n) {
+                self.entity_idx.insert(*n, new_uid);
                 self.entities.insert(new_uid, ent);
             } else {
                 return Err(Error::Other(format!(
@@ -270,6 +280,12 @@ impl Sim {
         }
         trace!("done");
 
+        Ok(new_uid)
+    }
+
+    pub fn add_event(&mut self, name: EventName) -> Result<()> {
+        self.model.events.push(EventModel { id: name });
+        self.event_queue.push(name);
         Ok(())
     }
 }
@@ -359,7 +375,7 @@ impl Sim {
         for (ent_uid, ent) in &self.entities {
             // if let Some(ent) = self.entities.get(ent_uid) {
             let mut ent_str = ent_uid.to_string();
-            if let Some((ent_id, _)) = &self.entities_idx.iter().find(|(id, uid)| uid == &ent_uid) {
+            if let Some((ent_id, _)) = &self.entity_idx.iter().find(|(id, uid)| uid == &ent_uid) {
                 ent_str = ent_id.to_string();
             }
             out_map.extend(ent.storage.map.iter().map(|((comp_id, var_id), v)| {
@@ -374,7 +390,7 @@ impl Sim {
 
     /// Get a `Var` from the sim using an absolute address.
     pub fn get_var(&self, addr: &Address) -> Result<&Var> {
-        if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
+        if let Some(ent_uid) = self.entity_idx.get(&addr.entity) {
             if let Some(ent) = self.entities.get(ent_uid) {
                 return ent.storage.get_var(&addr.storage_index());
             }
@@ -392,7 +408,7 @@ impl Sim {
 
     /// Get a variable from the sim using an absolute address.
     pub fn get_var_mut(&mut self, addr: &Address) -> Result<&mut Var> {
-        if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
+        if let Some(ent_uid) = self.entity_idx.get(&addr.entity) {
             if let Some(ent) = self.entities.get_mut(ent_uid) {
                 return ent.storage.get_var_mut(&addr.storage_index());
             }
@@ -412,7 +428,7 @@ impl Sim {
     /// Set a var at address using a string value as input.
     pub fn set_from_string(&mut self, addr: &Address, val: &String) -> Result<()> {
         match addr.var_type {
-            VarType::Str => {
+            VarType::String => {
                 *self.get_var_mut(&addr)?.as_str_mut()? = val.clone();
             }
             VarType::Int => {
@@ -441,7 +457,7 @@ impl Sim {
     /// Set a var of any type using a string list as input.
     pub fn set_from_string_list(&mut self, addr: &Address, vec: &Vec<String>) -> Result<()> {
         match addr.var_type {
-            VarType::StrList => {
+            VarType::StringList => {
                 *self.get_var_mut(&addr)?.as_str_list_mut()? = vec.clone();
             }
             VarType::IntList => {
@@ -474,7 +490,7 @@ impl Sim {
     /// Set a var of any type using a string grid as input.
     pub fn set_from_string_grid(&mut self, addr: &Address, vec2d: &Vec<Vec<String>>) -> Result<()> {
         match addr.var_type {
-            VarType::StrGrid => {
+            VarType::StringGrid => {
                 *self.get_var_mut(&addr)?.as_str_grid_mut()? = vec2d.clone();
             }
             VarType::IntGrid => {
@@ -648,12 +664,16 @@ impl Sim {
             };
             use crate::util::coerce_toml_val_to_string;
             match addr.var_type {
-                VarType::Str | VarType::Int | VarType::Float | VarType::Bool => {
+                VarType::String | VarType::Int | VarType::Float | VarType::Bool | VarType::Byte => {
                     //                    println!("{}", &addr.to_string());
                     self.set_from_string(&addr, &val);
                 }
                 //                    self.set_from_string(&addr, &val.as_str().to_string()),
-                VarType::StrList | VarType::IntList | VarType::FloatList | VarType::BoolList => {
+                VarType::StringList
+                | VarType::IntList
+                | VarType::FloatList
+                | VarType::BoolList
+                | VarType::ByteList => {
                     unimplemented!()
                     // self.set_from_string_list(
                     //     &addr,
@@ -665,7 +685,11 @@ impl Sim {
                     // );
                 }
                 #[cfg(feature = "grids")]
-                VarType::StrGrid | VarType::IntGrid | VarType::FloatGrid | VarType::BoolGrid => {
+                VarType::StringGrid
+                | VarType::IntGrid
+                | VarType::FloatGrid
+                | VarType::BoolGrid
+                | VarType::ByteGrid => {
                     unimplemented!()
                     // self.set_from_string_grid(
                     //     &addr,
@@ -702,7 +726,7 @@ impl Sim {
     /// Gets reference to entity using a string id
     pub fn get_entity_str(&self, name: &StringId) -> Result<&Entity> {
         let entity_uid = self
-            .entities_idx
+            .entity_idx
             .get(name)
             .ok_or(Error::NoEntityIndexed(name.to_string()))?;
         self.get_entity(entity_uid)
@@ -711,7 +735,7 @@ impl Sim {
     /// Gets mutable reference to entity using a string id
     pub fn get_entity_str_mut(&mut self, name: &StringId) -> Result<&mut Entity> {
         let entity_uid = *self
-            .entities_idx
+            .entity_idx
             .get(name)
             .ok_or(Error::NoEntityIndexed(name.to_string()))?;
         self.get_entity_mut(&entity_uid)

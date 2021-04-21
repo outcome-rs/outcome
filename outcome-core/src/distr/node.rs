@@ -8,9 +8,10 @@ use fnv::FnvHashMap;
 use crate::distr::{NodeCommunication, Signal};
 use crate::entity::Entity;
 use crate::sim::step;
-use crate::{CompName, Result};
+use crate::{Address, CompName, Result, Var};
 use crate::{EntityId, EntityName, SimModel, StringId};
 
+use crate::error::Error;
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
 
@@ -67,6 +68,43 @@ impl SimNode {
         // exec::execute(&commands, &ent_uid, &comp_uid, &mut sim, None, None);
 
         Ok(sim_node)
+    }
+
+    /// Get a `Var` from the sim using an absolute address.
+    pub fn get_var(&self, addr: &Address) -> Result<&Var> {
+        if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
+            if let Some(ent) = self.entities.get(ent_uid) {
+                return ent.storage.get_var(&addr.storage_index());
+            }
+        }
+        if let Some(ent) = self.entities.get(
+            &addr
+                .entity
+                .parse::<u32>()
+                .map_err(|e| Error::ParsingError(e.to_string()))?,
+        ) {
+            return ent.storage.get_var(&addr.storage_index());
+        }
+        Err(Error::FailedGettingVariable(addr.to_string()))
+    }
+
+    /// Get a variable from the sim using an absolute address.
+    pub fn get_var_mut(&mut self, addr: &Address) -> Result<&mut Var> {
+        if let Some(ent_uid) = self.entities_idx.get(&addr.entity) {
+            if let Some(ent) = self.entities.get_mut(ent_uid) {
+                return ent.storage.get_var_mut(&addr.storage_index());
+            }
+        } else {
+            if let Some(ent) = self.entities.get_mut(
+                &addr
+                    .entity
+                    .parse::<u32>()
+                    .map_err(|e| Error::ParsingError(e.to_string()))?,
+            ) {
+                return ent.storage.get_var_mut(&addr.storage_index());
+            }
+        }
+        Err(Error::FailedGettingVariable(addr.to_string()))
     }
 
     pub fn add_entity(
@@ -234,14 +272,14 @@ impl SimNode {
                 cexts_part.push(cmd);
             } else {
                 if !cexts_part.is_empty() {
-                    network.sig_send_central(Signal::ExecuteCentralExtCmds(cexts_part.clone()));
+                    network.sig_send_central(0, Signal::ExecuteCentralExtCmds(cexts_part.clone()));
                 }
                 break;
             }
 
             if counter >= 1000 {
                 counter = 0;
-                network.sig_send_central(Signal::ExecuteCentralExtCmds(cexts_part.clone()));
+                network.sig_send_central(0, Signal::ExecuteCentralExtCmds(cexts_part.clone()));
                 cexts_part.clear();
             }
         }
@@ -250,10 +288,10 @@ impl SimNode {
         //     network.sig_send_central(Signal::ExecuteCentralExtCmd(cext));
         // }
         // network.sig_send_central(Signal::ExecuteCentralExtCmds(cexts));
-        network.sig_send_central(Signal::EndOfMessages);
+        network.sig_send_central(0, Signal::EndOfMessages);
         loop {
             // std::thread::sleep(std::time::Duration::from_millis(8));
-            match network.sig_read_central()? {
+            match network.sig_read_central()?.1 {
                 Signal::SpawnEntities(e) => {
                     warn!("signal: spawn entities: {:?}", e);
                     for (a, b, c) in e {
@@ -277,7 +315,7 @@ impl SimNode {
         self.clock += 1;
 
         debug!("sending signal process step finished");
-        network.sig_send_central(Signal::ProcessStepFinished);
+        network.sig_send_central(0, Signal::ProcessStepFinished);
         trace!("sim_node finished send central ext cmd requests");
 
         // println!("{:?}", self.entities);

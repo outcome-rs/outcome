@@ -130,21 +130,22 @@ pub struct ComponentEntry {
 #[serde(untagged)]
 pub enum VarEntry {
     String(String),
-    Float(f64),
-    Int(i64),
+    Float(crate::Float),
+    Int(crate::Int),
     Bool(bool),
-    IntList(Vec<i64>),
+    // IntList(Vec<i64>),
 }
 
 use crate::Var;
+
 impl From<VarEntry> for Var {
     fn from(var_entry: VarEntry) -> Self {
         let var = match var_entry {
-            VarEntry::String(v) => Var::Str(v),
+            VarEntry::String(v) => Var::String(v),
             VarEntry::Float(v) => Var::Float(v),
             VarEntry::Int(v) => Var::Int(v),
             VarEntry::Bool(v) => Var::Bool(v),
-            VarEntry::IntList(v) => Var::IntList(v),
+            // VarEntry::IntList(v) => Var::List(v),
             _ => unimplemented!(),
         };
         var

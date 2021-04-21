@@ -13,7 +13,7 @@ component flock_member
 	state start 
 		#print some
 		#set bool:nothing true
-		eval "x + 0.2" x=float:floatie --out float:floatie
+		#eval "x + 0.2" x=float:floatie --out float:floatie
 	end
 end
 

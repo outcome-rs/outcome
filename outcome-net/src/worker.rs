@@ -12,20 +12,22 @@ use crate::msg::coord_worker::{
     IntroduceWorkerToCoordResponse,
 };
 use crate::msg::*;
-use crate::socket::{Encoding, Socket, SocketConfig, Transport};
-use crate::transport::{SocketInterface, WorkerDriverInterface};
-use crate::util::tcp_endpoint;
-use crate::{error::Error, sig, Result};
+use crate::socket::{Encoding, Socket, SocketAddress, SocketConfig, Transport};
+use crate::{error::Error, sig, Result, TaskId};
 
+use fnv::FnvHashMap;
+use id_pool::IdPool;
 use outcome::Sim;
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
+use outcome_core::query::{Query, QueryProduct};
 use outcome_core::{
     arraystring, Address, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType,
 };
+use std::str::FromStr;
 
-//TODO remove this
-/// Default address for the worker
-pub const WORKER_ADDRESS: &str = "0.0.0.0:5922";
+pub enum WorkerTask {
+    RequestedCoordToProcessStep,
+}
 
 /// Network-unique identifier for a single worker
 pub type WorkerId = u32;
@@ -70,6 +72,7 @@ pub struct Worker {
     pub inviter: Socket,
     pub network: WorkerNetwork,
 
+    // TODO overhaul the authentication system
     /// Whether the worker uses a password to authorize connecting comrade workers
     pub use_auth: bool,
     /// Password used for incoming connection authorization
@@ -77,52 +80,65 @@ pub struct Worker {
 
     /// Simulation node running on this worker
     pub sim_node: Option<outcome::distr::SimNode>,
+
+    tasks: Vec<(u32, WorkerTask)>,
 }
 
 pub struct WorkerNetwork {
     /// List of other workers in the cluster
-    pub comrades: Vec<Comrade>,
+    pub comrades: FnvHashMap<u32, Comrade>,
     /// Main coordinator
     pub coord: Option<Socket>,
+
+    task_id_pool: IdPool,
 }
 
 impl Worker {
     /// Creates a new `Worker`.
-    pub fn new(addr: &str) -> Result<Worker> {
+    pub fn new(addr: Option<&str>) -> Result<Worker> {
+        let address = match addr {
+            Some(a) => a.parse()?,
+            None => SocketAddr::from_str("0.0.0.0:0")?,
+        };
+        let greeter = Socket::new(Some(SocketAddress::Net(address)), Transport::Tcp)?;
+
         Ok(Worker {
-            addr: addr.to_string(),
-            greeter: Socket::bind(addr, Transport::Tcp)?,
-            inviter: Socket::bind_any(Transport::Tcp)?,
+            addr: greeter.listener_addr()?.to_string(),
+            greeter,
+            inviter: Socket::new(None, Transport::Tcp)?,
             network: WorkerNetwork {
-                comrades: vec![],
+                comrades: FnvHashMap::default(),
                 coord: None,
+                task_id_pool: IdPool::new(),
             },
             use_auth: false,
             passwd_list: vec![],
             sim_node: None,
+            tasks: vec![],
         })
     }
 
     /// Registers a fellow worker.
     pub fn register_comrade(&mut self, comrade: Comrade) -> Result<()> {
-        if self.use_auth {
-            if !&self.passwd_list.contains(&comrade.passwd) {
-                println!("Client provided wrong password");
-                return Err(Error::Other(String::from("WrongPasswd")));
-            }
-            self.network.comrades.push(comrade);
-        } else {
-            self.network.comrades.push(comrade);
-        }
-        return Ok(());
+        // if self.use_auth {
+        //     if !&self.passwd_list.contains(&comrade.passwd) {
+        //         println!("Client provided wrong password");
+        //         return Err(Error::Other(String::from("WrongPasswd")));
+        //     }
+        //     self.network.comrades.push(comrade);
+        // } else {
+        //     self.network.comrades.push(comrade);
+        // }
+        // return Ok(());
+        unimplemented!()
     }
 
     pub fn initiate_coord_connection(&mut self, addr: &str, timeout: Duration) -> Result<()> {
-        self.inviter.connect(addr)?;
+        self.inviter.connect(addr.parse()?)?;
         thread::sleep(Duration::from_millis(100));
-        self.inviter.pack_send_msg_payload(
+        self.inviter.send_payload(
             IntroduceWorkerToCoordRequest {
-                worker_addr: self.addr.clone(),
+                worker_addr: self.greeter.listener_addr().unwrap().to_string(),
                 //TODO
                 worker_passwd: "".to_string(),
             },
@@ -132,6 +148,7 @@ impl Worker {
         let resp: IntroduceWorkerToCoordResponse = self
             .inviter
             .try_recv_msg()?
+            .1
             .unpack_payload(self.inviter.encoding())?;
 
         self.inviter.disconnect(None)?;
@@ -171,19 +188,19 @@ impl Worker {
         let soc_config = SocketConfig {
             ..Default::default()
         };
-        let mut coord = Socket::bind_any_with_config(Transport::Tcp, soc_config)?;
+        let mut coord = Socket::new_with_config(None, Transport::Tcp, soc_config)?;
 
-        self.greeter.pack_send_msg_payload(
+        self.greeter.send_payload(
             IntroduceCoordResponse {
-                conn_socket: coord.last_endpoint().unwrap().to_string(),
+                conn_socket: coord.listener_addr()?.to_string(),
                 error: "".to_string(),
             },
             None,
         )?;
 
-        coord.connect(&req.ip_addr)?;
+        coord.connect(req.ip_addr.parse()?)?;
 
-        coord.send_sig(Signal::EndOfMessages, None)?;
+        coord.send_sig(sig::Signal::from(0, Signal::EndOfMessages), None)?;
 
         self.network.coord = Some(coord);
 
@@ -207,7 +224,8 @@ impl Worker {
     pub fn manual_poll(&mut self) -> Result<()> {
         loop {
             if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
-                self.handle_signal(sig.into_inner())?;
+                let (task_id, sig) = sig.into_inner();
+                self.handle_coord_signal(task_id, sig)?;
             } else {
                 break;
             }
@@ -215,7 +233,7 @@ impl Worker {
         Ok(())
     }
 
-    fn handle_signal(&mut self, sig: Signal) -> Result<()> {
+    fn handle_coord_signal(&mut self, task_id: u32, sig: Signal) -> Result<()> {
         debug!("handling signal: {:?}", sig);
 
         match sig {
@@ -226,6 +244,10 @@ impl Worker {
             }
             Signal::DataRequestAll => self.handle_sig_data_request_all()?,
             Signal::SpawnEntities(entities) => self.handle_sig_spawn_entities(entities)?,
+            Signal::QueryRequest(query) => self.handle_sig_query_request(task_id, query)?,
+            Signal::DataPullRequest(pull_data) => {
+                self.handle_sig_pull_data_request(task_id, pull_data)?
+            }
             _ => warn!("unhandled signal: {:?}", sig),
         }
 
@@ -253,6 +275,31 @@ impl Worker {
         Ok(())
     }
 
+    fn handle_sig_query_request(&mut self, task_id: TaskId, query: Query) -> Result<()> {
+        info!("handling query request: {:?}", query);
+        if let Some(node) = &self.sim_node {
+            let product = query.process(&node.entities, &node.entities_idx)?;
+            info!("  product: {:?}", product);
+            self.network
+                .sig_send_central(task_id, Signal::QueryResponse(product))?;
+        }
+        Ok(())
+    }
+
+    fn handle_sig_pull_data_request(
+        &mut self,
+        task_id: TaskId,
+        pull_data: Vec<(Address, Var)>,
+    ) -> Result<()> {
+        info!("handling pull data request: {:?}", pull_data);
+        if let Some(node) = &mut self.sim_node {
+            for (addr, var) in pull_data {
+                *node.get_var_mut(&addr)? = var;
+            }
+        }
+        Ok(())
+    }
+
     fn handle_sig_data_request_all(&mut self) -> Result<()> {
         let mut collection = Vec::new();
         for (entity_uid, entity) in &self.sim_node.as_ref().unwrap().entities {
@@ -274,7 +321,7 @@ impl Worker {
             .coord
             .as_mut()
             .unwrap()
-            .send_sig(signal, None)?;
+            .send_sig(sig::Signal::from(0, signal), None)?;
 
         Ok(())
     }
@@ -389,8 +436,7 @@ pub fn handle_data_transfer_request(msg: Message, server_arc: Arc<Mutex<Worker>>
         _ => (),
     }
     let response = DataTransferResponse {
-        data: Some(TransferResponseData::Var(data_pack)),
-        error: String::new(),
+        data: TransferResponseData::Var(data_pack),
     };
     Ok(())
     // TODO
@@ -413,14 +459,20 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
             //TODO do all other var types
             //TODO handle errors
             for (address, string_var) in data.strings {
-                let addr = Address::from_str(&address)?;
-                //        *sim_instance.as_mut().unwrap().get_str_mut(&addr).unwrap() = string_var;
+                // let addr = Address::from_str(&address)?;
+                //        *sim_instance.as_mut().unwrap().get_strd_mut(&addr).unwrap() = string_var;
             }
         }
-        PullRequestData::Var(data) => {
+        PullRequestData::NativeAddressedVars(data) => {
             //
         }
         PullRequestData::VarOrdered(order_idx, data) => {
+            //
+        }
+        PullRequestData::NativeAddressedVar((ent_id, comp_name, var_name), var) => {
+            //
+        }
+        PullRequestData::AddressedVars(data) => {
             //
         }
     }
@@ -437,7 +489,19 @@ pub fn handle_data_pull_request(msg: Message, server_arc: Arc<Mutex<Worker>>) ->
 }
 
 impl outcome::distr::NodeCommunication for WorkerNetwork {
-    fn sig_read_central(&mut self) -> outcome::Result<Signal> {
+    fn request_task_id(&mut self) -> outcome::Result<u32> {
+        self.task_id_pool
+            .request_id()
+            .ok_or(outcome::error::Error::RequestIdError)
+    }
+
+    fn return_task_id(&mut self, task_id: TaskId) -> outcome::Result<()> {
+        self.task_id_pool
+            .return_id(task_id)
+            .map_err(|e| outcome::error::Error::ReturnIdError)
+    }
+
+    fn sig_read_central(&mut self) -> outcome::Result<(u32, Signal)> {
         if let Some(coord) = &mut self.coord {
             let sig = match coord.recv_sig() {
                 Ok((addr, sig)) => sig,
@@ -449,15 +513,20 @@ impl outcome::distr::NodeCommunication for WorkerNetwork {
         }
     }
 
-    fn sig_send_central(&mut self, signal: Signal) -> outcome::Result<()> {
-        self.coord.as_mut().unwrap().send_sig(signal, None).unwrap();
+    fn sig_send_central(&mut self, task_id: u32, signal: Signal) -> outcome::Result<()> {
+        self.coord
+            .as_mut()
+            .unwrap()
+            .send_sig(sig::Signal::from(task_id, signal), None)
+            .unwrap();
         Ok(())
     }
 
-    fn sig_read(&mut self) -> outcome::Result<(String, Signal)> {
-        for comrade in &mut self.comrades {
+    fn sig_read(&mut self) -> outcome::Result<(u32, u32, Signal)> {
+        for (comrade_id, comrade) in &mut self.comrades {
             if let Ok((addr, sig)) = comrade.connection.recv_sig() {
-                return Ok((comrade.name.to_string(), sig.into_inner()));
+                let (task_id, signal) = sig.into_inner();
+                return Ok((*comrade_id, task_id, signal));
             }
         }
         Err(outcome::error::Error::Other(
@@ -465,19 +534,29 @@ impl outcome::distr::NodeCommunication for WorkerNetwork {
         ))
     }
 
-    fn sig_read_from(&mut self, node_id: u32) -> outcome::Result<Signal> {
+    fn sig_read_from(&mut self, node_id: u32) -> outcome::Result<(u32, Signal)> {
         unimplemented!()
     }
 
-    fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> outcome::Result<()> {
+    fn sig_send_to_node(
+        &mut self,
+        node_id: u32,
+        task_id: u32,
+        signal: Signal,
+    ) -> outcome::Result<()> {
         unimplemented!()
     }
 
-    fn sig_send_to_entity(&mut self, entity_uid: u32) -> outcome::Result<()> {
+    fn sig_send_to_entity(
+        &mut self,
+        entity_uid: u32,
+        task_id: u32,
+        signal: Signal,
+    ) -> outcome::Result<()> {
         unimplemented!()
     }
 
-    fn sig_broadcast(&mut self, signal: Signal) -> outcome::Result<()> {
+    fn sig_broadcast(&mut self, task_id: u32, signal: Signal) -> outcome::Result<()> {
         unimplemented!()
     }
 

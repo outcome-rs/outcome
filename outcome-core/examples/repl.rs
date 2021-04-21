@@ -29,7 +29,7 @@ fn main() {
     let comp_uid = *ent.components.map.iter().next().unwrap().0;
     let ent_uid = *ent_uid;
     let ent_index = sim
-        .entities_idx
+        .entity_idx
         .iter()
         .find(|(_, euid)| euid == &&ent_uid)
         .map(|(str_idx, _)| *str_idx)

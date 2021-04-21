@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use crate::msg::{MessageType, Payload};
+use crate::msg::{MessageType, Payload, VarJson};
+use outcome::{CompName, EntityId, Var, VarName};
+
+use fnv::FnvHashMap;
+use outcome::Address;
 
 /// One-way heartbeat message.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -58,7 +62,7 @@ impl Payload for StatusRequest {
 pub struct StatusResponse {
     pub name: String,
     pub description: String,
-    pub address: String,
+    // pub address: String,
     pub connected_clients: Vec<String>,
     pub engine_version: String,
     pub uptime: usize,
@@ -102,7 +106,6 @@ impl Payload for StatusResponse {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct RegisterClientRequest {
     pub name: String,
-    pub addr: Option<String>,
     pub is_blocking: bool,
     pub passwd: Option<String>,
 }
@@ -129,6 +132,40 @@ impl Payload for RegisterClientResponse {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct QueryRequest {
+    pub query: crate::msg::query::Query,
+}
+pub(crate) const QUERY_REQUEST: &str = "QueryRequest";
+impl Payload for QueryRequest {
+    fn type_(&self) -> MessageType {
+        MessageType::QueryRequest
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct NativeQueryRequest {
+    pub query: outcome::Query,
+}
+pub(crate) const NATIVE_QUERY_REQUEST: &str = "NativeQueryRequest";
+impl Payload for NativeQueryRequest {
+    fn type_(&self) -> MessageType {
+        MessageType::NativeQueryRequest
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct NativeQueryResponse {
+    pub query_product: outcome::QueryProduct,
+    pub error: Option<String>,
+}
+pub(crate) const NATIVE_QUERY_RESPONSE: &str = "NativeQueryResponse";
+impl Payload for NativeQueryResponse {
+    fn type_(&self) -> MessageType {
+        MessageType::NativeQueryResponse
+    }
+}
+
 /// Requests one-time transfer of data from server to client.
 ///
 /// `transfer_type` defines the process of data selection:
@@ -149,10 +186,12 @@ impl Payload for DataTransferRequest {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+// #[serde(untagged)]
 pub enum TransferResponseData {
     Typed(TypedSimDataPack),
     Var(VarSimDataPack),
+    AddressedVar(FnvHashMap<Address, Var>),
     VarOrdered(u32, VarSimDataPackOrdered),
 }
 
@@ -161,11 +200,9 @@ pub enum TransferResponseData {
 /// `data` structure containing a set of lists containing different types of data.
 ///
 /// `error` contains the report of any errors that might have occurred.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DataTransferResponse {
-    // pub data: Option<TypedSimDataPack>,
-    pub data: Option<TransferResponseData>,
-    pub error: String,
+    pub data: TransferResponseData,
 }
 pub(crate) const DATA_TRANSFER_RESPONSE: &str = "DataTransferResponse";
 impl Payload for DataTransferResponse {
@@ -201,20 +238,20 @@ pub struct VarSimDataPack {
 ///
 /// Each data type is represented by a set of key-value pairs, where
 /// keys are addresses represented with strings.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TypedSimDataPack {
-    pub strings: HashMap<String, String>,
-    pub ints: HashMap<String, outcome_core::Int>,
-    pub floats: HashMap<String, outcome_core::Float>,
-    pub bools: HashMap<String, bool>,
-    pub string_lists: HashMap<String, Vec<String>>,
-    pub int_lists: HashMap<String, Vec<outcome_core::Int>>,
-    pub float_lists: HashMap<String, Vec<outcome_core::Float>>,
-    pub bool_lists: HashMap<String, Vec<bool>>,
-    pub string_grids: HashMap<String, Vec<Vec<String>>>,
-    pub int_grids: HashMap<String, Vec<Vec<outcome_core::Int>>>,
-    pub float_grids: HashMap<String, Vec<Vec<outcome_core::Float>>>,
-    pub bool_grids: HashMap<String, Vec<Vec<bool>>>,
+    pub strings: HashMap<Address, String>,
+    pub ints: HashMap<Address, outcome_core::Int>,
+    pub floats: HashMap<Address, outcome_core::Float>,
+    pub bools: HashMap<Address, bool>,
+    pub string_lists: HashMap<Address, Vec<String>>,
+    pub int_lists: HashMap<Address, Vec<outcome_core::Int>>,
+    pub float_lists: HashMap<Address, Vec<outcome_core::Float>>,
+    pub bool_lists: HashMap<Address, Vec<bool>>,
+    pub string_grids: HashMap<Address, Vec<Vec<String>>>,
+    pub int_grids: HashMap<Address, Vec<Vec<outcome_core::Int>>>,
+    pub float_grids: HashMap<Address, Vec<Vec<outcome_core::Float>>>,
+    pub bool_grids: HashMap<Address, Vec<Vec<bool>>>,
 }
 impl TypedSimDataPack {
     pub fn empty() -> TypedSimDataPack {
@@ -233,26 +270,33 @@ impl TypedSimDataPack {
             bool_grids: HashMap::new(),
         }
     }
+    pub fn from_query_product(qp: outcome::query::QueryProduct) -> Self {
+        let mut data = Self::empty();
+        match qp {
+            outcome::query::QueryProduct::AddressedTyped(atm) => {
+                for (fa, f) in atm.floats {
+                    data.floats.insert(fa.into(), f);
+                }
+            }
+            _ => (),
+        }
+        data
+    }
     pub fn add(&mut self, addr: &outcome::Address, value_str: &str) {
         match addr.var_type {
-            outcome::VarType::Str => {
-                self.strings.insert(addr.to_string(), value_str.to_owned());
+            outcome::VarType::String => {
+                self.strings.insert(*addr, value_str.to_owned());
             }
             outcome::VarType::Int => {
-                self.ints.insert(
-                    addr.to_string(),
-                    value_str.parse::<outcome_core::Int>().unwrap(),
-                );
+                self.ints
+                    .insert(*addr, value_str.parse::<outcome_core::Int>().unwrap());
             }
             outcome::VarType::Float => {
-                self.floats.insert(
-                    addr.to_string(),
-                    value_str.parse::<outcome_core::Float>().unwrap(),
-                );
+                self.floats
+                    .insert(*addr, value_str.parse::<outcome_core::Float>().unwrap());
             }
             outcome::VarType::Bool => {
-                self.bools
-                    .insert(addr.to_string(), value_str.parse::<bool>().unwrap());
+                self.bools.insert(*addr, value_str.parse::<bool>().unwrap());
             }
             _ => (),
         };
@@ -268,13 +312,13 @@ pub struct TypedDataTransferRequest {
 pub(crate) const TYPED_DATA_TRANSFER_REQUEST: &str = "TypedDataTransferRequest";
 impl Payload for TypedDataTransferRequest {
     fn type_(&self) -> MessageType {
-        MessageType::DataTransferRequest
+        MessageType::TypedDataTransferRequest
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TypedDataTransferResponse {
-    pub data: Option<TypedSimDataPack>,
+    pub data: TypedSimDataPack,
     pub error: String,
 }
 pub(crate) const TYPED_DATA_TRANSFER_RESPONSE: &str = "TypedDataTransferResponse";
@@ -284,13 +328,15 @@ impl Payload for TypedDataTransferResponse {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum PullRequestData {
     /// Request to pull a key-value map of addresses and vars in string-form
     Typed(TypedSimDataPack),
     // TypedOrdered(TypedSimDataPackOrdered),
+    NativeAddressedVar((EntityId, CompName, VarName), Var),
     /// Request to pull a key-value map of addresses and serialized vars
-    Var(VarSimDataPack),
+    NativeAddressedVars(VarSimDataPack),
+    AddressedVars(FnvHashMap<Address, Var>),
     /// Request to pull an ordered list of serialized vars, based on ordering
     /// provided by server when responding to data transfer request
     VarOrdered(u32, VarSimDataPackOrdered),
@@ -298,7 +344,7 @@ pub enum PullRequestData {
 
 /// Request the server to pull provided data into the main simulation
 /// database.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DataPullRequest {
     pub data: PullRequestData,
 }
@@ -306,6 +352,20 @@ pub(crate) const DATA_PULL_REQUEST: &str = "DataPullRequest";
 impl Payload for DataPullRequest {
     fn type_(&self) -> MessageType {
         MessageType::DataPullRequest
+    }
+}
+
+/// Request the server to pull provided data into the main simulation
+/// database.
+// TODO add more data variants, use serde untagged for this struct
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct JsonPullRequest {
+    pub data: HashMap<Address, VarJson>,
+}
+pub(crate) const ADDRESSED_PULL_REQUEST: &str = "AddressedPullRequest";
+impl Payload for JsonPullRequest {
+    fn type_(&self) -> MessageType {
+        MessageType::JsonPullRequest
     }
 }
 
@@ -325,7 +385,7 @@ impl Payload for DataPullResponse {
 
 /// Request the server to pull provided data into the main simulation
 /// database.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TypedDataPullRequest {
     pub data: TypedSimDataPack,
 }
@@ -415,6 +475,9 @@ impl Payload for SpawnEntitiesRequest {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SpawnEntitiesResponse {
+    /// Names of entities that were spawned as the result of the request,
+    /// order from the request is preserved
+    pub entity_names: Vec<String>,
     pub error: String,
 }
 pub(crate) const SPAWN_ENTITIES_RESPONSE: &str = "SpawnEntitiesResponse";
@@ -547,3 +610,44 @@ impl Payload for LoadRemoteScenarioResponse {
         unimplemented!()
     }
 }
+
+// #[derive(Clone, Debug, Hash, Eq, PartialEq, Deserialize, Serialize)]
+// pub struct StringAddress {
+//     pub entity: String,
+//     pub component: String,
+//     pub var_type: u8,
+//     pub var_name: String,
+// }
+//
+// impl From<Address> for StringAddress {
+//     fn from(a: Address) -> Self {
+//         Self {
+//             entity: a.entity.to_string(),
+//             component: a.component.to_string(),
+//             var_type: a.var_type.to_string(),
+//             var_name: a.var_id.to_string(),
+//         }
+//     }
+// }
+//
+// impl From<&Address> for StringAddress {
+//     fn from(a: &Address) -> Self {
+//         Self {
+//             entity: a.entity.to_string(),
+//             component: a.component.to_string(),
+//             var_type: a.var_type.to_string(),
+//             var_name: a.var_id.to_string(),
+//         }
+//     }
+// }
+//
+// impl From<StringAddress> for Address {
+//     fn from(a: StringAddress) -> Self {
+//         Self {
+//             entity: outcome::EntityName::from(&a.entity).unwrap(),
+//             component: outcome::CompName::from(&a.component).unwrap(),
+//             var_type: outcome::VarType::from_str_unchecked(&a.var_type),
+//             var_id: outcome::VarName::from(&a.var_name).unwrap(),
+//         }
+//     }
+// }

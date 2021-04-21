@@ -79,6 +79,7 @@ extern crate fasteval;
 pub use address::Address;
 pub use error::Result;
 pub use model::SimModel;
+pub use query::{Query, QueryProduct};
 pub use sim::Sim;
 pub use var::{Var, VarType};
 
@@ -88,18 +89,18 @@ pub mod distr;
 pub mod entity;
 pub mod error;
 pub mod model;
-pub mod query;
 pub mod sim;
+pub mod snapshot;
 pub mod var;
 
 mod util;
 
 // features
-pub const FEATURE_NAME_SMALL_NUMS: &str = "small_nums";
-#[cfg(not(feature = "small_nums"))]
-pub const FEATURE_SMALL_NUMS: bool = false;
-#[cfg(feature = "small_nums")]
-pub const FEATURE_SMALL_NUMS: bool = true;
+pub const FEATURE_NAME_BIG_NUMS: &str = "big_nums";
+#[cfg(not(feature = "big_nums"))]
+pub const FEATURE_BIG_NUMS: bool = false;
+#[cfg(feature = "big_nums")]
+pub const FEATURE_BIG_NUMS: bool = true;
 
 pub const FEATURE_NAME_SHORT_STRINGID: &str = "short_stringid";
 #[cfg(not(feature = "short_stringid"))]
@@ -126,6 +127,7 @@ pub const FEATURE_MACHINE: bool = true;
 pub const FEATURE_MACHINE: bool = false;
 #[cfg(feature = "machine")]
 pub mod machine;
+pub mod query;
 
 pub const FEATURE_NAME_MACHINE_DYNLIB: &str = "machine_dynlib";
 #[cfg(not(feature = "machine_dynlib"))]
@@ -179,17 +181,17 @@ const DEFAULT_TRIGGER_EVENT: &str = "step";
 const DEFAULT_INIT_EVENT: &str = "init";
 
 /// Floating point numer type used throughout the library.
-#[cfg(feature = "small_nums")]
-pub type Float = f32;
-/// Floating point numer type used throughout the library.
-#[cfg(not(feature = "small_nums"))]
+#[cfg(feature = "big_nums")]
 pub type Float = f64;
+/// Floating point numer type used throughout the library.
+#[cfg(not(feature = "big_nums"))]
+pub type Float = f32;
 /// Integer number type used throughout the library.
-#[cfg(feature = "small_nums")]
-pub type Int = i32;
-/// Integer number type used throughout the library.
-#[cfg(not(feature = "small_nums"))]
+#[cfg(feature = "big_nums")]
 pub type Int = i64;
+/// Integer number type used throughout the library.
+#[cfg(not(feature = "big_nums"))]
+pub type Int = i32;
 
 /// Fixed-size string used internally for indexing objects.
 ///
@@ -203,21 +205,23 @@ pub type StringId = arrayvec::ArrayString<[u8; 23]>;
 #[cfg(feature = "short_stringid")]
 pub type StringId = arrayvec::ArrayString<[u8; 10]>;
 
-/// Short fixed-size string type.
+/// Short fixed-size string.
 pub type ShortString = arrayvec::ArrayString<[u8; 23]>;
-/// Medium-length fixed-size string type.
+/// Medium-length fixed-size string.
 type MedString = arrayvec::ArrayString<[u8; 40]>;
-/// Long fixed-size string type.
+/// Long fixed-size string.
 type LongString = arrayvec::ArrayString<[u8; 100]>;
 
-/// Entity string identifier type.
+/// Entity string identifier.
 pub type EntityName = StringId;
-/// Component string identifier type.
+/// Entity prefab string identifier.
+pub type PrefabName = StringId;
+/// Component string identifier.
 pub type CompName = StringId;
-/// Variable string identifier type.
+/// Variable string identifier.
 pub type VarName = StringId;
-/// Event string identifier type.
+/// Event string identifier.
 pub type EventName = StringId;
 
-/// Entity unique integer identifier type.
+/// Entity unique integer identifier.
 pub type EntityId = u32;

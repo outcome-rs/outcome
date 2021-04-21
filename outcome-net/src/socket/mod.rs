@@ -1,16 +1,16 @@
 use crate::msg::{msg_bytes_from_payload, Message, Payload};
 use crate::sig::Signal;
-use crate::{Error, Result};
-use serde::Serialize;
-use std::convert::TryFrom;
+use crate::{sig, Error, Result, TaskId};
+use serde::{Deserialize, Serialize};
+use std::convert::{TryFrom, TryInto};
+use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "laminar_transport")]
 pub mod laminar;
-#[cfg(feature = "messageio_transport")]
-pub mod messageio;
 #[cfg(feature = "zmq_transport")]
 pub mod zmq;
 
@@ -20,7 +20,7 @@ mod tcp;
 pub struct SocketConfig {
     /// Defines the possible behavior of the socket
     pub type_: SocketType,
-    /// Currently used encoding scheme
+    /// Encoding scheme used by the socket
     pub encoding: Encoding,
     pub try_timeout: Option<Duration>,
     pub idle_timeout: Option<Duration>,
@@ -33,29 +33,16 @@ impl Default for SocketConfig {
             type_: SocketType::Pair,
             encoding: Encoding::Bincode,
             try_timeout: None,
-            //idle_timeout: Some(Duration::from_secs(5)),
             idle_timeout: Some(Duration::from_secs(3)),
             heartbeat_interval: Some(Duration::from_secs(1)),
         }
     }
 }
 
-// pub struct SocketAddr {
-//     protocol: Option<Protocol>,
-//
-// }
-// pub enum Protocol {
-//     Tcp,
-//     Udp,
-//     Inproc,
-//     Ipc,
-//     // Websocket
-// }
-//
-
 /// Main socket abstraction.
 pub struct Socket {
     inner: InnerSocket,
+    last_heartbeat: Instant,
 }
 
 /// Wrapper over different socket types by transport.
@@ -65,8 +52,6 @@ pub enum InnerSocket {
     Laminar(laminar::LaminarSocket),
     #[cfg(feature = "zmq_transport")]
     Zmq(zmq::ZmqSocket),
-    //#[cfg(feature = "messageio_socket")]
-    //Messageio(messageio::MessageioSocket),
 }
 
 impl Socket {
@@ -76,7 +61,10 @@ impl Socket {
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => Transport::Laminar,
             #[cfg(feature = "zmq_transport")]
-            InnerSocket::Zmq(socket) => Transport::Zmq,
+            InnerSocket::Zmq(socket) => match socket.transport {
+                zmq::ZmqTransport::Tcp => Transport::ZmqTcp,
+                zmq::ZmqTransport::Ipc => Transport::ZmqIpc,
+            },
             _ => unimplemented!(),
         }
     }
@@ -92,46 +80,45 @@ impl Socket {
         }
     }
 
-    /// Creates and binds new socket to the given address using specific
-    /// transport type.
-    pub fn bind(addr: &str, transport: Transport) -> Result<Self> {
-        let config = SocketConfig::default();
-        Self::bind_with_config(addr, transport, config)
+    /// Creates new socket based on provided transport, optionally binding
+    /// a listener to the given address.
+    pub fn new(addr: Option<SocketAddress>, transport: Transport) -> Result<Self> {
+        Self::new_with_config(addr, transport, SocketConfig::default())
     }
 
-    /// Like `bind` but uses localhost with a random port.
-    pub fn bind_any(transport: Transport) -> Result<Self> {
-        let config = SocketConfig::default();
-        Self::bind_any_with_config(transport, config)
-    }
-
-    /// Creates and binds new socket to the given address using specific
-    /// transport type, and sets it up based on provided config struct.
-    pub fn bind_with_config(
-        addr: &str,
+    /// Creates new socket based on provided transport and config, optionally
+    /// binding a listener to the given address.
+    pub fn new_with_config(
+        addr: Option<SocketAddress>,
         transport: Transport,
         config: SocketConfig,
     ) -> Result<Self> {
         let inner = match transport {
             Transport::Tcp => {
-                InnerSocket::SimpleTcp(tcp::TcpSocket::bind_with_config(addr, config)?)
+                InnerSocket::SimpleTcp(tcp::TcpSocket::new_with_config(addr, config)?)
             }
             #[cfg(feature = "laminar_transport")]
             Transport::Laminar => {
-                InnerSocket::Laminar(laminar::LaminarSocket::bind_with_config(addr, config)?)
+                InnerSocket::Laminar(laminar::LaminarSocket::new_with_config(addr, config)?)
             }
             #[cfg(feature = "zmq_transport")]
-            Transport::Zmq => InnerSocket::Zmq(zmq::ZmqSocket::bind_with_config(addr, config)?),
-            //#[cfg(feature = "messageio_socket")]
-            //Transport::Messageio => InnerSocket::Messageio(messageio::MessageioSocket::bind(addr)?),
+            Transport::ZmqTcp => InnerSocket::Zmq(zmq::ZmqSocket::new_with_config(
+                addr,
+                zmq::ZmqTransport::Tcp,
+                config,
+            )?),
+            #[cfg(feature = "zmq_transport")]
+            Transport::ZmqIpc => InnerSocket::Zmq(zmq::ZmqSocket::new_with_config(
+                addr,
+                zmq::ZmqTransport::Ipc,
+                config,
+            )?),
             _ => unimplemented!(),
         };
-        Ok(Self { inner })
-    }
-
-    /// Like `bind_with_config` but uses localhost with a random port.
-    pub fn bind_any_with_config(transport: Transport, config: SocketConfig) -> Result<Self> {
-        Self::bind_with_config("0.0.0.0:0", transport, config)
+        Ok(Self {
+            inner,
+            last_heartbeat: Instant::now(),
+        })
     }
 
     pub fn encoding(&self) -> &Encoding {
@@ -145,16 +132,29 @@ impl Socket {
         }
     }
 
-    /// Returns the last address this socket was bound to.
-    pub fn last_endpoint(&self) -> Result<SocketAddr> {
+    pub fn listener_addr(&self) -> Result<SocketAddress> {
         match &self.inner {
-            InnerSocket::SimpleTcp(socket) => socket.last_endpoint(),
+            InnerSocket::SimpleTcp(socket) => socket.listener_addr(),
             #[cfg(feature = "laminar_transport")]
-            InnerSocket::Laminar(socket) => socket.last_endpoint(),
+            InnerSocket::Laminar(socket) => socket.listener_addr(),
             #[cfg(feature = "zmq_transport")]
-            InnerSocket::Zmq(socket) => socket.last_endpoint(),
+            InnerSocket::Zmq(socket) => socket.listener_addr(),
             _ => unimplemented!(),
         }
+    }
+
+    pub fn manual_poll(&mut self) -> Result<()> {
+        // send heartbeats
+        if let Some(heartbeat) = self.config().heartbeat_interval {
+            let now = Instant::now();
+            let since_last_heartbeat = now - self.last_heartbeat;
+            if since_last_heartbeat > heartbeat {
+                self.last_heartbeat = now;
+                let heartbeat = SocketEvent::new(SocketEventType::Heartbeat);
+                self.send_event(heartbeat, None)?;
+            }
+        }
+        Ok(())
     }
 
     /// Connects to a compatible socket at the provided address.
@@ -163,16 +163,25 @@ impl Socket {
     ///
     /// Some socket types allow for establishing multiple connections, while
     /// others don't.
-    ///
-    /// For single-connection socket types, calling this function twice will
-    /// return an error.
-    pub fn connect(&mut self, addr: &str) -> Result<()> {
+    pub fn connect(&mut self, addr: SocketAddress) -> Result<()> {
         match &mut self.inner {
             InnerSocket::SimpleTcp(socket) => socket.connect(addr)?,
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => socket.connect(addr)?,
             #[cfg(feature = "zmq_transport")]
             InnerSocket::Zmq(socket) => socket.connect(addr)?,
+            _ => unimplemented!(),
+        }
+        Ok(())
+    }
+
+    pub fn bind(&mut self, addr: SocketAddress) -> Result<()> {
+        match &mut self.inner {
+            // InnerSocket::SimpleTcp(socket) => socket.bind(addr)?,
+            // #[cfg(feature = "laminar_transport")]
+            // InnerSocket::Laminar(socket) => socket.bind(addr)?,
+            #[cfg(feature = "zmq_transport")]
+            InnerSocket::Zmq(socket) => socket.bind(addr)?,
             _ => unimplemented!(),
         }
         Ok(())
@@ -185,9 +194,9 @@ impl Socket {
     /// For socket types where multiple connections from a single socket
     /// are supported, it's required to provide the address of the connection
     /// to be terminated.
-    pub fn disconnect(&mut self, addr: Option<SocketAddr>) -> Result<()> {
+    pub fn disconnect(&mut self, addr: Option<SocketAddress>) -> Result<()> {
         match &mut self.inner {
-            InnerSocket::SimpleTcp(socket) => socket.disconnect(None)?,
+            InnerSocket::SimpleTcp(socket) => socket.disconnect(addr)?,
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => socket.disconnect(addr)?,
             #[cfg(feature = "zmq_transport")]
@@ -204,15 +213,13 @@ impl Socket {
     ///
     /// Return type is a tuple that includes the address of the socket where
     /// the received event came from.
-    pub fn recv(&mut self) -> Result<(SocketAddr, SocketEvent)> {
+    pub fn recv(&mut self) -> Result<(SocketAddress, SocketEvent)> {
         match &mut self.inner {
             InnerSocket::SimpleTcp(socket) => socket.recv(),
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => socket.recv(),
             #[cfg(feature = "zmq_transport")]
             InnerSocket::Zmq(socket) => socket.recv(),
-            //#[cfg(feature = "messageio_socket")]
-            //InnerSocket::Messageio(socket) => socket.recv(),
             _ => unimplemented!(),
         }
     }
@@ -226,7 +233,7 @@ impl Socket {
     /// function will be placed in an internal event backlog. Events pushed
     /// to the backlog can still be read using the regular socket event
     /// receiving functions.
-    pub fn recv_msg(&mut self) -> Result<(SocketAddr, Message)> {
+    pub fn recv_msg(&mut self) -> Result<(SocketAddress, Message)> {
         match &mut self.inner {
             InnerSocket::SimpleTcp(ref mut socket) => socket.recv_msg(),
             #[cfg(feature = "laminar_transport")]
@@ -246,14 +253,12 @@ impl Socket {
     /// function will be placed in an internal event backlog. Events pushed
     /// to the backlog can still be read using the regular socket event
     /// receiving functions.
-    pub fn recv_sig(&mut self) -> Result<(SocketAddr, Signal)> {
+    pub fn recv_sig(&mut self) -> Result<(SocketAddress, Signal)> {
         match &mut self.inner {
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => socket.recv_sig(),
             #[cfg(feature = "zmq_transport")]
             InnerSocket::Zmq(socket) => socket.recv_sig(),
-            //#[cfg(feature = "messageio_socket")]
-            //InnerSocket::Messageio(socket) => socket.recv(),
             InnerSocket::SimpleTcp(sock) => sock.recv_sig(),
             _ => unimplemented!(),
         }
@@ -261,32 +266,29 @@ impl Socket {
 
     /// Tries to receive the newest event from the socket without blocking.
     /// If no event is currently available returns an error.
-    pub fn try_recv(&mut self) -> Result<(SocketAddr, SocketEvent)> {
+    pub fn try_recv(&mut self) -> Result<(SocketAddress, SocketEvent)> {
         match &mut self.inner {
             InnerSocket::SimpleTcp(ref mut socket) => socket.try_recv(),
             #[cfg(feature = "laminar_transport")]
             InnerSocket::Laminar(socket) => socket.try_recv(),
             #[cfg(feature = "zmq_transport")]
             InnerSocket::Zmq(socket) => socket.try_recv(),
-            _ => unimplemented!(),
         }
     }
 
     /// Tries to receive the newest message from the socket without blocking.
     /// If no message is currently available returns an error.
-    pub fn try_recv_msg(&mut self) -> Result<Message> {
-        let (addr, msg) = match &mut self.inner {
-            InnerSocket::SimpleTcp(ref mut socket) => socket.try_recv_msg()?,
+    pub fn try_recv_msg(&mut self) -> Result<(SocketAddress, Message)> {
+        match &mut self.inner {
+            InnerSocket::SimpleTcp(ref mut socket) => socket.try_recv_msg(),
             #[cfg(feature = "laminar_transport")]
-            InnerSocket::Laminar(socket) => socket.try_recv_msg()?,
+            InnerSocket::Laminar(socket) => socket.try_recv_msg(),
             #[cfg(feature = "zmq_transport")]
-            InnerSocket::Zmq(socket) => socket.try_recv_msg()?,
-            _ => unimplemented!(),
-        };
-        Ok(msg)
+            InnerSocket::Zmq(socket) => socket.try_recv_msg(),
+        }
     }
 
-    pub fn try_recv_sig(&mut self) -> Result<(SocketAddr, Signal)> {
+    pub fn try_recv_sig(&mut self) -> Result<(SocketAddress, Signal)> {
         match &mut self.inner {
             InnerSocket::SimpleTcp(socket) => socket.try_recv_sig(),
             #[cfg(feature = "laminar_transport")]
@@ -301,64 +303,94 @@ impl Socket {
     ///
     /// For socket types supporting multiple connections, the address of the
     /// target socket must be specified.
-    pub fn send(&self, bytes: Vec<u8>, addr: Option<SocketAddr>) -> Result<()> {
+    pub fn send_bytes(&self, bytes: Vec<u8>, addr: Option<SocketAddress>) -> Result<()> {
         match &self.inner {
-            InnerSocket::SimpleTcp(socket) => socket.send(bytes, addr),
+            InnerSocket::SimpleTcp(socket) => socket.send_bytes(bytes, addr),
             #[cfg(feature = "laminar_transport")]
-            InnerSocket::Laminar(socket) => socket.send(bytes),
+            InnerSocket::Laminar(socket) => socket.send_bytes(bytes, addr),
             #[cfg(feature = "zmq_transport")]
-            InnerSocket::Zmq(socket) => socket.send(bytes),
-            _ => unimplemented!(),
+            InnerSocket::Zmq(socket) => socket.send_bytes(bytes, addr),
         }
     }
 
-    pub fn send_sig(
-        &mut self,
-        signal: outcome::distr::Signal,
-        addr: Option<SocketAddr>,
-    ) -> Result<()> {
-        let sig = Signal::from(signal);
-        let bytes = sig.to_bytes(self.encoding())?;
-        trace!("sending {} byte signal", bytes.len());
-        self.send(bytes, addr)
+    pub fn send_event(&self, event: SocketEvent, addr: Option<SocketAddress>) -> Result<()> {
+        match &self.inner {
+            InnerSocket::SimpleTcp(socket) => socket.send_event(event, addr),
+            #[cfg(feature = "laminar_transport")]
+            InnerSocket::Laminar(socket) => socket.send_event(event, addr),
+            #[cfg(feature = "zmq_transport")]
+            InnerSocket::Zmq(socket) => socket.send_event(event, addr),
+        }
     }
 
-    //pub fn send_msg(&mut self, msg: Message) -> Result<()> {
-    //match &mut self.inner {
-    //InnerSocket::SimpleTcp(socket) => socket.send_msg()
-    ////InnerSocket::Zmq(socket) => socket.send(bytes),
-    ////InnerSocket::Laminar(socket) => socket.send(bytes),
-    //_ => unimplemented!(),
-    //}
-    //}
-    //
-    // fn read_msg(&self) -> Result<Message>;
-    // fn try_read_msg(&self, timeout: Option<u32>) -> Result<Message>;
-    // fn send_msg(&self, msg: Message) -> Result<()>;
+    pub fn send_sig(&mut self, sig: sig::Signal, addr: Option<SocketAddress>) -> Result<()> {
+        let bytes = sig.to_bytes(self.encoding())?;
+        trace!("sending {} byte signal", bytes.len());
+        self.send_bytes(bytes, addr)
+    }
 
-    pub fn pack_send_msg_payload<P: Payload + Serialize>(
+    pub fn send_payload<P: Payload + Serialize>(
         &self,
         payload: P,
-        addr: Option<SocketAddr>,
+        addr: Option<SocketAddress>,
     ) -> Result<()> {
-        let msg_bytes = msg_bytes_from_payload(payload, self.encoding())?;
-        self.send(msg_bytes, addr)?;
+        let msg_bytes = msg_bytes_from_payload(payload, 0, self.encoding())?;
+        self.send_bytes(msg_bytes, addr)?;
+        Ok(())
+    }
+
+    pub fn send_payload_with_task<P: Payload + Serialize>(
+        &self,
+        payload: P,
+        task_id: TaskId,
+        addr: Option<SocketAddress>,
+    ) -> Result<()> {
+        let msg_bytes = msg_bytes_from_payload(payload, task_id, self.encoding())?;
+        self.send_bytes(msg_bytes, addr)?;
         Ok(())
     }
 }
 
-/// Variant event type that is to be sent across the network sockets.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub enum SocketEvent {
-    Bytes(Vec<u8>),
-    /// Depending on the transport, incoming event might be in a `Message`
-    /// form.
-    Message(Message),
+pub struct SocketEvent {
+    pub type_: SocketEventType,
+    pub bytes: Vec<u8>,
+}
+
+impl SocketEvent {
+    pub fn new(type_: SocketEventType) -> Self {
+        Self {
+            type_,
+            bytes: Default::default(),
+        }
+    }
+    pub fn new_bytes(bytes: Vec<u8>) -> Self {
+        Self {
+            type_: SocketEventType::Bytes,
+            bytes,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[repr(u8)]
+pub enum SocketEventType {
+    Bytes,
     Heartbeat,
     Connect,
     Disconnect,
     Timeout,
 }
+
+// /// Variant event type sent across the network sockets.
+// #[derive(Debug, Clone, Deserialize, Serialize)]
+// pub enum SocketEvent {
+//     Bytes(Vec<u8>),
+//     Heartbeat,
+//     Connect,
+//     Disconnect,
+//     Timeout,
+// }
 
 #[derive(Copy, Clone)]
 pub enum SocketType {
@@ -370,8 +402,87 @@ pub enum SocketType {
     //Dealer,
 }
 
-// TODO websockets
+// TODO perhaps make file variant use arraystring and then whole thing Copy
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SocketAddress {
+    Net(SocketAddr),
+    File(String),
+    Unavailable,
+}
+
+impl SocketAddress {
+    pub fn parse_composite(
+        s: &str,
+    ) -> Result<(Option<Encoding>, Option<Transport>, SocketAddress)> {
+        if s.contains("://") {
+            let split = s.split("://").collect::<Vec<&str>>();
+            if split[0].contains("@") {
+                let _split = split[0].split("@").collect::<Vec<&str>>();
+                Ok((
+                    Some(Encoding::from_str(_split[0])?),
+                    Some(Transport::from_str(_split[1])?),
+                    split[1].parse()?,
+                ))
+            } else {
+                Ok((
+                    None,
+                    Some(Transport::from_str(split[0])?),
+                    split[1].parse()?,
+                ))
+            }
+        } else if s.contains("@") {
+            let split = s.split("@").collect::<Vec<&str>>();
+            Ok((Some(Encoding::from_str(split[0])?), None, split[1].parse()?))
+        } else {
+            Ok((None, None, s.parse()?))
+        }
+    }
+}
+
+impl FromStr for SocketAddress {
+    type Err = Error;
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+        if s == "unavailable" {
+            Ok(Self::Unavailable)
+        } else if s.contains("/") {
+            Ok(Self::File(s.parse().unwrap()))
+        } else {
+            Ok(Self::Net(s.parse()?))
+        }
+    }
+}
+
+impl TryInto<SocketAddr> for SocketAddress {
+    type Error = Error;
+    fn try_into(self) -> core::result::Result<SocketAddr, Self::Error> {
+        match self {
+            SocketAddress::Net(net) => Ok(net),
+            _ => Err(Error::WrongSocketAddressType),
+        }
+    }
+}
+
+// impl ToString for SocketAddress {
+//     fn to_string(&self) -> String {
+//         match self {
+//             Self::Net(s) => s.to_string(),
+//             Self::File(s) => s.to_string_lossy().to_string(),
+//         }
+//     }
+// }
+
+impl Display for SocketAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SocketAddress::Net(net) => write!(f, "{}", net.to_string()),
+            SocketAddress::File(path) => write!(f, "{}", path),
+            SocketAddress::Unavailable => write!(f, "unavailable"),
+        }
+    }
+}
+
 /// List of possible network transports.
+// TODO websockets
 #[derive(Debug, Clone, Copy)]
 pub enum Transport {
     /// Basic TCP transport built with rust's standard library
@@ -379,33 +490,55 @@ pub enum Transport {
     /// UDP transport with customizable reliability using the laminar library
     #[cfg(feature = "laminar_transport")]
     Laminar,
-    /// ZeroMQ based transport, mostly tcp but also supports inproc and ipc
+    /// ZeroMQ based TCP transport
     #[cfg(feature = "zmq_transport")]
-    Zmq,
+    ZmqTcp,
+    /// ZeroMQ based IPC transport
+    #[cfg(feature = "zmq_transport")]
+    ZmqIpc,
     /// NNG (nanomsg-next-gen) based transport
     #[cfg(feature = "nng_transport")]
     Nng,
-    /// TCP/UDP transport using message-io library
-    #[cfg(feature = "messageio_transport")]
-    Messageio,
 }
 
 impl Transport {
     pub fn from_str(s: &str) -> Result<Self> {
-        let t = match s {
-            "tcp" => Transport::Tcp,
-            #[cfg(feature = "zmq_transport")]
-            "zmq" => Transport::Zmq,
-            #[cfg(feature = "laminar_transport")]
-            "laminar" => Transport::Laminar,
+        match s.to_lowercase().as_str() {
+            "tcp" => Ok(Transport::Tcp),
+            "zmq_tcp" | "zmq" | "zeromq" => {
+                #[cfg(feature = "zmq_transport")]
+                return Ok(Transport::ZmqTcp);
+                #[cfg(not(feature = "zmq_transport"))]
+                return Err(Error::Other(format!(
+                    "trying to use transport: {}, but crate feature zmq_transport is not enabled",
+                    s
+                )));
+            }
+            "zmq_ipc" | "ipc" => {
+                #[cfg(feature = "zmq_transport")]
+                return Ok(Transport::ZmqIpc);
+                #[cfg(not(feature = "zmq_transport"))]
+                return Err(Error::Other(format!(
+                    "trying to use transport: {}, but crate feature zmq_transport is not enabled",
+                    s
+                )));
+            }
+            "laminar" | "udp" => {
+                #[cfg(feature = "laminar_transport")]
+                return Ok(Transport::Laminar);
+                #[cfg(not(feature = "laminar_transport"))]
+                return Err(Error::Other(format!(
+                    "trying to use transport: {}, but crate feature laminar_transport is not enabled",
+                    s
+                )));
+            }
             _ => {
                 return Err(Error::Other(format!(
                     "failed parsing transport from string: {}",
                     s
                 )))
             }
-        };
-        Ok(t)
+        }
     }
 
     /// Checks if laminar transport is available, otherwise falls back on tcp.
@@ -432,10 +565,12 @@ pub enum Encoding {
 
 impl Encoding {
     pub fn from_str(s: &str) -> Result<Self> {
-        let e = match s {
+        let e = match s.to_lowercase().as_str() {
             "bincode" => Self::Bincode,
             #[cfg(feature = "msgpack_encoding")]
-            "msgpack" | "messagepack" | "MessagePack" => Self::MsgPack,
+            "msgpack" | "messagepack" | "rmp" => Self::MsgPack,
+            #[cfg(feature = "json_encoding")]
+            "json" => Self::MsgPack,
             _ => {
                 return Err(Error::Other(format!(
                     "failed parsing encoding from string: {}",
@@ -445,4 +580,47 @@ impl Encoding {
         };
         Ok(e)
     }
+}
+
+/// Packs serializable object to bytes based on selected encoding.
+pub(crate) fn pack<S: Serialize>(obj: S, encoding: &Encoding) -> Result<Vec<u8>> {
+    let packed: Vec<u8> = match encoding {
+        Encoding::Bincode => bincode::serialize(&obj)?,
+        #[cfg(feature = "msgpack_encoding")]
+        Encoding::MsgPack => {
+            use rmp_serde::config::StructMapConfig;
+            let mut buf = Vec::new();
+            obj.serialize(&mut rmp_serde::Serializer::new(&mut buf))?;
+            buf
+        }
+        #[cfg(feature = "json_encoding")]
+        Encoding::Json => unimplemented!(),
+    };
+    Ok(packed)
+}
+
+/// Unpacks object from bytes based on selected encoding.
+pub fn unpack<'de, P: Deserialize<'de>>(bytes: &'de [u8], encoding: &Encoding) -> Result<P> {
+    let unpacked = match encoding {
+        Encoding::Bincode => bincode::deserialize(bytes)?,
+        #[cfg(feature = "msgpack_encoding")]
+        Encoding::MsgPack => {
+            use rmp_serde::config::StructMapConfig;
+            // println!("{:?}", bytes);
+            let mut de = rmp_serde::Deserializer::new(bytes);
+
+            Deserialize::deserialize(&mut de)?
+        }
+        #[cfg(feature = "json_encoding")]
+        Encoding::Json => unimplemented!(),
+    };
+    Ok(unpacked)
+}
+
+// TODO allow for different compression modes
+/// Compress bytes using lz4.
+#[cfg(feature = "lz4")]
+pub(crate) fn compress(bytes: &Vec<u8>) -> Result<Vec<u8>> {
+    let compressed = lz4::block::compress(bytes.as_slice(), None, true)?;
+    Ok(compressed)
 }

@@ -86,22 +86,27 @@ pub fn app_matches() -> ArgMatches<'static> {
                 .long("snapshot")
                 .short("n")
                 .help("Start new simulation run using a snapshot file"))
+            .arg(Arg::with_name("server")
+                .long("server")
+                .help("Enable server-backed local simulation, allowing for attaching services")
+                .takes_value(true)
+                .default_value("127.0.0.1:0"))
             .arg(Arg::with_name("interactive")
-                .default_value("true")
+                .long("interactive")
                 .short("i")
-                .long("interactive"))
+                .default_value("true"))
             .arg(Arg::with_name("icfg")
+                .long("icfg")
+                .help("specify path to interactive mode configuration file")
                 .takes_value(true)
                 .value_name("path")
-                .default_value("./interactive.yaml")
-                .long("icfg")
-                .help("specify path to interactive mode configuration file"))
+                .default_value("./interactive.yaml"))
             .arg(Arg::with_name("watch")
                 .long("watch")
+                .help("Watch project directory for changes")
                 .value_name("on-change")
                 .default_value("restart")
-                .possible_values(&["restart", "update"])
-                .help("Watch project directory for changes"))
+                .possible_values(&["restart", "update"]))
 
         )
 
@@ -270,6 +275,13 @@ pub fn app_matches() -> ArgMatches<'static> {
                 .short("c")
                 .help("Address of the cluster coordinator to connect to")
                 .takes_value(true)
+                .value_name("address"))
+            .arg(Arg::with_name("server")
+                .long("server")
+                .short("s")
+                .help("Make the worker into a server able to handle clients")
+                .takes_value(true)
+                .min_values(0)
                 .value_name("address"))
         );
 
@@ -620,10 +632,12 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
                     addr,
                     worker_addrs,
                 )?)
-            } else {
-                // TODO
+            } else if let Some(snapshot_path) = matches.value_of("snapshot") {
                 unimplemented!()
+
                 // SimConnection::ClusterCoord(Coord::new_with_path());
+            } else {
+                panic!()
             }
         }
         None => {
@@ -637,7 +651,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         }
     };
 
-    let mut server = Server::new_with_config(server_address, config, sim_instance);
+    let mut server = Server::new_with_config(server_address, config, sim_instance)?;
     server.initialize_services()?;
 
     // run a loop allowing graceful shutdown
@@ -663,7 +677,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
 
 fn start_client(matches: &ArgMatches) -> Result<()> {
     let mut client = outcome_net::Client::new_with_config(
-        matches.value_of("public-addr").map(|s| s.to_string()),
+        // matches.value_of("public-addr").map(|s| s.to_string()),
         outcome_net::ClientConfig {
             name: matches.value_of("name").unwrap_or("cli-client").to_string(),
             heartbeat: match matches.value_of("heartbeat") {
@@ -683,7 +697,7 @@ fn start_client(matches: &ArgMatches) -> Result<()> {
     )?;
 
     client.connect(
-        matches
+        &matches
             .value_of("server-addr")
             .map(|s| s.to_string())
             .ok_or(Error::msg("server adddress must be provided"))?,
@@ -711,11 +725,6 @@ fn start_client(matches: &ArgMatches) -> Result<()> {
 }
 
 fn start_worker(matches: &ArgMatches) -> Result<()> {
-    let my_address = match matches.value_of("address") {
-        Some(addr) => addr,
-        // None => outcome_net::cluster::worker::WORKER_ADDRESS,
-        None => unimplemented!(),
-    };
     let mut use_auth = matches.is_present("use_auth");
     let passwd_list = match matches.value_of("passwd") {
         //TODO support multiple passwords separated by ','
@@ -729,9 +738,8 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
         use_auth = true;
     }
 
-    println!("Now listening on {}", my_address);
-
-    let mut worker = Worker::new(my_address)?;
+    let mut worker = Worker::new(matches.value_of("address"))?;
+    println!("Now listening on {}", worker.greeter.listener_addr()?);
 
     if let Some(coord_addr) = matches.value_of("coord") {
         print!("initiating connection with coordinator... ");
@@ -744,11 +752,7 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
     }
     worker.handle_coordinator()?;
 
-    // TODO get server address
-    let mut server = Server::new("127.0.0.1:8123", SimConnection::ClusterWorker(worker));
-    server.initialize_services()?;
-
-    // run a loop allowing graceful shutdown
+    // allow graceful shutdown on signal
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     ctrlc::set_handler(move || {
@@ -756,16 +760,39 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
     })
     .expect("error setting ctrlc handler");
 
-    server.start_polling(running);
+    if matches.is_present("server") {
+        let server_addr = match matches.value_of("server") {
+            Some(s) => s,
+            None => "127.0.0.1:0",
+        };
 
-    println!("Initiating graceful shutdown...");
-    for (client_id, client) in &mut server.clients {
-        client.connection.disconnect(None);
+        // TODO get server address
+        let mut server = Server::new(server_addr, SimConnection::ClusterWorker(worker))?;
+        server.initialize_services()?;
+
+        server.start_polling(running);
+
+        println!("Initiating graceful shutdown...");
+        for (client_id, client) in &mut server.clients {
+            client.connection.disconnect(None);
+        }
+        // server.manual_poll()?;
+        server.cleanup()?;
+
+        thread::sleep(Duration::from_secs(1));
+    } else {
+        loop {
+            // terminate loop if the `running` bool gets flipped to false
+            if !running.load(Ordering::SeqCst) {
+                break;
+            }
+
+            worker.manual_poll();
+
+            // wait a little to reduce polling overhead
+            thread::sleep(Duration::from_millis(3));
+        }
     }
-    // server.manual_poll()?;
-    server.cleanup()?;
-
-    thread::sleep(Duration::from_secs(1));
 
     Ok(())
 }

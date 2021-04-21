@@ -9,7 +9,7 @@ use crate::msg::{
     RegisterClientRequest, RegisterClientResponse, ScheduledDataTransferRequest, StatusRequest,
     StatusResponse, TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
 };
-use crate::socket::{Encoding, Socket, SocketConfig, SocketType, Transport};
+use crate::socket::{Encoding, Socket, SocketAddress, SocketConfig, SocketType, Transport};
 use crate::{error::Error, Result};
 
 /// List of available compression policies for outgoing messages.
@@ -103,10 +103,10 @@ pub struct Client {
 
 impl Client {
     pub fn new() -> Result<Self> {
-        Self::new_with_config(None, ClientConfig::default())
+        Self::new_with_config(ClientConfig::default())
     }
 
-    pub fn new_with_config(addr: Option<String>, config: ClientConfig) -> Result<Self> {
+    pub fn new_with_config(config: ClientConfig) -> Result<Self> {
         let transport = config
             .transports
             .first()
@@ -126,10 +126,7 @@ impl Client {
             encoding,
             ..Default::default()
         };
-        let connection = match addr {
-            Some(a) => Socket::bind_with_config(&a, transport, socket_config)?,
-            None => Socket::bind_any_with_config(transport, socket_config)?,
-        };
+        let connection = Socket::new_with_config(None, transport, socket_config)?;
         let client = Self {
             config,
             connection,
@@ -146,21 +143,35 @@ impl Client {
     /// In it's response to client registration message, the server can specify
     /// at what address the target two-way connection shall take place. This
     /// prompts the client to reconnect at that new address.
-    pub fn connect(&mut self, addr: String, password: Option<String>) -> Result<()> {
+    pub fn connect(&mut self, addr: &str, password: Option<String>) -> Result<()> {
         debug!("client public_addr: {:?}", self.public_addr);
         info!("dialing server at: {}", addr);
 
-        self.connection.connect(&addr)?;
+        let (encoding, transport, address) = SocketAddress::parse_composite(addr)?;
 
-        self.connection.pack_send_msg_payload(
+        let mut socket_config = SocketConfig {
+            type_: SocketType::Pair,
+            ..Default::default()
+        };
+        if let Some(_encoding) = encoding {
+            socket_config.encoding = _encoding;
+        }
+        let transport = transport.unwrap_or(Transport::Tcp);
+        self.connection = Socket::new_with_config(None, transport, socket_config)?;
+        self.connection.connect(address.clone())?;
+
+        // self.connection.connect(addr.parse()?)?;
+
+        self.connection.send_payload(
             RegisterClientRequest {
                 name: self.config.name.clone(),
-                addr: self.public_addr.clone(),
                 is_blocking: self.config.is_blocking,
                 passwd: password,
             },
             None,
         )?;
+
+        println!("sent register request");
 
         let resp: RegisterClientResponse = self
             .connection
@@ -173,7 +184,9 @@ impl Client {
         // perform redirection if server specified an alternative address
         if !resp.redirect.is_empty() {
             self.connection.disconnect(None)?;
-            self.connection.connect(&resp.redirect)?;
+            std::thread::sleep(Duration::from_millis(100));
+            // self.connection.disconnect(Some(address))?;
+            self.connection.connect(resp.redirect.parse()?)?;
         }
 
         if !resp.error.is_empty() {
@@ -190,8 +203,8 @@ impl Client {
         self.connection.disconnect(None)
     }
 
-    pub fn server_status(&mut self) -> Result<HashMap<String, String>> {
-        self.connection.pack_send_msg_payload(
+    pub fn server_status(&mut self) -> Result<StatusResponse> {
+        self.connection.send_payload(
             StatusRequest {
                 format: "".to_string(),
             },
@@ -200,15 +213,12 @@ impl Client {
         debug!("sent server status request to server");
         let (_, msg) = self.connection.recv_msg()?;
         let resp: StatusResponse = msg.unpack_payload(self.connection.encoding())?;
-        let mut out_map = HashMap::new();
-        out_map.insert("uptime".to_string(), format!("{}", resp.uptime));
-        out_map.insert("current_tick".to_string(), format!("{}", resp.current_tick));
-        Ok(out_map)
+        Ok(resp)
     }
 
     pub fn server_step_request(&mut self, steps: u32) -> Result<Message> {
         self.connection
-            .pack_send_msg_payload(TurnAdvanceRequest { tick_count: steps }, None)?;
+            .send_payload(TurnAdvanceRequest { tick_count: steps }, None)?;
         let (_, resp) = self.connection.recv_msg()?;
         Ok(resp)
     }
@@ -221,8 +231,8 @@ impl Client {
         unimplemented!();
     }
 
-    pub fn get_vars(&mut self) -> Result<Option<TransferResponseData>> {
-        self.connection.pack_send_msg_payload(
+    pub fn get_vars(&mut self) -> Result<TransferResponseData> {
+        self.connection.send_payload(
             DataTransferRequest {
                 transfer_type: "Full".to_string(),
                 selection: vec![],
@@ -239,7 +249,7 @@ impl Client {
     }
 
     pub fn reg_scheduled_transfer(&mut self) -> Result<()> {
-        self.connection.pack_send_msg_payload(
+        self.connection.send_payload(
             ScheduledDataTransferRequest {
                 event_triggers: vec!["step".to_string()],
                 transfer_type: "SelectVarOrdered".to_string(),

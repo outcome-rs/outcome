@@ -3,114 +3,144 @@
 use anyhow::Result;
 
 use outcome_core::machine::cmd::CommandResult;
-use outcome_core::{arraystring::new_truncate, entity::Storage, entity::StorageIndex, EntityId};
+use outcome_core::query::{Description, Filter, Layout, Map, Trigger};
+use outcome_core::{
+    arraystring::new_truncate, entity::Storage, entity::StorageIndex, CompName, EntityId, Query,
+    QueryProduct, Var, VarName, VarType,
+};
+use outcome_net::msg::MessageType::DataPullResponse;
 use outcome_net::msg::{
     DataPullRequest, DataTransferRequest, DataTransferResponse, Message, MessageType,
-    PullRequestData, TransferResponseData, TurnAdvanceRequest, TurnAdvanceResponse,
-    TypedSimDataPack, VarSimDataPack, VarSimDataPackOrdered,
+    NativeQueryRequest, NativeQueryResponse, PullRequestData, TransferResponseData,
+    TurnAdvanceRequest, TurnAdvanceResponse, TypedSimDataPack, VarSimDataPack,
+    VarSimDataPackOrdered,
 };
 use outcome_net::{Client, ClientConfig, CompressionPolicy, SocketEvent};
+use std::convert::TryInto;
+use std::str::FromStr;
+use std::time::Duration;
 
 pub fn main() -> Result<()> {
     // let mut client = Client::new("flock_service", true, false, None, Some(1000))?;
-    let mut client = Client::new_with_config(
-        None,
-        ClientConfig {
-            name: "flock_service".to_string(),
-            heartbeat: None,
-            is_blocking: true,
-            ..Default::default()
-        },
-    )?;
-    client.connect("127.0.0.1:9123".to_string(), None);
+    let mut client = Client::new_with_config(ClientConfig {
+        name: "flock_service".to_string(),
+        heartbeat: Some(Duration::from_secs(1)),
+        is_blocking: true,
+        ..Default::default()
+    })?;
+    client.connect("127.0.0.1:9123", None)?;
 
-    let mut advanced_turn = true;
+    let mut advance_turn = true;
     let mut received_data = true;
 
-    let mut data = VarSimDataPackOrdered::default();
-    let mut order_id = None;
+    // let mut data = Vec::new();
+    // let mut data = VarSimDataPackOrdered::default();
+    // let mut order_id = None;
 
-    client
-        .connection
-        .pack_send_msg_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
-    client.connection.pack_send_msg_payload(
-        DataTransferRequest {
-            transfer_type: "SelectVarOrdered".to_string(),
-            selection: vec!["4:velocity:float:x".to_string()],
-            // selection: vec![],
-        },
-        None,
-    )?;
+    // client
+    //     .connection
+    //     .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+
+    query_send(&mut client);
 
     loop {
         // println!("loop");
-        if advanced_turn && received_data && order_id.is_some() {
+        if advance_turn {
+            client
+                .connection
+                .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+            advance_turn = false;
+
+            // if !data.is_empty() {
+            //     println!("got vars: {:?}", data[0]);
+            // }
+        } else {
+            // client
+            //     .connection
+            //     .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+        }
+        if received_data {
+            // if advanced_turn && received_data {
+            // && order_id.is_some() {
             // println!("{:?}", data);
             // for (addr, var) in data
             // .vars
             //     .iter_mut()
             //     .filter(|(a, b)| a.contains(":velocity:float:x"))
-            for var in &mut data.vars {
-                if let Ok(v) = var.as_float_mut() {
-                    *v += 1.;
-                }
-            }
+            // for var in &mut data.vars {
+            //     if let Ok(v) = var.as_float_mut() {
+            //         *v += 1.;
+            //     }
+            // }
 
-            client.connection.pack_send_msg_payload(
-                DataPullRequest {
-                    data: PullRequestData::VarOrdered(order_id.unwrap(), data.clone()),
-                },
-                None,
-            )?;
-            client
-                .connection
-                .pack_send_msg_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
-            client
-                .connection
-                .pack_send_msg_payload(data_transfer_request(), None)?;
-            advanced_turn = false;
+            // client.connection.pack_send_msg_payload(
+            //     DataPullRequest {
+            //         data: PullRequestData::VarOrdered(order_id.unwrap(), data.clone()),
+            //     },
+            //     None,
+            // )?;
+
             received_data = false;
         }
+        std::thread::sleep(std::time::Duration::from_millis(3));
 
         loop {
             if let Ok((addr, event)) = client.connection.try_recv() {
                 match event {
                     SocketEvent::Bytes(bytes) => {
-                        let msg = Message::from_bytes(bytes)?;
-                        match msg.type_ {
+                        let msg = Message::from_bytes(bytes, client.connection.encoding())?;
+                        match msg.type_.try_into()? {
                             MessageType::TurnAdvanceResponse => {
                                 let resp: TurnAdvanceResponse =
                                     msg.unpack_payload(client.connection.encoding())?;
-                                if resp.error.is_empty() {
+                                // println!("{:?}", resp);
+                                if resp.error.is_empty()
+                                // || resp.error.as_str() == "PartiallyBlocked"
+                                {
+                                    query_send(&mut client);
                                     // println!("[{:?}] advanced turn", std::time::SystemTime::now());
-                                    advanced_turn = true;
+                                    // advanced_turn = true;
                                 } else {
                                     // println!("{}", resp.error);
-                                    client.connection.pack_send_msg_payload(
-                                        TurnAdvanceRequest { tick_count: 1 },
-                                        None,
-                                    )?;
                                 }
                             }
-                            MessageType::DataTransferResponse => {
-                                println!("received data transfer response");
-                                let resp: DataTransferResponse =
+                            MessageType::NativeQueryResponse => {
+                                // println!("received data transfer response");
+                                // if msg.task_id == 24 {
+                                let resp: NativeQueryResponse =
                                     msg.unpack_payload(client.connection.encoding())?;
-                                if let Some(resp_data) = resp.data {
-                                    match resp_data {
-                                        TransferResponseData::VarOrdered(ord_id, d) => {
-                                            order_id = Some(ord_id);
-                                            data = d
+                                match resp.query_product {
+                                    QueryProduct::NativeAddressedVar(vars) => {
+                                        // data = vars;
+                                        for ((entity_id, comp_name, var_name), mut var) in vars {
+                                            // if let Var::Float(mut f) = var {
+                                            //     f = f + 2.34;
+                                            // }
+                                            var = Var::Float(var.to_float() + 23.44);
+                                            client.connection.send_payload(
+                                                DataPullRequest {
+                                                    data: PullRequestData::NativeAddressedVar(
+                                                        (entity_id, comp_name, var_name),
+                                                        var,
+                                                    ),
+                                                },
+                                                None,
+                                            );
                                         }
-                                        _ => (),
+                                        // println!("{:?}", vars);
                                     }
+                                    // QueryProduct::AddressedVar()
+                                    _ => (),
                                 }
-                                received_data = true;
+                                // }
+
+                                advance_turn = true;
+                                // received_data = true;
                             }
                             MessageType::DataPullResponse => {
-                                println!("received pull response");
+                                // println!("received pull response");
                             }
-                            _ => (),
+                            _ => println!("unhandled message: {:?}", msg.type_),
                         }
                     }
                     SocketEvent::Disconnect => {
@@ -125,7 +155,7 @@ pub fn main() -> Result<()> {
             }
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        // std::thread::sleep(std::time::Duration::from_millis(1));
 
         // let data_pack = client.get_vars()?;
         // println!("data_pack: {:?}", data_pack);
@@ -142,12 +172,25 @@ pub fn main() -> Result<()> {
 
 fn match_msg(msg: Message) {}
 
-fn data_transfer_request() -> DataTransferRequest {
-    DataTransferRequest {
-        transfer_type: "SelectVarOrdered".to_string(),
-        // selection: vec!["*:velocity:float:x".to_string()],
-        selection: vec![],
-    }
+// fn data_request(client: &mut Client) -> DataTransferRequest {}
+
+fn query_send(client: &mut Client) -> Result<()> {
+    client.connection.send_payload_with_task(
+        NativeQueryRequest {
+            query: Query {
+                trigger: Trigger::Immediate,
+                description: Description::NativeDescribed,
+                layout: Layout::Var,
+                filters: vec![Filter::AllComponents(vec![CompName::from_str(
+                    "flock_member",
+                )?])],
+                mappings: vec![Map::Var(VarType::Float, VarName::from_str("floatie")?)],
+            },
+        },
+        24,
+        None,
+    )?;
+    Ok(())
 }
 
 pub fn calculate_entity(

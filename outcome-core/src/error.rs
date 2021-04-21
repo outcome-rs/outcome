@@ -50,6 +50,11 @@ pub enum Error {
     #[error("failed parsing bool: {0}")]
     ParseBoolError(#[from] ParseBoolError),
 
+    #[error("failed requesting new integer id: no more ids available in the pool?")]
+    RequestIdError,
+    #[error("failed returning integer id to pool: already exists?")]
+    ReturnIdError,
+
     #[error("invalid var type: {0}")]
     InvalidVarType(String),
     #[error("invalid local address: {0}")]
@@ -57,6 +62,9 @@ pub enum Error {
     #[error("invalid local address: {0}")]
     InvalidLocalAddress(String),
 
+    #[cfg(feature = "lz4")]
+    #[error("failed decompressing snapshot: {0}")]
+    SnapshotDecompressionError(String),
     #[error("failed reading snapshot: {0}")]
     FailedReadingSnapshot(String),
     #[error("failed creating snapshot: {0}")]

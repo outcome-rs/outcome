@@ -53,7 +53,7 @@ impl End {
                                 .unwrap()
                                 .as_int_mut()
                             {
-                                *int_var = fici.iteration as i64;
+                                *int_var = fici.iteration as crate::Int;
                             }
                         }
                     }

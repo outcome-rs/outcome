@@ -1,2 +1,9 @@
 print "[hello_world mod] Hello World!"
 
+component hello_greetable
+    var str:hello
+end
+
+prefab greetable hello_greetable
+
+spawn greetable

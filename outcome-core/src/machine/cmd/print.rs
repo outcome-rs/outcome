@@ -148,7 +148,7 @@ impl Print {
         //        let evuid =
         // comp.loc_vars.get(self.source).unwrap();
         let print_string = match &self.source.var_type {
-            VarType::Str => format!(
+            VarType::String => format!(
                 "{}",
                 match entity_db.get_var(&self.source.storage_index()) {
                     Ok(v) => v.to_string(),

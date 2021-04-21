@@ -11,21 +11,7 @@ pub fn process_step(client: &mut Client, config: &Config) -> Result<(), String> 
 }
 
 /// Create the prompt string. It defaults to current clock tick integer number.
-/// It can display a custom prompt based on the configuration file.
-///
-/// ### Example
-///
-/// example of custom prompt setup (interactive.yaml):
-///
-/// ```yaml
-/// prompt_format: "{}-{}-{} {}:00"
-/// prompt_vars: [
-/// 	"/universal/universal/generic/clock/string/day",
-/// 	"/universal/universal/generic/clock/string/month",
-/// 	"/universal/universal/generic/clock/string/year",
-/// 	"/universal/universal/generic/clock/string/hour",
-/// ]
-/// ```
+/// It can display a custom prompt based on the passed configuration.
 pub fn create_prompt(client: &mut Client, cfg: &Config) -> anyhow::Result<String> {
     //    unimplemented!();
     if &cfg.prompt_format == "" {
@@ -58,7 +44,7 @@ pub fn create_prompt(client: &mut Client, cfg: &Config) -> anyhow::Result<String
 
 pub fn create_prompt_default(client: &mut Client) -> anyhow::Result<String> {
     let status = client.server_status()?;
-    let clock = status.get("current_tick").unwrap();
+    let clock = status.current_tick;
     Ok(format!(
         "[{}] ",
         //TODO this should instead ask for a default clock variable

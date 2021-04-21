@@ -3,7 +3,10 @@
 use anyhow::Result;
 
 use outcome_core::machine::cmd::CommandResult;
-use outcome_core::{arraystring::new_truncate, entity::Storage, entity::StorageIndex, EntityId};
+use outcome_core::{
+    arraystring::new_truncate, entity::Storage, entity::StorageIndex, CompName, EntityId,
+    EntityName, VarName,
+};
 use outcome_net::msg::{
     DataPullRequest, DataTransferRequest, DataTransferResponse, Message, MessageType,
     PullRequestData, TransferResponseData, TurnAdvanceRequest, TurnAdvanceResponse,
@@ -11,44 +14,67 @@ use outcome_net::msg::{
 };
 use outcome_net::{Client, ClientConfig, CompressionPolicy, SocketEvent};
 use std::convert::TryFrom;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub fn main() -> Result<()> {
     let mut hello_string = "starting hello_service with the following arguments:".to_string();
-    let args = std::env::args().skip(1);
-    for arg in args {
+    let mut args = Vec::new();
+    let _args = std::env::args().skip(1);
+    for arg in _args {
         hello_string.push_str(&format!(" {}", arg));
+        args.push(arg);
     }
 
     println!("{}", hello_string);
 
-    let mut client = Client::new_with_config(
-        None,
-        ClientConfig {
-            name: "hello_service".to_string(),
-            heartbeat: Some(Duration::from_secs(1)),
-            is_blocking: true,
-            ..Default::default()
-        },
-    )?;
+    let mut client = Client::new_with_config(ClientConfig {
+        name: "hello_service".to_string(),
+        heartbeat: Some(Duration::from_secs(1)),
+        is_blocking: true,
+        ..Default::default()
+    })?;
 
-    client.connect("127.0.0.1:9123".to_string(), None);
+    // TODO get server address from stdin
+    client.connect(args[0].clone(), None);
 
     let mut advanced_turn = true;
     let mut received_data = true;
 
-    let mut data = VarSimDataPackOrdered::default();
-    let mut order_id = None;
+    // println!("connected");
 
     client
         .connection
-        .pack_send_msg_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+        .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+
+    let start = Instant::now();
 
     loop {
+        // println!("loop");
         if advanced_turn {
+            let mut data = VarSimDataPack {
+                vars: Default::default(),
+            };
+            data.vars.insert(
+                // "2:hello_greetable:str:hello".to_string(),
+                (
+                    EntityName::from("2").unwrap(),
+                    CompName::from("hello_greetable").unwrap(),
+                    VarName::from("hello").unwrap(),
+                ),
+                outcome_core::Var::Str(format!(
+                    "hello since {}",
+                    Instant::now().duration_since(start).as_millis()
+                )),
+            );
+            client.connection.send_payload(
+                DataPullRequest {
+                    data: PullRequestData::NativeAddressedVars(data),
+                },
+                None,
+            )?;
             client
                 .connection
-                .pack_send_msg_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+                .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
             advanced_turn = false;
         }
 
@@ -66,29 +92,28 @@ pub fn main() -> Result<()> {
                                     advanced_turn = true;
                                 } else {
                                     // println!("{}", resp.error);
-                                    client.connection.pack_send_msg_payload(
-                                        TurnAdvanceRequest { tick_count: 1 },
-                                        None,
-                                    )?;
+                                    client
+                                        .connection
+                                        .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
                                 }
                             }
                             MessageType::DataTransferResponse => {
                                 println!("received data transfer response");
-                                let resp: DataTransferResponse =
-                                    msg.unpack_payload(client.connection.encoding())?;
-                                if let Some(resp_data) = resp.data {
-                                    match resp_data {
-                                        TransferResponseData::VarOrdered(ord_id, d) => {
-                                            order_id = Some(ord_id);
-                                            data = d
-                                        }
-                                        _ => (),
-                                    }
-                                }
+                                // let resp: DataTransferResponse =
+                                //     msg.unpack_payload(client.connection.encoding())?;
+                                // if let Some(resp_data) = resp.data {
+                                //     match resp_data {
+                                //         TransferResponseData::VarOrdered(ord_id, d) => {
+                                //             order_id = Some(ord_id);
+                                //             data = d
+                                //         }
+                                //         _ => (),
+                                //     }
+                                // }
                                 received_data = true;
                             }
                             MessageType::DataPullResponse => {
-                                println!("received pull response");
+                                // println!("received pull response");
                             }
                             _ => (),
                         }
@@ -105,7 +130,7 @@ pub fn main() -> Result<()> {
             }
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        std::thread::sleep(std::time::Duration::from_nanos(1000));
 
         // let data_pack = client.get_vars()?;
         // println!("data_pack: {:?}", data_pack);

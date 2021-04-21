@@ -15,9 +15,9 @@ default = ["lz4", "laminar_transport"]
 zmq_transport = ["zmq"]
 nng_transport = ["nng"]
 laminar_transport = ["laminar", "crossbeam-channel"]
-messageio_transport = ["message-io"]
 
 msgpack_encoding = ["rmp-serde"]
+json_encoding = ["serde_json"]
 
 grids = []
 
@@ -28,6 +28,7 @@ grids = []
 outcome-core = { version = "0.1.0", path = "../outcome-core" }
 
 serde = "1.0.117"
+serde_repr = "0.1.6"
 thiserror = "1.0.21"
 id-pool = { version = "0.2.1", default-features = false, features = ["u32", "serde"] }
 log = "0.4.11"
@@ -44,6 +45,6 @@ zmq = { version = "0.9.2", optional = true }
 nng = { version = "1.0.0-rc.2", optional = true }
 laminar = { version = "0.4.0", optional = true }
 crossbeam-channel = { version = "0.4.0", optional = true }
-message-io = { version = "0.5.1", optional = true }
 
 rmp-serde = { version = "0.15.0", optional = true }
+serde_json = { version = "1.0.64", optional = true }

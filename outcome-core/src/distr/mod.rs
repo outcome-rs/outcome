@@ -26,12 +26,18 @@ use crate::entity::{Entity, Storage};
 use crate::error::{Error, Result};
 use crate::model::{DataEntry, DataImageEntry, Scenario};
 use crate::sim::step;
-use crate::{model, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType};
+use crate::{
+    model, CompName, EntityId, EntityName, PrefabName, Query, QueryProduct, SimModel, StringId,
+    Var, VarType,
+};
 
 #[cfg(feature = "machine")]
 use crate::machine::{
     cmd::CentralRemoteCommand, cmd::Command, cmd::CommandResult, cmd::ExtCommand, ExecutionContext,
 };
+
+pub type NodeId = u32;
+pub type TaskId = u32;
 
 /// Definition encompassing all possible messages available for communication
 /// between two nodes and between node and central.
@@ -39,12 +45,14 @@ use crate::machine::{
 pub enum Signal {
     /// Request node to start initialization using given model and list of entities
     InitializeNode(SimModel),
-    // uid, prefab string_id, target string_id
-    SpawnEntities(Vec<(EntityId, Option<EntityName>, Option<EntityName>)>),
+    /// Request node to spawn a set of entities.
+    SpawnEntities(Vec<(EntityId, Option<PrefabName>, Option<EntityName>)>),
     /// Request node to start processing step, includes event_queue vec
     StartProcessStep(Vec<StringId>),
 
-    WorkerRequestProcessStep,
+    SnapshotRequest,
+
+    WorkerStepAdvanceRequest(u32),
     WorkerReady,
     WorkerNotReady,
 
@@ -61,6 +69,9 @@ pub enum Signal {
     EndOfMessages,
 
     UpdateModel(SimModel),
+
+    QueryRequest(Query),
+    QueryResponse(QueryProduct),
 
     /// Request all data from the node
     DataRequestAll,
@@ -85,44 +96,62 @@ pub enum Signal {
 /// Trait representing central coordinator's ability to send and receive
 /// data over the network.
 pub trait CentralCommunication {
+    fn request_task_id(&mut self) -> Result<TaskId>;
+    fn return_task_id(&mut self, task_id: TaskId) -> Result<()>;
+
     /// Gets ids of all the currently connected nodes.
-    fn get_node_ids(&self) -> Result<Vec<u32>>;
+    fn get_node_ids(&self) -> Result<Vec<NodeId>>;
 
     /// Tries to read a single incoming signal from any node.
-    fn try_recv_sig(&mut self) -> Result<(u32, Signal)>;
+    /// On success returns node id, task id and signal.
+    fn try_recv_sig(&mut self) -> Result<(NodeId, TaskId, Signal)>;
     /// Reads incoming signal from a specific node.
-    fn try_recv_sig_from(&mut self, node_id: u32) -> Result<Signal>;
+    /// On success returns task id and signal.
+    fn try_recv_sig_from(&mut self, node_id: NodeId) -> Result<(TaskId, Signal)>;
 
     /// Sends a signal to specified node.
-    fn send_sig_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
+    fn send_sig_to_node(&mut self, node_id: NodeId, task_id: TaskId, signal: Signal) -> Result<()>;
     /// Sends a signal to node where the specified entity is currently stored.
-    fn send_sig_to_entity(&mut self, entity_uid: EntityId, signal: Signal) -> Result<()>;
+    fn send_sig_to_entity(
+        &mut self,
+        entity_uid: EntityId,
+        task_id: TaskId,
+        signal: Signal,
+    ) -> Result<()>;
 
     /// Sends a signal to all nodes.
-    fn broadcast_sig(&mut self, signal: Signal) -> Result<()>;
+    fn broadcast_sig(&mut self, task_id: TaskId, signal: Signal) -> Result<()>;
 }
 
 /// Trait representing node's ability to send and receive data over the
 /// network.
 pub trait NodeCommunication {
+    fn request_task_id(&mut self) -> Result<TaskId>;
+    fn return_task_id(&mut self, task_id: TaskId) -> Result<()>;
+
     /// Reads a single signal coming from central orchestrator.
-    fn sig_read_central(&mut self) -> Result<Signal>;
+    fn sig_read_central(&mut self) -> Result<(TaskId, Signal)>;
     /// Sends a signal to the central orchestrator.
-    fn sig_send_central(&mut self, signal: Signal) -> Result<()>;
+    fn sig_send_central(&mut self, task_id: TaskId, signal: Signal) -> Result<()>;
 
     /// Reads a single signal coming from another node. Result contains either
-    /// a tuple of node id and the received signal, or an error.
-    fn sig_read(&mut self) -> Result<(String, Signal)>;
+    /// a tuple of node id, task id and the received signal, or an error.
+    fn sig_read(&mut self) -> Result<(NodeId, TaskId, Signal)>;
     /// Reads incoming signal from a specific node.
-    fn sig_read_from(&mut self, node_id: u32) -> Result<Signal>;
+    fn sig_read_from(&mut self, node_id: NodeId) -> Result<(TaskId, Signal)>;
 
     /// Sends a signal to node.
-    fn sig_send_to_node(&mut self, node_id: u32, signal: Signal) -> Result<()>;
+    fn sig_send_to_node(&mut self, node_id: NodeId, task_id: TaskId, signal: Signal) -> Result<()>;
     /// Sends a signal to node where the specified entity lives.
-    fn sig_send_to_entity(&mut self, entity_uid: EntityId) -> Result<()>;
+    fn sig_send_to_entity(
+        &mut self,
+        entity_uid: EntityId,
+        task_id: TaskId,
+        signal: Signal,
+    ) -> Result<()>;
 
     /// Sends a signal to all the nodes.
-    fn sig_broadcast(&mut self, signal: Signal) -> Result<()>;
+    fn sig_broadcast(&mut self, task_id: TaskId, signal: Signal) -> Result<()>;
 
     /// Gets ids of all the connected nodes.
     fn get_nodes(&mut self) -> Vec<String>;
