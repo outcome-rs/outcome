@@ -9,7 +9,9 @@ use crate::msg::{
     RegisterClientRequest, RegisterClientResponse, ScheduledDataTransferRequest, StatusRequest,
     StatusResponse, TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
 };
-use crate::socket::{Encoding, Socket, SocketAddress, SocketConfig, SocketType, Transport};
+use crate::socket::{
+    CompositeSocketAddress, Encoding, Socket, SocketAddress, SocketConfig, SocketType, Transport,
+};
 use crate::{error::Error, Result};
 
 /// List of available compression policies for outgoing messages.
@@ -97,8 +99,6 @@ pub struct Client {
     pub connection: Socket,
     /// Current connection status
     connected: bool,
-    /// Public ip address of the client, `None` if behind a firewall
-    public_addr: Option<String>,
 }
 
 impl Client {
@@ -131,7 +131,6 @@ impl Client {
             config,
             connection,
             connected: false,
-            public_addr: None,
         };
         Ok(client)
     }
@@ -140,53 +139,56 @@ impl Client {
     ///
     /// # Redirection
     ///
-    /// In it's response to client registration message, the server can specify
-    /// at what address the target two-way connection shall take place. This
-    /// prompts the client to reconnect at that new address.
-    pub fn connect(&mut self, addr: &str, password: Option<String>) -> Result<()> {
-        debug!("client public_addr: {:?}", self.public_addr);
-        info!("dialing server at: {}", addr);
+    /// In it's response to client registration message, the server specifies
+    /// a new address at which it started a listener socket. New connection
+    /// to that address is then initiated by the client.
+    pub fn connect(&mut self, greeter_addr: &str, password: Option<String>) -> Result<()> {
+        info!("dialing server greeter at: {}", greeter_addr);
 
-        let (encoding, transport, address) = SocketAddress::parse_composite(addr)?;
+        let greeter_composite: CompositeSocketAddress = greeter_addr.parse()?;
 
         let mut socket_config = SocketConfig {
             type_: SocketType::Pair,
             ..Default::default()
         };
-        if let Some(_encoding) = encoding {
+        if let Some(_encoding) = greeter_composite.encoding {
             socket_config.encoding = _encoding;
         }
-        let transport = transport.unwrap_or(Transport::Tcp);
+        let transport = greeter_composite.transport.unwrap_or(Transport::Tcp);
         self.connection = Socket::new_with_config(None, transport, socket_config)?;
-        self.connection.connect(address.clone())?;
-
-        // self.connection.connect(addr.parse()?)?;
-
+        self.connection.connect(greeter_composite.address.clone())?;
         self.connection.send_payload(
             RegisterClientRequest {
                 name: self.config.name.clone(),
                 is_blocking: self.config.is_blocking,
-                passwd: password,
+                auth_pair: None,
+                encodings: self.config.encodings.clone(),
+                transports: self.config.transports.clone(),
             },
             None,
         )?;
-
-        println!("sent register request");
+        debug!("sent client registration request");
 
         let resp: RegisterClientResponse = self
             .connection
             .recv_msg()?
             .1
             .unpack_payload(self.connection.encoding())?;
-
         debug!("got response from server: {:?}", resp);
 
-        // perform redirection if server specified an alternative address
+        // perform redirection using address provided by the server
         if !resp.redirect.is_empty() {
             self.connection.disconnect(None)?;
-            std::thread::sleep(Duration::from_millis(100));
+            // std::thread::sleep(Duration::from_millis(100));
             // self.connection.disconnect(Some(address))?;
-            self.connection.connect(resp.redirect.parse()?)?;
+            let composite: CompositeSocketAddress = resp.redirect.parse()?;
+            if let Some(_encoding) = composite.encoding {
+                socket_config.encoding = _encoding;
+            }
+            if let Some(_transport) = composite.transport {
+                self.connection = Socket::new_with_config(None, _transport, socket_config)?;
+            }
+            self.connection.connect(composite.address)?;
         }
 
         if !resp.error.is_empty() {

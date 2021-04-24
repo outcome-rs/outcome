@@ -1,4 +1,5 @@
-use crate::msg;
+use crate::msg::{Message, MessageType};
+use crate::{msg, Transport};
 use num_enum::TryFromPrimitiveError;
 use thiserror::Error;
 
@@ -21,6 +22,8 @@ pub enum Error {
     SocketNotBoundToAddress,
     #[error("wrong socket address type")]
     WrongSocketAddressType,
+    #[error("handshake failed, got: {0}")]
+    HandshakeFailed(String),
 
     #[error("other: {0}")]
     Other(String),
@@ -28,7 +31,7 @@ pub enum Error {
     #[error("failed parsing address: {0}")]
     AddrParseError(#[from] std::net::AddrParseError),
     #[error("transport unavailable: {0}")]
-    TransportUnavailable(String),
+    TransportUnavailable(Transport),
 
     #[error("no activity for {0} milliseconds, terminating server")]
     ServerKeepaliveLimitReached(u32),

@@ -18,8 +18,8 @@ use crate::service::Service;
 use crate::coord::CoordTask;
 use crate::msg::TransferResponseData::AddressedVar;
 use crate::socket::{
-    pack, unpack, Encoding, Socket, SocketAddress, SocketConfig, SocketEvent, SocketEventType,
-    SocketType, Transport,
+    pack, unpack, CompositeSocketAddress, Encoding, Socket, SocketAddress, SocketConfig,
+    SocketEvent, SocketEventType, SocketType, Transport,
 };
 use crate::{error::Error, Result, TaskId};
 use crate::{Coord, Worker};
@@ -222,10 +222,10 @@ impl Server {
 
     /// Creates a new server using provided address and config.
     pub fn new_with_config(addr: &str, config: ServerConfig, sim: SimConnection) -> Result<Self> {
-        let (encoding, transport, address) = SocketAddress::parse_composite(addr)?;
+        let greeter_addr: CompositeSocketAddress = addr.parse()?;
         println!(
             "encoding: {:?}, transport: {:?}, address: {:?}",
-            encoding, transport, address
+            greeter_addr.encoding, greeter_addr.transport, greeter_addr.address
         );
         let mut greeters = Vec::new();
 
@@ -234,12 +234,15 @@ impl Server {
             ..Default::default()
         };
 
-        if let Some(_transport) = transport {
-            if let Some(_encoding) = encoding {
+        if let Some(_transport) = greeter_addr.transport {
+            if let Some(_encoding) = greeter_addr.encoding {
                 greeter_config.encoding = _encoding;
                 println!("binding socket");
-                let sock =
-                    Socket::new_with_config(Some(address.clone()), _transport, greeter_config)?;
+                let sock = Socket::new_with_config(
+                    Some(greeter_addr.address.clone()),
+                    _transport,
+                    greeter_config,
+                )?;
                 greeters.push(sock);
             }
         }
@@ -251,13 +254,17 @@ impl Server {
                 ..Default::default()
             };
 
-            if let Some(trans) = transport {
-                let sock = Socket::new_with_config(Some(address.clone()), trans, greeter_config)?;
+            if let Some(trans) = greeter_addr.transport {
+                let sock = Socket::new_with_config(
+                    Some(greeter_addr.address.clone()),
+                    trans,
+                    greeter_config,
+                )?;
                 println!("sock binded");
                 greeters.push(sock);
             } else {
                 for transport in &config.transports {
-                    match &address {
+                    match &greeter_addr.address {
                         SocketAddress::Net(addr) => {
                             let _address = if addr.port() != 0 {
                                 SocketAddress::Net(*addr)
@@ -266,7 +273,7 @@ impl Server {
                             };
                             info!(
                                 "starting listener on: {} (transport: {:?}, encoding: {:?})",
-                                address, transport, encoding
+                                greeter_addr.address, transport, greeter_config.encoding
                             );
                             greeters.push(Socket::new_with_config(
                                 Some(_address),
@@ -276,7 +283,7 @@ impl Server {
                         }
                         // port = port + 1;
                         SocketAddress::File(path) => greeters.push(Socket::new_with_config(
-                            Some(address.clone()),
+                            Some(greeter_addr.address.clone()),
                             *transport,
                             greeter_config,
                         )?),
@@ -392,7 +399,7 @@ impl Server {
             if let Err(e) = self.try_accept_client(true) {
                 match e {
                     Error::WouldBlock => (),
-                    _ => debug!("{:?}", e),
+                    _ => error!("{:?}", e),
                 }
             }
         }
@@ -502,13 +509,9 @@ impl Server {
         Ok(())
     }
 
-    /// Tries to accept a single new client connection.spa
+    /// Tries to accept a single new client connection.
     ///
     /// On success returns a newly assigned client id.
-    ///
-    /// # Redirection
-    ///
-    /// Help
     pub fn try_accept_client(&mut self, redirect: bool) -> Result<u32> {
         for mut greeter in &mut self.greeters {
             let (peer_addr, msg) = match greeter.try_recv_msg() {
@@ -523,28 +526,50 @@ impl Server {
                     continue;
                 }
             };
-            info!("got new client message: {:?}", msg);
 
-            let req: RegisterClientRequest = msg.unpack_payload(greeter.encoding())?;
-            println!("req: {:?}", req);
+            let req: RegisterClientRequest = match msg.unpack_payload(greeter.encoding()) {
+                Ok(r) => r,
+                Err(e) => return Err(Error::HandshakeFailed(e.to_string())),
+            };
+            info!("greeter received message from a new client: \"{}\" at: {} (supported transports: {:?}, supported encodings: {:?})", 
+                  req.name, peer_addr, req.transports, req.encodings);
+            debug!("client registration request contents: {:?}", req);
             self.port_count += 1;
 
-            let _address = match greeter.listener_addr()? {
-                SocketAddress::Net(addr) => SocketAddress::Net(SocketAddr::new(addr.ip(), 0)),
-                SocketAddress::File(path) => {
-                    SocketAddress::File(format!("{}{}", path, self.port_count.to_string()))
+            // negotiate transport and encoding for the communication channel
+            let mut new_config = greeter.config();
+            let mut new_transport = greeter.transport();
+            for transport in req.transports {
+                if self.config.transports.contains(&transport) {
+                    new_transport = transport;
+                    break;
+                }
+            }
+            for encoding in req.encodings {
+                if self.config.encodings.contains(&encoding) {
+                    new_config.encoding = encoding;
+                    break;
+                }
+            }
+            let new_address = match new_transport {
+                Transport::ZmqIpc | Transport::NngIpc => {
+                    SocketAddress::File(format!("/tmp/server_pair_{}", self.port_count.to_string()))
+                }
+                _ => {
+                    if let SocketAddress::Net(_addr) = greeter.listener_addr()? {
+                        SocketAddress::Net(SocketAddr::new(_addr.ip(), 0))
+                    } else {
+                        SocketAddress::Net(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+                    }
                 }
                 _ => unimplemented!(),
             };
 
-            let socket = Socket::new_with_config(
-                Some(_address.clone()),
-                greeter.transport(),
-                greeter.config(),
-            )?;
+            let socket =
+                Socket::new_with_config(Some(new_address.clone()), new_transport, new_config)?;
 
-            let socket_addr = socket.listener_addr().unwrap();
-            debug!("redirect address: {}", socket_addr);
+            let socket_addr = socket.listener_addr_composite()?;
+            debug!("redirect address: {:?}", socket_addr);
 
             let resp = RegisterClientResponse {
                 //redirect: format!("192.168.2.106:{}", client_id),

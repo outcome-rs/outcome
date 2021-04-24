@@ -23,7 +23,7 @@ use crate::msg::coord_worker::{
     IntroduceWorkerToCoordResponse,
 };
 use crate::msg::{Message, MessageType};
-use crate::socket::{Socket, SocketAddress, Transport};
+use crate::socket::{CompositeSocketAddress, Socket, SocketAddress, Transport};
 use crate::worker::{WorkerId, WorkerTask};
 use crate::{sig, TaskId};
 use std::convert::TryFrom;
@@ -104,11 +104,11 @@ impl Coord {
 
     /// Creates a new coordinator listening on the given address.
     pub fn new(central: SimCentral, addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
-        let (encoding, transport, address) = SocketAddress::parse_composite(addr)?;
+        let greeter_target: CompositeSocketAddress = addr.parse()?;
         let addr_ip = addr.split(":").collect::<Vec<&str>>()[0];
         let net = CoordNetwork {
-            greeter: Socket::new(Some(address.clone()), Transport::Tcp)?,
-            inviter: Socket::new(None, transport.unwrap_or(Transport::Tcp))?,
+            greeter: Socket::new(Some(greeter_target.address.clone()), Transport::Tcp)?,
+            inviter: Socket::new(None, greeter_target.transport.unwrap_or(Transport::Tcp))?,
             workers: Default::default(),
             routing_table: Default::default(),
             task_id_pool: IdPool::new(),
@@ -116,7 +116,7 @@ impl Coord {
         let mut coord = Self {
             central,
             net,
-            address: address.clone(),
+            address: greeter_target.address.clone(),
             worker_pool: IdPool::new_ranged(0..u32::max_value()),
             // routing_table: Default::default(),
             is_blocking_step: false,
@@ -135,9 +135,12 @@ impl Coord {
     ///
     /// On success returns newly assigned unique worker id.
     fn add_worker(&mut self, worker_addr: &str) -> Result<u32> {
-        let (encoding, transport, address) = SocketAddress::parse_composite(worker_addr)?;
+        let target_socket: CompositeSocketAddress = worker_addr.parse()?;
         let id = self.worker_pool.request_id().unwrap();
-        let socket = Socket::new(Some(address.clone()), transport.unwrap_or(Transport::Tcp))?;
+        let socket = Socket::new(
+            Some("127.0.0.1:0".parse()?),
+            target_socket.transport.unwrap_or(Transport::Tcp),
+        )?;
         // let socket = Socket::bind(
         //     &format!(
         //         "{}:892{}",
@@ -152,7 +155,7 @@ impl Coord {
         // )?;
         let worker = Worker {
             // id,
-            address,
+            address: target_socket.address,
             entities: vec![],
             connection: socket,
             is_blocking_step: true,
@@ -269,9 +272,8 @@ impl Coord {
                     &self.net.greeter.send_payload(resp, None).unwrap();
                     debug!("sent response");
 
-                    let worker_id = self
-                        .add_initialize_worker(&req.worker_addr, self.central.model.clone())
-                        .unwrap();
+                    let worker_id =
+                        self.add_initialize_worker(&req.worker_addr, self.central.model.clone())?;
 
                     self.central.node_entities.insert(worker_id, Vec::new());
 

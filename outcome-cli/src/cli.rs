@@ -21,6 +21,7 @@ use crate::util::{
     find_project_root, format_elements_list, get_scenario_paths, get_snapshot_paths,
 };
 use crate::{interactive, test};
+use std::str::FromStr;
 
 pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 pub const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
@@ -249,15 +250,15 @@ pub fn app_matches() -> ArgMatches<'static> {
                 .takes_value(true)
                 .value_name("secs")
                 .default_value("1"))
-            .arg(Arg::with_name("encoding")
-                .long("encoding")
+            .arg(Arg::with_name("encodings")
+                .long("encodings")
                 .short("e")
-                .help("Encoding used when connecting to server")
+                .help("Supported encodings that can be used when talking to server")
                 .default_value("bincode"))
-            .arg(Arg::with_name("transport")
-                .long("transport")
+            .arg(Arg::with_name("transports")
+                .long("transports")
                 .short("t")
-                .help("Transport used when connecting to server")
+                .help("Supported transports that can be used when talking to server")
                 .default_value("tcp"))
         )
 
@@ -594,7 +595,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
                 let mut transports = Vec::new();
                 for transport_str in split {
                     if !transport_str.is_empty() {
-                        transports.push(outcome_net::Transport::from_str(transport_str)?);
+                        transports.push(transport_str.parse()?);
                     }
                 }
                 transports
@@ -607,7 +608,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
                 let mut encodings = Vec::new();
                 for encoding_str in split {
                     if !encoding_str.is_empty() {
-                        encodings.push(outcome_net::Encoding::from_str(encoding_str)?);
+                        encodings.push(encoding_str.parse()?);
                     }
                 }
                 encodings
@@ -687,12 +688,32 @@ fn start_client(matches: &ArgMatches) -> Result<()> {
             is_blocking: matches.is_present("blocking"),
             compress: CompressionPolicy::from_str(matches.value_of("compress").unwrap())?,
             //matches.is_present("compress"),
-            encodings: vec![outcome_net::Encoding::from_str(
-                matches.value_of("encoding").unwrap(),
-            )?],
-            transports: vec![outcome_net::Transport::from_str(
-                matches.value_of("transport").unwrap(),
-            )?],
+            encodings: match matches.value_of("encodings") {
+                Some(encodings_str) => {
+                    let split = encodings_str.split(',').collect::<Vec<&str>>();
+                    let mut transports = Vec::new();
+                    for transport_str in split {
+                        if !transport_str.is_empty() {
+                            transports.push(transport_str.parse()?);
+                        }
+                    }
+                    transports
+                }
+                None => Vec::new(),
+            },
+            transports: match matches.value_of("transports") {
+                Some(transports_str) => {
+                    let split = transports_str.split(',').collect::<Vec<&str>>();
+                    let mut transports = Vec::new();
+                    for transport_str in split {
+                        if !transport_str.is_empty() {
+                            transports.push(transport_str.parse()?);
+                        }
+                    }
+                    transports
+                }
+                None => Vec::new(),
+            },
         },
     )?;
 

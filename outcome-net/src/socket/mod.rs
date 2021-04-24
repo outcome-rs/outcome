@@ -97,22 +97,36 @@ impl Socket {
             Transport::Tcp => {
                 InnerSocket::SimpleTcp(tcp::TcpSocket::new_with_config(addr, config)?)
             }
-            #[cfg(feature = "laminar_transport")]
             Transport::Laminar => {
+                #[cfg(not(feature = "laminar_transport"))]
+                return Err(Error::TransportUnavailable(transport));
+                #[cfg(feature = "laminar_transport")]
                 InnerSocket::Laminar(laminar::LaminarSocket::new_with_config(addr, config)?)
             }
-            #[cfg(feature = "zmq_transport")]
-            Transport::ZmqTcp => InnerSocket::Zmq(zmq::ZmqSocket::new_with_config(
-                addr,
-                zmq::ZmqTransport::Tcp,
-                config,
-            )?),
-            #[cfg(feature = "zmq_transport")]
-            Transport::ZmqIpc => InnerSocket::Zmq(zmq::ZmqSocket::new_with_config(
-                addr,
-                zmq::ZmqTransport::Ipc,
-                config,
-            )?),
+            Transport::ZmqTcp => {
+                #[cfg(not(feature = "zmq_transport"))]
+                return Err(Error::TransportUnavailable(transport));
+                #[cfg(feature = "zmq_transport")]
+                {
+                    InnerSocket::Zmq(zmq::ZmqSocket::new_with_config(
+                        addr,
+                        zmq::ZmqTransport::Tcp,
+                        config,
+                    )?)
+                }
+            }
+            Transport::ZmqIpc => {
+                #[cfg(not(feature = "zmq_transport"))]
+                return Err(Error::TransportUnavailable(transport));
+                #[cfg(feature = "zmq_transport")]
+                {
+                    InnerSocket::Zmq(zmq::ZmqSocket::new_with_config(
+                        addr,
+                        zmq::ZmqTransport::Ipc,
+                        config,
+                    )?)
+                }
+            }
             _ => unimplemented!(),
         };
         Ok(Self {
@@ -141,6 +155,14 @@ impl Socket {
             InnerSocket::Zmq(socket) => socket.listener_addr(),
             _ => unimplemented!(),
         }
+    }
+
+    pub fn listener_addr_composite(&self) -> Result<CompositeSocketAddress> {
+        Ok(CompositeSocketAddress {
+            encoding: Some(*self.encoding()),
+            transport: Some(self.transport()),
+            address: self.listener_addr()?,
+        })
     }
 
     pub fn manual_poll(&mut self) -> Result<()> {
@@ -392,7 +414,7 @@ pub enum SocketEventType {
 //     Timeout,
 // }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SocketType {
     Req,
     Rep,
@@ -402,41 +424,68 @@ pub enum SocketType {
     //Dealer,
 }
 
-// TODO perhaps make file variant use arraystring and then whole thing Copy
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SocketAddress {
-    Net(SocketAddr),
-    File(String),
-    Unavailable,
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CompositeSocketAddress {
+    pub encoding: Option<Encoding>,
+    pub transport: Option<Transport>,
+    pub address: SocketAddress,
 }
 
-impl SocketAddress {
-    pub fn parse_composite(
-        s: &str,
-    ) -> Result<(Option<Encoding>, Option<Transport>, SocketAddress)> {
+impl FromStr for CompositeSocketAddress {
+    type Err = Error;
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
         if s.contains("://") {
             let split = s.split("://").collect::<Vec<&str>>();
             if split[0].contains("@") {
                 let _split = split[0].split("@").collect::<Vec<&str>>();
-                Ok((
-                    Some(Encoding::from_str(_split[0])?),
-                    Some(Transport::from_str(_split[1])?),
-                    split[1].parse()?,
-                ))
+                Ok(CompositeSocketAddress {
+                    encoding: Some(Encoding::from_str(_split[0])?),
+                    transport: Some(Transport::from_str(_split[1])?),
+                    address: split[1].parse()?,
+                })
             } else {
-                Ok((
-                    None,
-                    Some(Transport::from_str(split[0])?),
-                    split[1].parse()?,
-                ))
+                Ok(CompositeSocketAddress {
+                    encoding: None,
+                    transport: Some(Transport::from_str(split[0])?),
+                    address: split[1].parse()?,
+                })
             }
         } else if s.contains("@") {
             let split = s.split("@").collect::<Vec<&str>>();
-            Ok((Some(Encoding::from_str(split[0])?), None, split[1].parse()?))
+            Ok(CompositeSocketAddress {
+                encoding: Some(Encoding::from_str(split[0])?),
+                transport: None,
+                address: split[1].parse()?,
+            })
         } else {
-            Ok((None, None, s.parse()?))
+            Ok(CompositeSocketAddress {
+                encoding: None,
+                transport: None,
+                address: s.parse()?,
+            })
         }
     }
+}
+
+impl Display for CompositeSocketAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut out = self.address.to_string();
+        if let Some(transport) = self.transport {
+            out = format!("{}://{}", transport.to_string(), out);
+        }
+        if let Some(encoding) = self.encoding {
+            out = format!("{}@{}", encoding.to_string(), out);
+        }
+        write!(f, "{}", out)
+    }
+}
+
+// TODO perhaps make file variant use arraystring and then whole thing Copy
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+pub enum SocketAddress {
+    Net(SocketAddr),
+    File(String),
+    Unavailable,
 }
 
 impl FromStr for SocketAddress {
@@ -445,7 +494,7 @@ impl FromStr for SocketAddress {
         if s == "unavailable" {
             Ok(Self::Unavailable)
         } else if s.contains("/") {
-            Ok(Self::File(s.parse().unwrap()))
+            Ok(Self::File(s.to_string()))
         } else {
             Ok(Self::Net(s.parse()?))
         }
@@ -462,47 +511,51 @@ impl TryInto<SocketAddr> for SocketAddress {
     }
 }
 
-// impl ToString for SocketAddress {
-//     fn to_string(&self) -> String {
-//         match self {
-//             Self::Net(s) => s.to_string(),
-//             Self::File(s) => s.to_string_lossy().to_string(),
-//         }
-//     }
-// }
-
 impl Display for SocketAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SocketAddress::Net(net) => write!(f, "{}", net.to_string()),
-            SocketAddress::File(path) => write!(f, "{}", path),
-            SocketAddress::Unavailable => write!(f, "unavailable"),
+            Self::Net(net) => write!(f, "{}", net.to_string()),
+            Self::File(path) => write!(f, "{}", path),
+            Self::Unavailable => write!(f, "unavailable"),
         }
     }
 }
 
 /// List of possible network transports.
 // TODO websockets
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize)]
 pub enum Transport {
     /// Basic TCP transport built with rust's standard library
     Tcp,
+    // TODO provide separate laminar udp transports for reliable/unreliable
     /// UDP transport with customizable reliability using the laminar library
-    #[cfg(feature = "laminar_transport")]
     Laminar,
     /// ZeroMQ based TCP transport
-    #[cfg(feature = "zmq_transport")]
     ZmqTcp,
     /// ZeroMQ based IPC transport
-    #[cfg(feature = "zmq_transport")]
     ZmqIpc,
-    /// NNG (nanomsg-next-gen) based transport
-    #[cfg(feature = "nng_transport")]
-    Nng,
+    /// NNG based IPC transport
+    NngIpc,
+    /// NNG based WebSocket transport
+    NngWs,
 }
 
-impl Transport {
-    pub fn from_str(s: &str) -> Result<Self> {
+impl Display for Transport {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tcp => write!(f, "tcp"),
+            Self::Laminar => write!(f, "udp"),
+            Self::ZmqTcp => write!(f, "zmq_tcp"),
+            Self::ZmqIpc => write!(f, "zmq_ipc"),
+            Self::NngIpc => write!(f, "nng_ipc"),
+            Self::NngWs => write!(f, "nng_ws"),
+        }
+    }
+}
+
+impl FromStr for Transport {
+    type Err = Error;
+    fn from_str(s: &str) -> core::result::Result<Self, Error> {
         match s.to_lowercase().as_str() {
             "tcp" => Ok(Transport::Tcp),
             "zmq_tcp" | "zmq" | "zeromq" => {
@@ -540,7 +593,9 @@ impl Transport {
             }
         }
     }
+}
 
+impl Transport {
     /// Checks if laminar transport is available, otherwise falls back on tcp.
     pub fn prefer_laminar() -> Self {
         #[cfg(feature = "laminar_transport")]
@@ -551,20 +606,19 @@ impl Transport {
 }
 
 /// List of possible formats for encoding data sent over the network.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize)]
 pub enum Encoding {
     /// Fast binary format, useful for communicating directly between Rust apps
     Bincode,
     /// Binary format with implementations in many different languages
-    #[cfg(feature = "msgpack_encoding")]
     MsgPack,
     /// Very common but more verbose format
-    #[cfg(feature = "json_encoding")]
     Json,
 }
 
-impl Encoding {
-    pub fn from_str(s: &str) -> Result<Self> {
+impl FromStr for Encoding {
+    type Err = Error;
+    fn from_str(s: &str) -> core::result::Result<Self, Error> {
         let e = match s.to_lowercase().as_str() {
             "bincode" => Self::Bincode,
             #[cfg(feature = "msgpack_encoding")]
@@ -582,19 +636,41 @@ impl Encoding {
     }
 }
 
+impl Display for Encoding {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bincode => write!(f, "bincode"),
+            Self::MsgPack => write!(f, "msgpack"),
+            Self::Json => write!(f, "json"),
+        }
+    }
+}
+
 /// Packs serializable object to bytes based on selected encoding.
 pub(crate) fn pack<S: Serialize>(obj: S, encoding: &Encoding) -> Result<Vec<u8>> {
     let packed: Vec<u8> = match encoding {
         Encoding::Bincode => bincode::serialize(&obj)?,
-        #[cfg(feature = "msgpack_encoding")]
         Encoding::MsgPack => {
-            use rmp_serde::config::StructMapConfig;
-            let mut buf = Vec::new();
-            obj.serialize(&mut rmp_serde::Serializer::new(&mut buf))?;
-            buf
+            #[cfg(not(feature = "msgpack_encoding"))]
+            panic!(
+                "trying to use msgpack encoding, but msgpack_encoding crate feature is not enabled"
+            );
+            #[cfg(feature = "msgpack_encoding")]
+            {
+                use rmp_serde::config::StructMapConfig;
+                let mut buf = Vec::new();
+                obj.serialize(&mut rmp_serde::Serializer::new(&mut buf))?;
+                buf
+            }
         }
-        #[cfg(feature = "json_encoding")]
-        Encoding::Json => unimplemented!(),
+        Encoding::Json => {
+            #[cfg(not(feature = "json_encoding"))]
+            panic!("trying to use json encoding, but json_encoding crate feature is not enabled");
+            #[cfg(feature = "json_encoding")]
+            {
+                unimplemented!()
+            }
+        }
     };
     Ok(packed)
 }
@@ -603,16 +679,24 @@ pub(crate) fn pack<S: Serialize>(obj: S, encoding: &Encoding) -> Result<Vec<u8>>
 pub fn unpack<'de, P: Deserialize<'de>>(bytes: &'de [u8], encoding: &Encoding) -> Result<P> {
     let unpacked = match encoding {
         Encoding::Bincode => bincode::deserialize(bytes)?,
-        #[cfg(feature = "msgpack_encoding")]
         Encoding::MsgPack => {
-            use rmp_serde::config::StructMapConfig;
-            // println!("{:?}", bytes);
-            let mut de = rmp_serde::Deserializer::new(bytes);
-
-            Deserialize::deserialize(&mut de)?
+            #[cfg(not(feature = "msgpack_encoding"))]
+            panic!("trying to unpack using msgpack encoding, but msgpack_encoding crate feature is not enabled");
+            #[cfg(feature = "msgpack_encoding")]
+            {
+                use rmp_serde::config::StructMapConfig;
+                let mut de = rmp_serde::Deserializer::new(bytes);
+                Deserialize::deserialize(&mut de)?
+            }
         }
-        #[cfg(feature = "json_encoding")]
-        Encoding::Json => unimplemented!(),
+        Encoding::Json => {
+            #[cfg(not(feature = "json_encoding"))]
+            panic!("trying to unpack using json encoding, but json_encoding crate feature is not enabled");
+            #[cfg(feature = "json_encoding")]
+            {
+                unimplemented!()
+            }
+        }
     };
     Ok(unpacked)
 }

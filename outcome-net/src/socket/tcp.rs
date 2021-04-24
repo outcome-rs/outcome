@@ -9,7 +9,9 @@ use std::time::Duration;
 use byteorder::{ByteOrder, LittleEndian};
 
 use crate::msg::{Message, MessageType};
-use crate::socket::{Encoding, SocketAddress, SocketConfig, SocketEvent, SocketEventType};
+use crate::socket::{
+    CompositeSocketAddress, Encoding, SocketAddress, SocketConfig, SocketEvent, SocketEventType,
+};
 use crate::{
     error::{Error, Result},
     sig::Signal,
@@ -456,7 +458,7 @@ impl ConnectionHandler {
                         // info!("incoming stream");
                         //s.set_read_timeout(Some(Duration::from_millis(1)))
                         //.expect("set_read_timeout call failed");
-                        println!("accepting new connection: {:?}", s.peer_addr()?);
+                        debug!("accepting new connection: {:?}", s.peer_addr()?);
                         s.set_nonblocking(true);
                         s.set_nodelay(true);
                         self.connections

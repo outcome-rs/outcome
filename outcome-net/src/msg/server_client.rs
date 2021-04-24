@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::msg::{MessageType, Payload, VarJson};
 use outcome::{CompName, EntityId, Var, VarName};
 
+use crate::{Encoding, Transport};
 use fnv::FnvHashMap;
 use outcome::Address;
 
@@ -97,17 +98,15 @@ impl Payload for StatusResponse {
 /// `name` self assigned name of the client.
 ///
 /// `is_blocking` specifies whether the client is a blocking client.
-/// A _blocking client_ is one that has to explicitly agree for the server to start
-/// processing the next tick/turn).
-///
-/// `is_player` specifies whether the client is a player.
-/// A _player client_ is one that's limited to only changing decision related
-/// data of one entity.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+/// A blocking client is one that has to explicitly agree for the server to
+/// start processing the next tick/turn.
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RegisterClientRequest {
     pub name: String,
     pub is_blocking: bool,
-    pub passwd: Option<String>,
+    pub auth_pair: Option<(String, String)>,
+    pub encodings: Vec<Encoding>,
+    pub transports: Vec<Transport>,
 }
 pub(crate) const REGISTER_CLIENT_REQUEST: &str = "RegisterClientRequest";
 impl Payload for RegisterClientRequest {

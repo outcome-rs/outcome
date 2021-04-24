@@ -335,11 +335,11 @@ pub fn start(
                     match driver.deref_mut() {
                         SimDriver::Local(ref mut sim) => {
                             sim.step()?;
-                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
+                            interface.set_prompt(create_prompt(&mut driver, &config)?.as_str())?;
                         }
                         SimDriver::Remote(client) => {
                             let msg = client.server_step_request(1)?;
-                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
+                            interface.set_prompt(create_prompt(&mut driver, &config)?.as_str())?;
                         }
                     }
 
@@ -414,7 +414,7 @@ pub fn start(
                                     }
                                 }
                                 interface
-                                    .set_prompt(create_prompt(&mut driver, &config).as_str())?;
+                                    .set_prompt(create_prompt(&mut driver, &config)?.as_str())?;
                             }
                             //TODO
                             "runf-until" => {
@@ -447,13 +447,13 @@ pub fn start(
                                         SimDriver::Local(ref mut sim) => {
                                             sim.step()?;
                                             interface.set_prompt(
-                                                create_prompt(&mut driver, &config).as_str(),
+                                                create_prompt(&mut driver, &config)?.as_str(),
                                             )?;
                                         }
                                         SimDriver::Remote(client) => {
                                             let msg = client.server_step_request(1)?;
                                             interface.set_prompt(
-                                                create_prompt(&mut driver, &config).as_str(),
+                                                create_prompt(&mut driver, &config)?.as_str(),
                                             )?;
                                         }
                                     }
@@ -714,7 +714,7 @@ show_list               {show_list}
                             _ => println!("couldn't recognize input: {:?}", line),
                         }
                         if do_run_freq.is_none() && !do_run_loop {
-                            interface.set_prompt(create_prompt(&mut driver, &config).as_str())?;
+                            interface.set_prompt(create_prompt(&mut driver, &config)?.as_str())?;
                         }
                         std::mem::drop(driver);
                     }
@@ -774,10 +774,10 @@ show_list               {show_list}
     Ok(())
 }
 
-pub fn create_prompt(driver: &mut SimDriver, cfg: &Config) -> String {
+pub fn create_prompt(driver: &mut SimDriver, cfg: &Config) -> Result<String> {
     match driver {
-        SimDriver::Local(sim) => local::create_prompt(&sim, &cfg),
-        SimDriver::Remote(client) => remote::create_prompt(client, &cfg).unwrap(),
+        SimDriver::Local(sim) => Ok(local::create_prompt(&sim, &cfg)),
+        SimDriver::Remote(client) => remote::create_prompt(client, &cfg),
     }
 }
 

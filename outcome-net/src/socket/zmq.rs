@@ -5,13 +5,12 @@ use std::str::FromStr;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use zmq::SocketType;
-
 use crate::error::{Error, Result};
 use crate::msg::{Message, MessageType, Payload};
 use crate::sig::Signal;
 use crate::socket::{
     pack, unpack, Encoding, Socket, SocketAddress, SocketConfig, SocketEvent, SocketEventType,
+    SocketType,
 };
 use crate::{msg, util};
 
@@ -48,9 +47,9 @@ impl ZmqSocket {
     ) -> Result<Self> {
         let context = zmq::Context::new();
         let socket_type = match config.type_ {
-            super::SocketType::Req => SocketType::REQ,
-            super::SocketType::Rep => SocketType::REP,
-            super::SocketType::Pair => SocketType::PAIR,
+            SocketType::Req => zmq::SocketType::REQ,
+            SocketType::Rep => zmq::SocketType::REP,
+            SocketType::Pair => zmq::SocketType::PAIR,
             _ => unimplemented!(),
         };
         println!("socket_type: {:?}", socket_type);
@@ -61,7 +60,9 @@ impl ZmqSocket {
             let mut string_addr = prepend_transport(_addr.to_string().as_str(), &transport);
             println!("binding to string_addr: {}", string_addr);
             socket.bind(&string_addr)?;
-            listener_addr = Some(socket.get_last_endpoint().unwrap().unwrap().parse()?);
+            listener_addr =
+                Some(yeet_transport(&socket.get_last_endpoint().unwrap().unwrap()).parse()?);
+            println!("listener_addr: {:?}", listener_addr);
             // TODO tweak timeout values
             // socket.set_rcvtimeo(10)?;
             // socket.set_sndtimeo(10)?;
@@ -220,9 +221,8 @@ impl ZmqSocket {
                     SocketEventType::Bytes => {
                         return Ok((addr, unpack(&socket_event.bytes, &self.config.encoding)?))
                     }
-                    // SocketEvent::Message(msg) => return Ok((addr, msg)),
                     _ => {
-                        println!("pushing back: {:?}", (&addr, &socket_event));
+                        trace!("pushing back: {:?}", (&addr, &socket_event));
                         self.event_backlog.push_back((addr, socket_event));
                         continue;
                     }
@@ -250,12 +250,14 @@ impl ZmqSocket {
         event: &SocketEvent,
     ) -> Result<()> {
         match event.type_ {
-            // SocketEvent::Connect => self.
+            // SocketEvent::Connect => ()
             SocketEventType::Disconnect => {
                 // self.inner.set_sndtimeo(0);
-                let lep = self.inner.get_last_endpoint().unwrap().unwrap();
                 // self.inner.disconnect(&lep)?;
-                self.inner.bind(&lep)?;
+                if self.config.type_ == SocketType::Pair {
+                    let lep = self.inner.get_last_endpoint().unwrap().unwrap();
+                    self.inner.bind(&lep)?;
+                }
             }
             _ => (),
         }
@@ -283,5 +285,14 @@ pub(crate) fn prepend_transport(s: &str, transport: &ZmqTransport) -> String {
             ZmqTransport::Tcp => format!("tcp://{}", s),
             ZmqTransport::Ipc => format!("ipc://{}", s),
         }
+    }
+}
+
+/// Create a valid tcp address that includes the prefix.
+pub(crate) fn yeet_transport(s: &str) -> String {
+    if s.contains("://") {
+        s.split("://").collect::<Vec<&str>>()[1].to_string()
+    } else {
+        s.to_string()
     }
 }
