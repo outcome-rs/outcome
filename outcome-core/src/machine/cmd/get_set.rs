@@ -5,12 +5,12 @@ use std::str::FromStr;
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::SimModel;
-use crate::{model, EntityId, Var};
+use crate::{model, CompName, EntityId, Var};
 use crate::{EntityName, Sim, StringId, VarType};
 
 use super::{Command, CommandResult, ExtCommand};
 use crate::machine::error::{Error, ErrorKind};
-use crate::machine::Result;
+use crate::machine::{ExecutionContext, LocationInfo, Result};
 
 /// Sets var at local address on entity to a value of a var
 /// at external address on another entity. Can only be
@@ -62,7 +62,8 @@ impl Get {
     }
     //    //TODO it could maybe be faster to not deal with `Var`
     // enum here?
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, exec_ctx: &ExecutionContext) -> Result<()> {
+        let ent_uid = exec_ctx.ent;
         // println!("{:?}, {:?}", self.source.get_ent_type,
         // self.source.get_ent_id)
         let ext_ent = match sim.get_entity_str(&self.source.entity)
@@ -151,7 +152,7 @@ pub struct ExtSetVar {
     pub source: Var,
 }
 impl ExtSetVar {
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
+    pub fn execute_ext(&self, sim: &mut Sim, exec_ctx: &ExecutionContext) -> Result<()> {
         unimplemented!();
         // let ext_ent = match sim
         //.entities
@@ -177,33 +178,51 @@ impl ExtSetVar {
 pub struct ExtSet {
     pub target: Address,
     pub source: Address,
+    pub out: Option<Address>,
 }
 impl ExtSet {
-    pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
-        let loc_ent = match sim.get_entity(ent_uid) {
-            Ok(e) => e,
-            Err(_) => {
-                debug!("");
-                return Ok(());
+    pub fn execute_ext(
+        &self,
+        sim: &mut Sim,
+        ent_id: &EntityId,
+        comp_name: &CompName,
+        location: &LocationInfo,
+    ) -> Result<()> {
+        let var = match sim.get_var(&self.source) {
+            Ok(v) => v.clone(),
+            Err(e) => {
+                if let Some(out) = self.out {
+                    *sim.get_var_mut(&out)? = Var::Bool(false).coerce(out.var_type)?;
+                }
+                return Err(Error::new(*location, ErrorKind::CoreError(e.to_string())));
             }
         };
-        let loc_var = loc_ent
-            .storage
-            .get_var(&self.source.storage_index())
-            .unwrap();
-        let ext_ent = match sim.get_entity_str_mut(&(self.target.entity)) {
-            Ok(e) => e,
-            Err(_) => {
-                debug!(
-                    "execute ext failed: entity not found: {}",
-                    self.target.to_string()
-                );
-                return Ok(());
+        match sim.get_var_mut(&self.target) {
+            Ok(target) => *target = var,
+            Err(e) => {
+                if let Some(out) = self.out {
+                    *sim.get_var_mut(&out)? = Var::Bool(false).coerce(out.var_type)?;
+                }
+                return Err(Error::new(*location, ErrorKind::CoreError(e.to_string())));
             }
-        };
-        unimplemented!();
-        // ext_ent.storage.set_from_var(&self.target.as_loc(),
-        // loc_var);
+        }
+
+        if let Some(out) = self.out {
+            *sim.get_var_mut(&out)? = Var::Bool(true).coerce(out.var_type)?;
+        }
+
+        // sim.get_var(&self.source)
+        //     .map_err(|e| Error::new(*location, ErrorKind::CoreError(e.to_string())))?
+        //     .clone();
+
+        // *sim.get_var_mut(&self.target)
+        //     .map_err(|e| Error::new(*location, ErrorKind::CoreError(e.to_string())))? = sim
+        //     .get_var(&self.source)
+        //     .map_err(|e| Error::new(*location, ErrorKind::CoreError(e.to_string())))?
+        //     .clone();
+        // if let Some(out) = self.out {
+        //     *sim.get_var_mut(&out)? = sim.get_var(&out)?.coerce(out.var_type)?;
+        // }
         return Ok(());
     }
 }

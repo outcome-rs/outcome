@@ -11,7 +11,10 @@ use std::{env, thread};
 use anyhow::{Error, Result};
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use outcome::Sim;
-use outcome_net::{CompressionPolicy, Coord, Server, ServerConfig, SimConnection, Worker};
+use outcome_net::{
+    CompressionPolicy, Coord, Server, ServerConfig, SimConnection, SocketEvent, SocketEventType,
+    Worker,
+};
 
 #[cfg(feature = "watcher")]
 use notify::{RecommendedWatcher, Watcher};
@@ -668,6 +671,17 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     for (client_id, client) in &mut server.clients {
         client.connection.disconnect(None);
     }
+    match &server.sim {
+        SimConnection::ClusterCoord(coord) => {
+            for (_, worker) in &coord.net.workers {
+                worker
+                    .connection
+                    .send_event(SocketEvent::new(SocketEventType::Disconnect), None)?;
+            }
+        }
+        _ => (),
+    }
+
     // server.manual_poll()?;
     server.cleanup()?;
 
@@ -808,7 +822,10 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
                 break;
             }
 
-            worker.manual_poll();
+            worker.manual_poll()?;
+            // if let Err(e) = worker.manual_poll() {
+            //     println!("{}", e);
+            // }
 
             // wait a little to reduce polling overhead
             thread::sleep(Duration::from_millis(3));

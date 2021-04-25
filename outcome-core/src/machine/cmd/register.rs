@@ -104,31 +104,44 @@ impl RegisterVar {
     ) -> Result<()> {
         debug!("registering var: {:?}", self);
 
-        sim.model
-            .get_component_mut(&self.comp)
-            .unwrap()
-            .vars
-            .push(crate::model::VarModel {
-                id: self.addr.var_id,
+        let comp_name = if !self.comp.is_empty() {
+            &self.comp
+        } else {
+            comp_name
+        };
+
+        if let Some(comp) = sim.model.get_component_mut(comp_name) {
+            comp.vars.push(crate::model::VarModel {
+                id: self.addr.var_name,
                 type_: self.addr.var_type,
                 default: self.val.clone(),
             });
+        }
+
         Ok(())
     }
 
-    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+    pub fn execute_ext_distr(
+        &self,
+        central: &mut SimCentral,
+        comp_name: &crate::CompName,
+    ) -> Result<()> {
         debug!("registering var: {:?}", self);
 
-        central
-            .model
-            .get_component_mut(&self.comp)
-            .unwrap()
-            .vars
-            .push(crate::model::VarModel {
-                id: self.addr.var_id,
+        let comp_name = if !self.comp.is_empty() {
+            &self.comp
+        } else {
+            comp_name
+        };
+
+        if let Some(comp) = central.model.get_component_mut(comp_name) {
+            comp.vars.push(crate::model::VarModel {
+                id: self.addr.var_name,
                 type_: self.addr.var_type,
                 default: self.val.clone(),
             });
+        }
+
         Ok(())
     }
 }
@@ -211,7 +224,8 @@ impl RegisterEvent {
     }
 
     pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
-        unimplemented!();
+        central.model.events.push(EventModel { id: self.name });
+        central.event_queue.push(self.name);
         Ok(())
     }
 }
@@ -419,7 +433,9 @@ impl RegisterTrigger {
             comp: Default::default(),
         })
     }
+
     pub fn execute_loc(&self, call_stack: &mut CallStackVec) -> Vec<CommandResult> {
+        // println!("call stack: {:?}", call_stack);
         let mut new_reg_trigger = self.clone();
         if let Some(comp_info) = call_stack.iter().find_map(|ci: &CallInfo| match ci {
             CallInfo::Component(c) => Some(c),
@@ -436,6 +452,7 @@ impl RegisterTrigger {
             CommandResult::Continue,
         ]
     }
+
     pub fn execute_ext(
         &self,
         sim: &mut Sim,
@@ -444,11 +461,10 @@ impl RegisterTrigger {
     ) -> Result<()> {
         debug!("registering comp trigger: {:?}", self);
 
-        sim.model
-            .get_component_mut(&self.comp)
-            .unwrap()
-            .triggers
-            .push(self.name);
+        if let Some(comp) = sim.model.get_component_mut(&self.comp) {
+            comp.triggers.push(self.name);
+        }
+
         Ok(())
     }
 

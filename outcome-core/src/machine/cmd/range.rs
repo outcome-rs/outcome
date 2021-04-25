@@ -1,9 +1,10 @@
+use std::str::FromStr;
+
 use crate::entity::Storage;
 use crate::{Address, CompName, StringId, Var};
 
-use super::super::{error::Error, LocationInfo};
+use super::super::{error::Error, error::ErrorKind, error::Result, LocationInfo};
 use super::CommandResult;
-use crate::machine::error::ErrorKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Range {
@@ -16,11 +17,11 @@ impl Range {
     pub fn get_type() -> String {
         return "range".to_string();
     }
-    pub fn new(args: Vec<String>) -> Result<Self, Error> {
+    pub fn new(args: Vec<String>) -> Result<Self> {
         Ok(Range {
             start: args[0].to_string(),
             end: args[1].to_string(),
-            output: Address::from_str(&args[2]).unwrap(),
+            output: Address::from_str(&args[2])?,
         })
     }
 }
@@ -31,7 +32,6 @@ impl Range {
         comp_name: &CompName,
         location: &LocationInfo,
     ) -> CommandResult {
-        // println!("{:?}", self);
         let mut list = Vec::new();
         let start_int = self.start.parse::<crate::Int>().unwrap();
         let end_int = self.end.parse::<crate::Int>().unwrap();
@@ -42,13 +42,13 @@ impl Range {
             pointer = pointer + 1;
         }
         // println!("{:?}", list);
-        if !storage.get_var(&(*comp_name, self.output.var_id)).is_ok() {
-            storage.insert((*comp_name, self.output.var_id), Var::IntList(Vec::new()));
+        if !storage.get_var(&(*comp_name, self.output.var_name)).is_ok() {
+            storage.insert((*comp_name, self.output.var_name), Var::List(Vec::new()));
         }
-        match storage.get_var_mut(&(*comp_name, self.output.var_id)) {
-            Ok(il) => *il = Var::IntList(list),
-            Err(_) => return CommandResult::Err(Error::new(*location, ErrorKind::Panic)),
-        }
+        // match storage.get_var_mut(&(*comp_name, self.output.var_id)) {
+        //     Ok(il) => *il = Var::List(list),
+        //     Err(_) => return CommandResult::Err(Error::new(*location, ErrorKind::Panic)),
+        // }
         //list;
         // println!("done");
         CommandResult::Continue

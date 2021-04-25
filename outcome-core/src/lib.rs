@@ -176,7 +176,7 @@ const DEFAULT_SCENARIO_MODULE_DEP_VERSION: &str = "*";
 #[cfg(feature = "machine")]
 const DEFAULT_INACTIVE_STATE: &str = "idle";
 #[cfg(feature = "machine")]
-const DEFAULT_TRIGGER_EVENT: &str = "step";
+const DEFAULT_STEP_EVENT: &str = "step";
 #[cfg(feature = "machine")]
 const DEFAULT_INIT_EVENT: &str = "init";
 

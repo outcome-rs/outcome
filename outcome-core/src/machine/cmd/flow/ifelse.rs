@@ -2,15 +2,17 @@ use smallvec::SmallVec;
 
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::MedString;
+use crate::{CompName, MedString};
 
 use super::super::super::{
     error::Error, CallInfo, CallStackVec, ForInCallInfo, IfElseCallInfo, IfElseMetaData,
     ProcedureCallInfo, Registry,
 };
 use super::super::{CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo};
+use crate::address::ShortLocalAddress;
 use crate::machine::error::ErrorKind;
 use crate::machine::Result;
+use crate::query::Map::VarType;
 
 pub const IF_COMMAND_NAMES: [&'static str; 1] = ["if"];
 pub const ELSE_COMMAND_NAMES: [&'static str; 2] = ["else", "else_if"];
@@ -18,13 +20,18 @@ pub const ELSE_COMMAND_NAMES: [&'static str; 2] = ["else", "else_if"];
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Condition {
     // Command()
+    VarAddress(ShortLocalAddress),
     BoolValue(bool),
 }
 impl Condition {
-    pub fn evaluate(&self) -> bool {
+    pub fn evaluate(&self, storage: &Storage, comp_name: &CompName) -> Result<bool> {
         match self {
-            Condition::BoolValue(b) => *b,
-            _ => false,
+            Condition::VarAddress(addr) => Ok(storage
+                .get_var(&addr.storage_index(Some(*comp_name))?)?
+                .to_bool()
+                == true),
+            Condition::BoolValue(b) => Ok(*b),
+            _ => Ok(false),
         }
     }
 }
@@ -87,10 +94,13 @@ impl If {
             }
         };
 
-        // condition
-        let condition = match args[0].as_str() {
-            "true" => Condition::BoolValue(true),
-            _ => Condition::BoolValue(false),
+        let condition = if args[0].contains(crate::address::SEPARATOR_SYMBOL) {
+            Condition::VarAddress(args[0].parse().unwrap())
+        } else {
+            match args[0].as_str() {
+                "true" => Condition::BoolValue(true),
+                _ => Condition::BoolValue(false),
+            }
         };
 
         match positions_opt {
@@ -110,13 +120,14 @@ impl If {
         &self,
         call_stack: &mut CallStackVec,
         ent_storage: &mut Storage,
+        comp_name: &CompName,
         line: usize,
     ) -> CommandResult {
         let mut else_lines_arr = [0; 10];
         for (n, el) in self.else_lines.iter().enumerate() {
             else_lines_arr[n] = *el;
         }
-        if self.condition.evaluate() {
+        if self.condition.evaluate(ent_storage, comp_name).unwrap() {
             debug!("evaluated to true");
             let next_line = if self.else_lines.is_empty() {
                 self.end
@@ -138,6 +149,7 @@ impl If {
             call_stack.push(call_info);
             CommandResult::Continue
         } else {
+            debug!("evaluated to false");
             if !self.else_lines.is_empty() {
                 let goto_line = self.else_lines[0];
                 let call_info = CallInfo::IfElse(IfElseCallInfo {

@@ -22,13 +22,13 @@ impl Storage {
     pub fn get_var(&self, idx: &StorageIndex) -> Result<&Var> {
         self.map
             .get(&idx)
-            .ok_or(Error::FailedGettingVariable(format!("{:?}", idx)))
+            .ok_or(Error::FailedGettingVarFromEntityStorage(*idx))
     }
 
     pub fn get_var_mut(&mut self, idx: &StorageIndex) -> Result<&mut Var> {
         self.map
             .get_mut(&idx)
-            .ok_or(Error::FailedGettingVariable(format!("{:?}", idx)))
+            .ok_or(Error::FailedGettingVarFromEntityStorage(*idx))
     }
 
     pub fn get_all_coerce_to_string(&self) -> HashMap<String, String> {
@@ -56,7 +56,7 @@ impl Storage {
     }
     pub fn set_from_var(&mut self, target: &Address, comp_uid: Option<&CompName>, var: &Var) {
         let target = self
-            .get_var_mut(&(target.component, target.var_id))
+            .get_var_mut(&(target.component, target.var_name))
             .unwrap();
         *target = var.clone();
     }

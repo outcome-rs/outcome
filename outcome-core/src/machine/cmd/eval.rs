@@ -23,6 +23,7 @@ use crate::{arraystring, CompName, MedString, Sim, StringId, Var, VarType};
 use super::super::{CommandPrototype, Error, LocationInfo, Registry, RegistryTarget, Result};
 use super::{Command, CommandResult};
 use crate::machine::ErrorKind;
+use std::str::FromStr;
 
 /// Precompiles an evaluation and stores it
 #[derive(Debug, Clone, Serialize, Deserialize)]

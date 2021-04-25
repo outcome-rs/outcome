@@ -20,6 +20,9 @@ pub use server_client::*;
 
 use crate::socket::{pack, unpack, Encoding};
 use crate::{error::Error, Result, TaskId};
+use fnv::FnvHashMap;
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 /// Enumeration of all available message types.
 #[derive(Debug, Clone, Copy, PartialEq, TryFromPrimitive, Deserialize_repr, Serialize_repr)]
@@ -188,7 +191,7 @@ pub trait Payload: Clone {
 }
 
 /// Version of the `Var` struct used for untagged ser/deser.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum VarJson {
     String(String),
@@ -196,21 +199,17 @@ pub enum VarJson {
     Float(outcome::Float),
     Bool(bool),
     Byte(u8),
-    StringList(Vec<String>),
-    IntList(Vec<outcome::Int>),
-    FloatList(Vec<outcome::Float>),
-    BoolList(Vec<bool>),
-    ByteList(Vec<u8>),
-    #[cfg(feature = "grids")]
-    StringGrid(Vec<Vec<String>>),
-    #[cfg(feature = "grids")]
-    IntGrid(Vec<Vec<outcome::Int>>),
-    #[cfg(feature = "grids")]
-    FloatGrid(Vec<Vec<outcome::Float>>),
-    #[cfg(feature = "grids")]
-    BoolGrid(Vec<Vec<bool>>),
-    #[cfg(feature = "grids")]
-    ByteGrid(Vec<Vec<u8>>),
+    List(Vec<VarJson>),
+    Grid(Vec<Vec<VarJson>>),
+    Map(BTreeMap<VarJson, VarJson>),
+}
+
+impl Eq for VarJson {}
+
+impl Ord for VarJson {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
 }
 
 impl From<outcome::Var> for VarJson {

@@ -1,9 +1,44 @@
 print "[hello_world mod] Hello World!"
 
-component hello_greetable
-    var str:hello
+
+event additional
+
+component greeting
+    var str:hello \
+        "hello"
+    var str:realm
+    var list_str:hello_multiple = "first","second"
+
+    set str:test test
+    print "{}" str:test
+    var vec3:position = 1.,2.42,39233.932
+
+    trigger step
+    trigger additional
+	state start
+	    print here
+        component realm
+            var str:name "valhalla"
+        end
+        prefab world realm
+        spawn world world
+
+	    set bool:do false
+	    var bool:dod false
+        goto main
+	end
+
+	state main
+#        spawn greeter
+        invoke additional
+	    set str:realm world:realm:str:name => bool:do
+	    if bool:do
+		    print "{}, {}" str:hello str:realm
+	    end
+	end
 end
 
-prefab greetable hello_greetable
+prefab greeter greeting
 
-spawn greetable
+
+spawn greeter

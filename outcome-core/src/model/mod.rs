@@ -27,6 +27,7 @@ use crate::{
 
 #[cfg(feature = "machine_script")]
 use crate::machine::script::{parser, preprocessor, InstructionType};
+#[cfg(feature = "machine")]
 use crate::machine::START_STATE_NAME;
 
 /// Collection of all the model data needed for running a simulation.
@@ -83,7 +84,7 @@ impl SimModel {
         // add hardcoded content
         #[cfg(feature = "machine")]
         model.events.push(crate::model::EventModel {
-            id: ShortString::from(crate::DEFAULT_TRIGGER_EVENT).unwrap(),
+            id: ShortString::from(crate::DEFAULT_STEP_EVENT).unwrap(),
         });
 
         let mut mod_init_prefab = EntityPrefab {
@@ -920,6 +921,7 @@ impl ComponentModel {
                 .map(|(k, v)| VarModel::from_deser(&k, v).unwrap())
                 .collect(),
             triggers: Vec::new(),
+            #[cfg(feature = "machine")]
             logic: LogicModel {
                 start_state: arraystring::new_unchecked(START_STATE_NAME),
                 ..Default::default()
@@ -981,7 +983,7 @@ impl VarModel {
         let addr = ShortLocalAddress::from_str(key)?;
 
         Ok(VarModel {
-            id: arraystring::new_truncate(&addr.var_id),
+            id: arraystring::new_truncate(&addr.var_name),
             type_: addr.var_type,
             default: val.map(|v| Var::from(v)),
         })

@@ -31,8 +31,10 @@ pub(crate) fn execute_ext(
     ext_cmds: &Vec<(ExecutionContext, ExtCommand)>,
     sim: &mut Sim,
 ) -> Result<()> {
-    for (exe_loc, ext_cmd) in ext_cmds {
-        ext_cmd.execute(sim, &exe_loc.ent, &exe_loc.comp)?;
+    for (exec_ctx, ext_cmd) in ext_cmds {
+        if let Err(e) = ext_cmd.execute(sim, &exec_ctx.ent, &exec_ctx.comp, &exec_ctx.location) {
+            error!("{}", e);
+        }
     }
     Ok(())
 }
@@ -165,10 +167,11 @@ pub(crate) fn execute_loc(
     }
     Ok(())
 }
+
 /// Executes given set of commands within global sim scope.
 pub fn execute(
     cmds: &Vec<Command>,
-    ent_uid: &EntityId,
+    ent_id: &EntityId,
     comp_uid: &CompName,
     mut sim: &mut Sim,
     start: Option<usize>,
@@ -195,7 +198,7 @@ pub fn execute(
             }
         }
         let loc_cmd = cmds.get(cmd_n).unwrap();
-        let location = sim
+        let location = *sim
             .model
             .get_component(comp_uid)
             .expect("can't get component model")
@@ -205,7 +208,7 @@ pub fn execute(
             .unwrap_or(&empty_locinfo);
 
         // let entity = match sim.entities.get_mut(sim.entities_idx.get(ent_uid).unwrap()) {
-        let entity = match sim.entities.get_mut(ent_uid) {
+        let entity = match sim.entities.get_mut(ent_id) {
             Some(e) => e,
             None => {
                 unimplemented!();
@@ -226,7 +229,7 @@ pub fn execute(
                 error!(
                     "{}",
                     //todo
-                    Error::new(*location, ErrorKind::Initialization("".to_string()))
+                    Error::new(location, ErrorKind::Initialization("".to_string()))
                 );
                 cmd_n += 1;
                 continue;
@@ -239,9 +242,9 @@ pub fn execute(
             &mut call_stack,
             &mut registry,
             comp_uid,
-            ent_uid,
+            ent_id,
             &sim.model,
-            location,
+            &location,
         );
         for result in results {
             match result {
@@ -253,10 +256,10 @@ pub fn execute(
                 }
                 CommandResult::JumpToTag(_) => unimplemented!("jumping to tag not supported"),
                 CommandResult::ExecExt(ext_cmd) => {
-                    ext_cmd.execute(sim, ent_uid, comp_uid)?;
+                    ext_cmd.execute(sim, ent_id, comp_uid, &location)?;
                 }
                 CommandResult::ExecCentralExt(cext_cmd) => {
-                    cext_cmd.execute(sim, ent_uid, comp_uid)?;
+                    cext_cmd.execute(sim, ent_id, comp_uid)?;
                 }
                 CommandResult::Err(e) => {
                     //TODO implement configurable system for deciding whether to

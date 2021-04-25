@@ -131,12 +131,12 @@ impl ForIn {
         let len = match iter_target {
             Var::Int(num) => *num as usize,
             Var::Float(num) => *num as usize,
-            Var::StringList(list) => list.len(),
-            Var::IntList(list) => list.len(),
-            Var::FloatList(list) => list.len(),
-            Var::BoolList(list) => list.len(),
-            #[cfg(feature = "grids")]
-            Var::StringGrid(list) => list.len(),
+            // Var::StringList(list) => list.len(),
+            // Var::IntList(list) => list.len(),
+            // Var::FloatList(list) => list.len(),
+            // Var::BoolList(list) => list.len(),
+            // #[cfg(feature = "grids")]
+            // Var::StringGrid(list) => list.len(),
             _ => 0,
         };
 
@@ -146,13 +146,13 @@ impl ForIn {
             // comp: self.variable.comp.unwrap_or(*comp_id),
             comp: self.variable.comp.unwrap_or(*comp_id),
             var_type: self.variable.var_type,
-            var_id: self.variable.var_id,
+            var_name: self.variable.var_name,
         };
         let target = LocalAddress {
             // comp: self.target.comp.unwrap_or(*comp_id),
             comp: self.target.comp.unwrap_or(*comp_id),
             var_type: self.target.var_type,
-            var_id: self.target.var_id,
+            var_name: self.target.var_name,
         };
         // let target = (*comp_id, self.target.var_id);
         // let variable_type = self.variable.var_type;
@@ -192,32 +192,32 @@ impl ForIn {
                             *int_var = iteration as crate::Int;
                         }
                     }
-                    VarType::IntList => {
-                        let newvar = ent_storage
-                            .get_var_mut(&target.storage_index())
-                            .unwrap()
-                            .as_int_list_mut()
-                            .unwrap()[iteration];
-                        match ent_storage
-                            .get_var_mut(&variable.storage_index())
-                            .unwrap()
-                            .as_int_mut()
-                        {
-                            Ok(var) => *var = newvar,
-                            Err(_) => {
-                                ent_storage.insert(
-                                    variable.storage_index(),
-                                    Var::Int(
-                                        ent_storage
-                                            .get_var(&target.storage_index())
-                                            .unwrap()
-                                            .as_int_list()
-                                            .unwrap()[iteration],
-                                    ),
-                                );
-                            }
-                        }
-                    }
+                    // VarType::IntList => {
+                    //     let newvar = ent_storage
+                    //         .get_var_mut(&target.storage_index())
+                    //         .unwrap()
+                    //         .as_int_list_mut()
+                    //         .unwrap()[iteration];
+                    //     match ent_storage
+                    //         .get_var_mut(&variable.storage_index())
+                    //         .unwrap()
+                    //         .as_int_mut()
+                    //     {
+                    //         Ok(var) => *var = newvar,
+                    //         Err(_) => {
+                    //             ent_storage.insert(
+                    //                 variable.storage_index(),
+                    //                 Var::Int(
+                    //                     ent_storage
+                    //                         .get_var(&target.storage_index())
+                    //                         .unwrap()
+                    //                         .as_int_list()
+                    //                         .unwrap()[iteration],
+                    //                 ),
+                    //             );
+                    //         }
+                    //     }
+                    // }
                     _ => unimplemented!(),
                 }
 
@@ -233,6 +233,8 @@ use annotate_snippets::display_list::{DisplayList, FormatOptions};
 use annotate_snippets::snippet::{Annotation, AnnotationType, Slice, Snippet, SourceAnnotation};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
+use std::str::FromStr;
+
 fn format_err_no_arguments(location: &LocationInfo) -> String {
     let start_line = location.source_line.unwrap();
     let mut source_file = File::open(location.source.unwrap().to_string()).unwrap();

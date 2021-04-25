@@ -54,7 +54,7 @@ pub fn test_sim_struct(sim: &Sim) {
     let mut total_float_grid_variables_count = 0;
     let mut total_bool_grid_variables_count = 0;
     for ent in sim.get_entities() {
-        for (_, var) in ent.storage.map.iter() {
+        for (si, var) in ent.storage.map.iter() {
             match var.get_type() {
                 outcome::VarType::String => total_str_variables_count += 1,
                 outcome::VarType::Int => total_int_variables_count += 1,

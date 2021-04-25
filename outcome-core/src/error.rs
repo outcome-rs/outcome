@@ -7,6 +7,7 @@ use std::str::ParseBoolError;
 
 use crate::address::Address;
 
+use crate::entity::StorageIndex;
 #[cfg(feature = "machine")]
 use crate::machine;
 use crate::{CompName, EntityName};
@@ -83,7 +84,18 @@ pub enum Error {
     #[error("no entity found: {0}")]
     NoEntityIndexed(String),
     #[error("failed getting variable: {0}")]
-    FailedGettingVariable(String),
+    FailedGettingVarFromSim(Address),
+    #[error(
+        "failed getting variable from entity storage: comp: {}, var: {}",
+        _0.0,
+        _0.1
+    )]
+    FailedGettingVarFromEntityStorage(StorageIndex),
+
+    #[error("failed creating address from string: {0}")]
+    FailedCreatingAddress(String),
+    #[error("failed creating variable from string: {0}")]
+    FailedCreatingVar(String),
 
     #[error("other error: {0}")]
     Other(String),

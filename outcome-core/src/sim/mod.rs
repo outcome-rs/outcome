@@ -23,6 +23,8 @@ use crate::{arraystring, model, EntityName, EventName, Result, SimModel, Var, Va
 use crate::{EntityId, StringId};
 use fnv::FnvHashMap;
 use id_pool::IdPool;
+use std::str::FromStr;
+use std::time::Instant;
 
 /// Local (non-distributed) simulation instance object.
 ///
@@ -254,10 +256,15 @@ impl Sim {
         trace!("starting spawn_entity");
 
         trace!("creating new entity");
+        let now = Instant::now();
         let mut ent = match prefab {
             Some(p) => Entity::from_prefab_name(p, &self.model)?,
             None => Entity::empty(),
         };
+        println!(
+            "creating ent from prefab took: {}ns",
+            now.elapsed().as_nanos()
+        );
         trace!("done");
 
         trace!("getting new_uid from pool");
@@ -394,16 +401,17 @@ impl Sim {
             if let Some(ent) = self.entities.get(ent_uid) {
                 return ent.storage.get_var(&addr.storage_index());
             }
+        } else if addr.entity.chars().all(char::is_numeric) {
+            if let Some(ent) = self.entities.get(
+                &addr
+                    .entity
+                    .parse::<u32>()
+                    .map_err(|e| Error::ParsingError(e.to_string()))?,
+            ) {
+                return ent.storage.get_var(&addr.storage_index());
+            }
         }
-        if let Some(ent) = self.entities.get(
-            &addr
-                .entity
-                .parse::<u32>()
-                .map_err(|e| Error::ParsingError(e.to_string()))?,
-        ) {
-            return ent.storage.get_var(&addr.storage_index());
-        }
-        Err(Error::FailedGettingVariable(addr.to_string()))
+        Err(Error::FailedGettingVarFromSim(*addr))
     }
 
     /// Get a variable from the sim using an absolute address.
@@ -412,7 +420,7 @@ impl Sim {
             if let Some(ent) = self.entities.get_mut(ent_uid) {
                 return ent.storage.get_var_mut(&addr.storage_index());
             }
-        } else {
+        } else if addr.entity.chars().all(char::is_numeric) {
             if let Some(ent) = self.entities.get_mut(
                 &addr
                     .entity
@@ -422,14 +430,14 @@ impl Sim {
                 return ent.storage.get_var_mut(&addr.storage_index());
             }
         }
-        Err(Error::FailedGettingVariable(addr.to_string()))
+        Err(Error::FailedGettingVarFromSim(*addr))
     }
 
     /// Set a var at address using a string value as input.
     pub fn set_from_string(&mut self, addr: &Address, val: &String) -> Result<()> {
         match addr.var_type {
             VarType::String => {
-                *self.get_var_mut(&addr)?.as_str_mut()? = val.clone();
+                *self.get_var_mut(&addr)?.as_string_mut()? = val.clone();
             }
             VarType::Int => {
                 *self.get_var_mut(&addr)?.as_int_mut()? = val
@@ -457,25 +465,25 @@ impl Sim {
     /// Set a var of any type using a string list as input.
     pub fn set_from_string_list(&mut self, addr: &Address, vec: &Vec<String>) -> Result<()> {
         match addr.var_type {
-            VarType::StringList => {
-                *self.get_var_mut(&addr)?.as_str_list_mut()? = vec.clone();
-            }
-            VarType::IntList => {
-                *self.get_var_mut(&addr)?.as_int_list_mut()? = vec
-                    .iter()
-                    .map(|is| is.parse::<crate::Int>().unwrap())
-                    .collect();
-            }
-            VarType::FloatList => {
-                *self.get_var_mut(&addr)?.as_float_list_mut()? = vec
-                    .iter()
-                    .map(|fs| fs.parse::<crate::Float>().unwrap())
-                    .collect();
-            }
-            VarType::BoolList => {
-                *self.get_var_mut(&addr)?.as_bool_list_mut()? =
-                    vec.iter().map(|bs| bs.parse::<bool>().unwrap()).collect();
-            }
+            // VarType::StringList => {
+            //     *self.get_var_mut(&addr)?.as_str_list_mut()? = vec.clone();
+            // }
+            // VarType::IntList => {
+            //     *self.get_var_mut(&addr)?.as_int_list_mut()? = vec
+            //         .iter()
+            //         .map(|is| is.parse::<crate::Int>().unwrap())
+            //         .collect();
+            // }
+            // VarType::FloatList => {
+            //     *self.get_var_mut(&addr)?.as_float_list_mut()? = vec
+            //         .iter()
+            //         .map(|fs| fs.parse::<crate::Float>().unwrap())
+            //         .collect();
+            // }
+            // VarType::BoolList => {
+            //     *self.get_var_mut(&addr)?.as_bool_list_mut()? =
+            //         vec.iter().map(|bs| bs.parse::<bool>().unwrap()).collect();
+            // }
             _ => error!(
                 "set_from_string_list not yet implemented for var type {:?}",
                 addr.var_type
@@ -490,35 +498,35 @@ impl Sim {
     /// Set a var of any type using a string grid as input.
     pub fn set_from_string_grid(&mut self, addr: &Address, vec2d: &Vec<Vec<String>>) -> Result<()> {
         match addr.var_type {
-            VarType::StringGrid => {
-                *self.get_var_mut(&addr)?.as_str_grid_mut()? = vec2d.clone();
-            }
-            VarType::IntGrid => {
-                *self.get_var_mut(&addr)?.as_int_grid_mut()? = vec2d
-                    .iter()
-                    .map(|v| {
-                        v.iter()
-                            .map(|is| is.parse::<crate::Int>().unwrap())
-                            .collect()
-                    })
-                    .collect();
-            }
-            VarType::FloatGrid => {
-                *self.get_var_mut(&addr)?.as_float_grid_mut()? = vec2d
-                    .iter()
-                    .map(|v| {
-                        v.iter()
-                            .map(|fs| fs.parse::<crate::Float>().unwrap())
-                            .collect()
-                    })
-                    .collect();
-            }
-            VarType::BoolGrid => {
-                *self.get_var_mut(&addr)?.as_bool_grid_mut()? = vec2d
-                    .iter()
-                    .map(|v| v.iter().map(|bs| bs.parse::<bool>().unwrap()).collect())
-                    .collect();
-            }
+            // VarType::StringGrid => {
+            //     *self.get_var_mut(&addr)?.as_str_grid_mut()? = vec2d.clone();
+            // }
+            // VarType::IntGrid => {
+            //     *self.get_var_mut(&addr)?.as_int_grid_mut()? = vec2d
+            //         .iter()
+            //         .map(|v| {
+            //             v.iter()
+            //                 .map(|is| is.parse::<crate::Int>().unwrap())
+            //                 .collect()
+            //         })
+            //         .collect();
+            // }
+            // VarType::FloatGrid => {
+            //     *self.get_var_mut(&addr)?.as_float_grid_mut()? = vec2d
+            //         .iter()
+            //         .map(|v| {
+            //             v.iter()
+            //                 .map(|fs| fs.parse::<crate::Float>().unwrap())
+            //                 .collect()
+            //         })
+            //         .collect();
+            // }
+            // VarType::BoolGrid => {
+            //     *self.get_var_mut(&addr)?.as_bool_grid_mut()? = vec2d
+            //         .iter()
+            //         .map(|v| v.iter().map(|bs| bs.parse::<bool>().unwrap()).collect())
+            //         .collect();
+            // }
             _ => error!(
                 "set_from_string_grid not yet implemented for var type {:?}",
                 addr.var_type
@@ -546,18 +554,16 @@ impl Sim {
                     );
                     //                    println!("{}", img.);
                     let img = img.to_luma8();
-                    let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
-                    let mut row: Vec<crate::Int> = Vec::new();
+                    let mut out_grid: Vec<Vec<crate::Var>> = Vec::new();
+                    let mut row: Vec<Var> = Vec::new();
                     for (w, h, luma) in img.enumerate_pixels() {
-                        row.push(luma[0] as crate::Int);
+                        row.push(Var::Int(luma[0] as crate::Int));
                         if (w + 1) % img.width() == 0 {
                             out_grid.push(row);
                             row = Vec::new();
                         }
                     }
-                    let ig = self
-                        .get_var_mut(&Address::from_str(&addr)?)?
-                        .as_int_grid_mut()?;
+                    let ig = self.get_var_mut(&addr.parse()?)?.as_grid_mut()?;
                     *ig = out_grid;
                 }
                 DataImageEntry::PngU8U8U8Concat(addr, path) => {
@@ -572,21 +578,21 @@ impl Sim {
                     let width = img.width();
                     let img = img.to_rgb8();
 
-                    let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
-                    let mut row: Vec<crate::Int> = Vec::new();
+                    let mut out_grid: Vec<Vec<Var>> = Vec::new();
+                    let mut row: Vec<Var> = Vec::new();
                     for (w, h, rgb) in img.enumerate_pixels() {
                         let combined = (rgb.0[0] as u32 * 10_u32.pow(3) + rgb.0[1] as u32)
                             * 10_u32.pow(3)
                             + rgb.0[2] as u32;
-                        row.push(combined as crate::Int);
+                        row.push(Var::Int(combined as crate::Int));
 
                         if (w + 1) % img.width() == 0 {
                             out_grid.push(row);
                             row = Vec::new();
                         }
                     }
-                    let deal = Address::from_str(&addr).expect("failed creating addr from str");
-                    let ig = self.get_var_mut(&deal)?.as_int_grid_mut()?;
+                    let deal = addr.parse().expect("failed creating addr from str");
+                    let ig = self.get_var_mut(&deal)?.as_grid_mut()?;
                     *ig = out_grid;
                 }
                 DataImageEntry::PngU8U8U8(addr, path) => {
@@ -601,19 +607,17 @@ impl Sim {
                     let width = img.width();
                     let img = img.to_rgb8();
 
-                    let mut out_grid: Vec<Vec<crate::Int>> = Vec::new();
-                    let mut row: Vec<crate::Int> = Vec::new();
+                    let mut out_grid: Vec<Vec<Var>> = Vec::new();
+                    let mut row: Vec<Var> = Vec::new();
                     for (w, h, rgb) in img.enumerate_pixels() {
                         let c = 65536 * rgb.0[0] as u32 + 256 * rgb.0[1] as u32 + rgb.0[2] as u32;
-                        row.push(c as crate::Int);
+                        row.push(Var::Int(c as crate::Int));
                         if (w + 1) % img.width() == 0 {
                             out_grid.push(row);
                             row = Vec::new();
                         }
                     }
-                    let ig = self
-                        .get_var_mut(&Address::from_str(&addr)?)?
-                        .as_int_grid_mut()?;
+                    let ig = self.get_var_mut(&Address::from_str(addr)?)?.as_grid_mut()?;
                     *ig = out_grid;
                 }
                 _ => (),
@@ -668,44 +672,45 @@ impl Sim {
                     //                    println!("{}", &addr.to_string());
                     self.set_from_string(&addr, &val);
                 }
-                //                    self.set_from_string(&addr, &val.as_str().to_string()),
-                VarType::StringList
-                | VarType::IntList
-                | VarType::FloatList
-                | VarType::BoolList
-                | VarType::ByteList => {
-                    unimplemented!()
-                    // self.set_from_string_list(
-                    //     &addr,
-                    //     &val.as_array()
-                    //         .unwrap()
-                    //         .iter()
-                    //         .map(|v| coerce_toml_val_to_string(&v))
-                    //         .collect(),
-                    // );
-                }
-                #[cfg(feature = "grids")]
-                VarType::StringGrid
-                | VarType::IntGrid
-                | VarType::FloatGrid
-                | VarType::BoolGrid
-                | VarType::ByteGrid => {
-                    unimplemented!()
-                    // self.set_from_string_grid(
-                    //     &addr,
-                    //     &val.as_array()
-                    //         .unwrap()
-                    //         .iter()
-                    //         .map(|v| {
-                    //             v.as_array()
-                    //                 .unwrap()
-                    //                 .iter()
-                    //                 .map(|vv| coerce_toml_val_to_string(&vv))
-                    //                 .collect()
-                    //         })
-                    //         .collect(),
-                    // );
-                }
+                _ => unimplemented!(), //                    self.set_from_string(&addr, &val.as_str().to_string()),
+                                       // VarType::StringList
+                                       // | VarType::IntList
+                                       // | VarType::FloatList
+                                       // | VarType::BoolList
+                                       // | VarType::ByteList => {
+                                       //     unimplemented!()
+                                       // self.set_from_string_list(
+                                       //     &addr,
+                                       //     &val.as_array()
+                                       //         .unwrap()
+                                       //         .iter()
+                                       //         .map(|v| coerce_toml_val_to_string(&v))
+                                       //         .collect(),
+                                       // );
+                                       // }
+                                       // #[cfg(feature = "grids")]
+                                       // VarType::StringGrid
+                                       // | VarType::IntGrid
+                                       // | VarType::FloatGrid
+                                       // | VarType::BoolGrid
+                                       // | VarType::ByteGrid => {
+                                       //     unimplemented!()
+
+                                       // self.set_from_string_grid(
+                                       //     &addr,
+                                       //     &val.as_array()
+                                       //         .unwrap()
+                                       //         .iter()
+                                       //         .map(|v| {
+                                       //             v.as_array()
+                                       //                 .unwrap()
+                                       //                 .iter()
+                                       //                 .map(|vv| coerce_toml_val_to_string(&vv))
+                                       //                 .collect()
+                                       //         })
+                                       //         .collect(),
+                                       // );
+                                       // }
             };
         }
     }

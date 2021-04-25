@@ -1,6 +1,7 @@
 use outcome::{Address, Sim};
 
 use crate::interactive::Config;
+use std::str::FromStr;
 
 /// Create the prompt string. It defaults to current clock tick integer number.
 /// It can display a custom prompt based on the configuration file.
@@ -32,7 +33,7 @@ pub fn create_prompt(sim: &Sim, cfg: &Config) -> String {
                 return create_prompt_default(sim);
             }
         };
-        let var_res = match sim.get_var(&addr).unwrap().as_str() {
+        let var_res = match sim.get_var(&addr).unwrap().as_string() {
             Ok(i) => i.clone(),
             Err(_) => {
                 return create_prompt_default(sim);

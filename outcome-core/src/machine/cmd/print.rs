@@ -11,6 +11,7 @@ use crate::model::ComponentModel;
 use super::super::{error::Error, LocationInfo};
 use super::CommandResult;
 use crate::machine::error::{ErrorKind, Result};
+use std::str::FromStr;
 
 /// Print format
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,29 +86,16 @@ impl PrintFmt {
             let mut output = self.fmt.clone();
             let mut track_added = 0;
             for (index, addr) in &self.inserts {
-                // let part_addr = PartialAddress::from_str(addr).unwrap();
-                // let substring = match addr {
-                //     PartialAddress::ComponentLocal { var_type, var_id } => {
-                //         entity_db.get_var(&(*comp_uid, var_id)).unwrap().to_string()
-                //     }
-                //     _ => unimplemented!(),
-                // };
-                let substring = entity_db
-                    .get_var(&addr.storage_index_using(*comp_uid))
-                    .unwrap()
-                    .to_string();
-
-                // let substring = match entity_db.get_coerce_to_string(&addr, Some(&addr.component)) {
-                //     Some(s) => s,
-                //     None => {
-                //         return CommandResult::Err(Error::new(
-                //             *location,
-                //             ErrorKind::FailedGettingFromStorage(addr.to_string()),
-                //         ))
-                //     }
-                // };
-                output.insert_str(*index + track_added, &substring);
-                track_added += substring.len();
+                match entity_db.get_var(&addr.storage_index_using(*comp_uid)) {
+                    Ok(substring) => {
+                        let substring = substring.to_string();
+                        output.insert_str(*index + track_added, &substring);
+                        track_added += substring.len();
+                    }
+                    Err(e) => {
+                        warn!("{}", e)
+                    }
+                }
             }
             info!("{}", output);
         } else {

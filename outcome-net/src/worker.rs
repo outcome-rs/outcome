@@ -12,7 +12,9 @@ use crate::msg::coord_worker::{
     IntroduceWorkerToCoordResponse,
 };
 use crate::msg::*;
-use crate::socket::{Encoding, Socket, SocketAddress, SocketConfig, Transport};
+use crate::socket::{
+    Encoding, Socket, SocketAddress, SocketConfig, SocketEvent, SocketEventType, Transport,
+};
 use crate::{error::Error, sig, Result, TaskId};
 
 use fnv::FnvHashMap;
@@ -160,7 +162,7 @@ impl Worker {
     pub fn handle_coordinator(&mut self) -> Result<()> {
         print!("Waiting for message from coordinator... ");
         std::io::stdout().flush()?;
-        let (_, msg) = self.greeter.recv_msg()?;
+        let (peer_addr, msg) = self.greeter.recv_msg()?;
         println!("success");
 
         debug!("message from coordinator: {:?}", msg);
@@ -188,14 +190,18 @@ impl Worker {
         let soc_config = SocketConfig {
             ..Default::default()
         };
-        let mut coord = Socket::new_with_config(None, Transport::Tcp, soc_config)?;
+        let mut coord = Socket::new_with_config(
+            Some(SocketAddress::from_str("0.0.0.0:0")?),
+            Transport::Tcp,
+            soc_config,
+        )?;
 
         self.greeter.send_payload(
             IntroduceCoordResponse {
                 conn_socket: coord.listener_addr()?.to_string(),
                 error: "".to_string(),
             },
-            None,
+            Some(peer_addr),
         )?;
 
         coord.connect(req.ip_addr.parse()?)?;
@@ -223,12 +229,40 @@ impl Worker {
 impl Worker {
     pub fn manual_poll(&mut self) -> Result<()> {
         loop {
-            if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
-                let (task_id, sig) = sig.into_inner();
-                self.handle_coord_signal(task_id, sig)?;
-            } else {
-                break;
+            if let Some(coord) = self.network.coord.as_mut() {
+                match coord.try_recv() {
+                    Ok((addr, event)) => match event.type_ {
+                        SocketEventType::Bytes => {
+                            let sig =
+                                crate::sig::Signal::from_bytes(&event.bytes, &Encoding::Bincode)?;
+                            let (task_id, sig) = sig.into_inner();
+                            self.handle_coord_signal(task_id, sig)?;
+                        }
+                        SocketEventType::Heartbeat => (),
+                        SocketEventType::Connect => {
+                            info!("coordinator connected");
+                        }
+                        SocketEventType::Timeout => {
+                            info!("connection timed out");
+                            break;
+                        }
+                        SocketEventType::Disconnect => {
+                            info!("coordinator ended the connection");
+                            return Err(Error::SocketNotConnected);
+                        }
+                    },
+                    Err(e) => {
+                        // error!("{}", e);
+                        break;
+                    }
+                }
             }
+            // if let Ok((addr, sig)) = self.network.coord.as_mut().unwrap().try_recv_sig() {
+            //     let (task_id, sig) = sig.into_inner();
+            //     self.handle_coord_signal(task_id, sig)?;
+            // } else {
+            //     break;
+            // }
         }
         Ok(())
     }
@@ -310,7 +344,7 @@ impl Worker {
                         entity: arraystring::new_truncate(&entity_uid.to_string()),
                         component: *comp_id,
                         var_type: var.get_type(),
-                        var_id: *var_id,
+                        var_name: *var_id,
                     },
                     var.clone(),
                 ))

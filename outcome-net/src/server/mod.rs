@@ -24,6 +24,7 @@ use crate::socket::{
 use crate::{error::Error, Result, TaskId};
 use crate::{Coord, Worker};
 use outcome::distr::{CentralCommunication, NodeCommunication, Signal};
+use std::str::FromStr;
 
 mod pull;
 mod query;
@@ -40,6 +41,7 @@ pub enum SimConnection {
     Local(Sim),
     ClusterCoord(Coord),
     ClusterWorker(Worker),
+    // ClusterRelay(Relay),
 }
 
 /// Connected client as seen by the server.
@@ -183,7 +185,7 @@ pub struct Server {
     pub config: ServerConfig,
 
     /// Connection with the simulation
-    sim: SimConnection,
+    pub sim: SimConnection,
     /// Outward facing sockets
     pub greeters: Vec<Socket>,
     /// Counter used for assigning client ids
@@ -959,7 +961,7 @@ impl Server {
                     for (addr, var) in data_vec {
                         data_pack
                             .vars
-                            .insert((addr.entity, addr.component, addr.var_id), var);
+                            .insert((addr.entity, addr.component, addr.var_name), var);
                     }
                     for (entity_id, entity) in &worker.sim_node.as_ref().unwrap().entities {
                         for ((comp_name, var_name), var) in &entity.storage.map {
@@ -1038,7 +1040,7 @@ impl Server {
                                             // entity: entity_uid.parse().unwrap(),
                                             component: *comp_name,
                                             var_type: VarType::Float,
-                                            var_id: *var_id,
+                                            var_name: *var_id,
                                         }
                                         .into(),
                                         // comp_name.to_string(),

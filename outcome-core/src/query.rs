@@ -354,7 +354,7 @@ impl Query {
                             entity: ent_id.to_string().parse().unwrap(),
                             component: *comp_name,
                             var_type: var.get_type(),
-                            var_id: *var_name,
+                            var_name: *var_name,
                         };
                         data.insert(addr, var.clone());
                     }
@@ -373,7 +373,7 @@ impl Query {
                             entity: ent_id.to_string().parse().unwrap(),
                             component: *comp_name,
                             var_type: var.get_type(),
-                            var_id: *var_name,
+                            var_name: *var_name,
                         };
                         if var.is_float() {
                             data.floats.insert(addr, var.to_float());

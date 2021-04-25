@@ -1,6 +1,7 @@
 use crate::interactive::Config;
 use outcome::Address;
 use outcome_net::Client;
+use std::str::FromStr;
 
 pub fn process_step(client: &mut Client, config: &Config) -> Result<(), String> {
     client
@@ -13,18 +14,15 @@ pub fn process_step(client: &mut Client, config: &Config) -> Result<(), String> 
 /// Create the prompt string. It defaults to current clock tick integer number.
 /// It can display a custom prompt based on the passed configuration.
 pub fn create_prompt(client: &mut Client, cfg: &Config) -> anyhow::Result<String> {
-    //    unimplemented!();
     if &cfg.prompt_format == "" {
         return create_prompt_default(client);
     }
-    //    return "err".to_string();
-    // vars resolved
+
     let mut var_addrs = Vec::new();
     for v in &cfg.prompt_vars {
         let addr = match Address::from_str(v) {
             Ok(a) => a,
             Err(e) => {
-                //                println!("failed making addr from: {}", v.clone());
                 return create_prompt_default(client);
             }
         };

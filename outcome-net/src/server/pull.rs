@@ -11,6 +11,7 @@ use crate::{Server, SimConnection};
 
 use outcome::distr::{CentralCommunication, Signal};
 use outcome::Address;
+use std::str::FromStr;
 
 impl Server {
     pub fn handle_json_pull_request(&mut self, msg: Message, client_id: &ClientId) -> Result<()> {
@@ -64,47 +65,32 @@ impl Server {
                     let dpr: DataPullRequest = msg.unpack_payload(client.connection.encoding())?;
                     match dpr.data {
                         PullRequestData::Typed(data) => {
-                            //TODO handle errors
-                            for (addr, var) in data.strings {
-                                *sim.get_var_mut(&addr)?.as_str_mut()? = var;
-                            }
-                            for (addr, var) in data.ints {
-                                *sim.get_var_mut(&addr)?.as_int_mut()? = var;
-                            }
-                            for (addr, var) in data.floats {
-                                *sim.get_var_mut(&addr)?.as_float_mut()? = var;
-                            }
-                            for (addr, var) in data.bools {
-                                *sim.get_var_mut(&addr)?.as_bool_mut()? = var;
-                            }
-                            for (addr, var) in data.string_lists {
-                                *sim.get_var_mut(&addr)?.as_str_list_mut()? = var;
-                            }
-                            for (addr, var) in data.int_lists {
-                                *sim.get_var_mut(&addr)?.as_int_list_mut()? = var;
-                            }
-                            for (addr, var) in data.float_lists {
-                                *sim.get_var_mut(&addr)?.as_float_list_mut()? = var;
-                            }
-                            for (addr, var) in data.bool_lists {
-                                *sim.get_var_mut(&addr)?.as_bool_list_mut()? = var;
-                            }
-
-                            #[cfg(feature = "outcome/grids")]
-                            {
-                                for (addr, var) in data.string_grids {
-                                    *sim.get_var_mut(&addr)?.as_str_grid_mut()? = var;
-                                }
-                                for (addr, var) in data.int_grids {
-                                    *sim.get_var_mut(&addr)?.as_int_grid_mut()? = var;
-                                }
-                                for (addr, var) in data.float_grids {
-                                    *sim.get_var_mut(&addr)?.as_float_grid_mut()? = var;
-                                }
-                                for (addr, var) in data.bool_grids {
-                                    *sim.get_var_mut(&addr)?.as_bool_grid_mut()? = var;
-                                }
-                            }
+                            // //TODO handle errors
+                            // for (addr, var) in data.strings {
+                            //     *sim.get_var_mut(&addr)?.as_string_mut()? = var;
+                            // }
+                            // for (addr, var) in data.ints {
+                            //     *sim.get_var_mut(&addr)?.as_int_mut()? = var;
+                            // }
+                            // for (addr, var) in data.floats {
+                            //     *sim.get_var_mut(&addr)?.as_float_mut()? = var;
+                            // }
+                            // for (addr, var) in data.bools {
+                            //     *sim.get_var_mut(&addr)?.as_bool_mut()? = var;
+                            // }
+                            // for (addr, var) in data.string_lists {
+                            //     *sim.get_var_mut(&addr)?.as_str_list_mut()? = var;
+                            // }
+                            // for (addr, var) in data.int_lists {
+                            //     *sim.get_var_mut(&addr)?.as_int_list_mut()? = var;
+                            // }
+                            // for (addr, var) in data.float_lists {
+                            //     *sim.get_var_mut(&addr)?.as_float_list_mut()? = var;
+                            // }
+                            // for (addr, var) in data.bool_lists {
+                            //     *sim.get_var_mut(&addr)?.as_bool_list_mut()? = var;
+                            // }
+                            unimplemented!()
                         }
                         PullRequestData::NativeAddressedVars(data) => {
                             for ((ent, comp, var), v) in data.vars {
@@ -197,46 +183,32 @@ impl Server {
 
         let mut sim_instance = match &mut self.sim {
             SimConnection::Local(sim) => {
-                //TODO handle errors
-                for (addr, var) in data.strings {
-                    *sim.get_var_mut(&addr)?.as_str_mut()? = var;
-                }
-                for (addr, var) in data.ints {
-                    *sim.get_var_mut(&addr)?.as_int_mut()? = var;
-                }
-                for (addr, var) in data.floats {
-                    *sim.get_var_mut(&addr)?.as_float_mut()? = var;
-                }
-                for (addr, var) in data.bools {
-                    *sim.get_var_mut(&addr)?.as_bool_mut()? = var;
-                }
-                for (addr, var) in data.string_lists {
-                    *sim.get_var_mut(&addr)?.as_str_list_mut()? = var;
-                }
-                for (addr, var) in data.int_lists {
-                    *sim.get_var_mut(&addr)?.as_int_list_mut()? = var;
-                }
-                for (addr, var) in data.float_lists {
-                    *sim.get_var_mut(&addr)?.as_float_list_mut()? = var;
-                }
-                for (addr, var) in data.bool_lists {
-                    *sim.get_var_mut(&addr)?.as_bool_list_mut()? = var;
-                }
-                #[cfg(feature = "outcome/grids")]
-                {
-                    for (addr, var) in data.string_grids {
-                        *sim.get_var_mut(&addr)?.as_str_grid_mut()? = var;
-                    }
-                    for (addr, var) in data.int_grids {
-                        *sim.get_var_mut(&addr)?.as_int_grid_mut()? = var;
-                    }
-                    for (addr, var) in data.float_grids {
-                        *sim.get_var_mut(&addr)?.as_float_grid_mut()? = var;
-                    }
-                    for (addr, var) in data.bool_grids {
-                        *sim.get_var_mut(&addr)?.as_bool_grid_mut()? = var;
-                    }
-                }
+                // //TODO handle errors
+                // for (addr, var) in data.strings {
+                //     *sim.get_var_mut(&addr)?.as_string_mut()? = var;
+                // }
+                // for (addr, var) in data.ints {
+                //     *sim.get_var_mut(&addr)?.as_int_mut()? = var;
+                // }
+                // for (addr, var) in data.floats {
+                //     *sim.get_var_mut(&addr)?.as_float_mut()? = var;
+                // }
+                // for (addr, var) in data.bools {
+                //     *sim.get_var_mut(&addr)?.as_bool_mut()? = var;
+                // }
+                // for (addr, var) in data.string_lists {
+                //     *sim.get_var_mut(&addr)?.as_str_list_mut()? = var;
+                // }
+                // for (addr, var) in data.int_lists {
+                //     *sim.get_var_mut(&addr)?.as_int_list_mut()? = var;
+                // }
+                // for (addr, var) in data.float_lists {
+                //     *sim.get_var_mut(&addr)?.as_float_list_mut()? = var;
+                // }
+                // for (addr, var) in data.bool_lists {
+                //     *sim.get_var_mut(&addr)?.as_bool_list_mut()? = var;
+                // }
+                unimplemented!();
 
                 let resp = DataPullResponse {
                     error: String::new(),

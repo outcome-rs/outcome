@@ -85,7 +85,7 @@ impl SimNode {
         ) {
             return ent.storage.get_var(&addr.storage_index());
         }
-        Err(Error::FailedGettingVariable(addr.to_string()))
+        Err(Error::FailedGettingVarFromSim(*addr))
     }
 
     /// Get a variable from the sim using an absolute address.
@@ -104,7 +104,7 @@ impl SimNode {
                 return ent.storage.get_var_mut(&addr.storage_index());
             }
         }
-        Err(Error::FailedGettingVariable(addr.to_string()))
+        Err(Error::FailedGettingVarFromSim(*addr))
     }
 
     pub fn add_entity(

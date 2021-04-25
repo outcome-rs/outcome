@@ -1,43 +1,37 @@
 //! Variable types and their transformations.
 
-use crate::error::{Error, Result};
-use serde_repr::*;
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::fmt;
+
+use fnv::FnvHashMap;
+use serde_repr::*;
+
+use crate::error::{Error, Result};
+use crate::{Float, Int};
 
 // default values for base var types
 const DEFAULT_STR_VALUE: &str = "";
-const DEFAULT_INT_VALUE: crate::Int = 0;
-const DEFAULT_FLOAT_VALUE: crate::Float = 0.0;
+const DEFAULT_INT_VALUE: Int = 0;
+const DEFAULT_FLOAT_VALUE: Float = 0.;
 const DEFAULT_BOOL_VALUE: bool = false;
 const DEFAULT_BYTE_VALUE: u8 = 0;
 
-const STR_VAR_TYPE_NAME: &str = "str";
-const STR_VAR_TYPE_NAME_ALT: &str = "string";
+const STRING_VAR_TYPE_NAME: &str = "str";
 const INT_VAR_TYPE_NAME: &str = "int";
-const INT_VAR_TYPE_NAME_ALT: &str = "integer";
 const FLOAT_VAR_TYPE_NAME: &str = "float";
-const FLOAT_VAR_TYPE_NAME_ALT: &str = "flt";
 const BOOL_VAR_TYPE_NAME: &str = "bool";
-const BOOL_VAR_TYPE_NAME_ALT: &str = "boolean";
 const BYTE_VAR_TYPE_NAME: &str = "byte";
-const STR_LIST_VAR_TYPE_NAME: &str = "str_list";
-const STR_LIST_VAR_TYPE_NAME_ALT: &str = "string_list";
-const INT_LIST_VAR_TYPE_NAME: &str = "int_list";
-const INT_LIST_VAR_TYPE_NAME_ALT: &str = "integer_list";
-const FLOAT_LIST_VAR_TYPE_NAME: &str = "float_list";
-const FLOAT_LIST_VAR_TYPE_NAME_ALT: &str = "flt_list";
-const BOOL_LIST_VAR_TYPE_NAME: &str = "bool_list";
-const BOOL_LIST_VAR_TYPE_NAME_ALT: &str = "boolean_list";
-const BYTE_LIST_VAR_TYPE_NAME: &str = "byte_list";
-const STR_GRID_VAR_TYPE_NAME: &str = "str_grid";
-const STR_GRID_VAR_TYPE_NAME_ALT: &str = "string_grid";
-const INT_GRID_VAR_TYPE_NAME: &str = "int_grid";
-const INT_GRID_VAR_TYPE_NAME_ALT: &str = "integer_grid";
-const FLOAT_GRID_VAR_TYPE_NAME: &str = "float_grid";
-const FLOAT_GRID_VAR_TYPE_NAME_ALT: &str = "flt_grid";
-const BOOL_GRID_VAR_TYPE_NAME: &str = "bool_grid";
-const BOOL_GRID_VAR_TYPE_NAME_ALT: &str = "boolean_grid";
-const BYTE_GRID_VAR_TYPE_NAME: &str = "byte_grid";
+const VEC2_VAR_TYPE_NAME: &str = "vec2";
+const VEC3_VAR_TYPE_NAME: &str = "vec3";
+
+const LIST_VAR_TYPE_NAME: &str = "list";
+const GRID_VAR_TYPE_NAME: &str = "grid";
+const MAP_VAR_TYPE_NAME: &str = "map";
+
+const VAR_TYPE_NAME_SEPARATOR: &str = "_";
+
+const VALUE_SEPARATOR: char = ',';
 
 /// Defines all possible types of values.
 #[derive(
@@ -50,21 +44,28 @@ pub enum VarType {
     Float,
     Bool,
     Byte,
+    Vec2,
+    Vec3,
+
     StringList,
     IntList,
     FloatList,
     BoolList,
     ByteList,
-    #[cfg(feature = "grids")]
+    Vec2List,
+    Vec3List,
+    VarList,
+
     StringGrid,
-    #[cfg(feature = "grids")]
     IntGrid,
-    #[cfg(feature = "grids")]
     FloatGrid,
-    #[cfg(feature = "grids")]
     BoolGrid,
-    #[cfg(feature = "grids")]
     ByteGrid,
+    Vec2Grid,
+    Vec3Grid,
+    VarGrid,
+
+    Map,
 }
 
 impl fmt::Display for VarType {
@@ -73,49 +74,47 @@ impl fmt::Display for VarType {
     }
 }
 
-/// List of all possible variable types.
-pub static VAR_TYPES: &[&str; 15] = &[
-    STR_VAR_TYPE_NAME,
-    INT_VAR_TYPE_NAME,
-    FLOAT_VAR_TYPE_NAME,
-    BOOL_VAR_TYPE_NAME,
-    BYTE_VAR_TYPE_NAME,
-    STR_LIST_VAR_TYPE_NAME,
-    INT_LIST_VAR_TYPE_NAME,
-    FLOAT_LIST_VAR_TYPE_NAME,
-    BOOL_LIST_VAR_TYPE_NAME,
-    BYTE_LIST_VAR_TYPE_NAME,
-    STR_GRID_VAR_TYPE_NAME,
-    INT_GRID_VAR_TYPE_NAME,
-    FLOAT_GRID_VAR_TYPE_NAME,
-    BOOL_GRID_VAR_TYPE_NAME,
-    BYTE_GRID_VAR_TYPE_NAME,
-];
-
 impl VarType {
     /// Creates new `VarType` from str.
     pub fn from_str(s: &str) -> Result<VarType> {
         let var_type = match s {
-            STR_VAR_TYPE_NAME | STR_VAR_TYPE_NAME_ALT => VarType::String,
-            INT_VAR_TYPE_NAME | INT_VAR_TYPE_NAME_ALT => VarType::Int,
-            FLOAT_VAR_TYPE_NAME | FLOAT_VAR_TYPE_NAME_ALT => VarType::Float,
-            BOOL_VAR_TYPE_NAME | BOOL_VAR_TYPE_NAME_ALT => VarType::Bool,
+            STRING_VAR_TYPE_NAME => VarType::String,
+            INT_VAR_TYPE_NAME => VarType::Int,
+            FLOAT_VAR_TYPE_NAME => VarType::Float,
+            BOOL_VAR_TYPE_NAME => VarType::Bool,
             BYTE_VAR_TYPE_NAME => VarType::Byte,
-            STR_LIST_VAR_TYPE_NAME | STR_LIST_VAR_TYPE_NAME_ALT => VarType::StringList,
-            INT_LIST_VAR_TYPE_NAME | INT_LIST_VAR_TYPE_NAME_ALT => VarType::IntList,
-            FLOAT_LIST_VAR_TYPE_NAME | FLOAT_LIST_VAR_TYPE_NAME_ALT => VarType::FloatList,
-            BOOL_LIST_VAR_TYPE_NAME | BOOL_LIST_VAR_TYPE_NAME_ALT => VarType::BoolList,
-            BYTE_LIST_VAR_TYPE_NAME => VarType::ByteList,
-            #[cfg(feature = "grids")]
-            STR_GRID_VAR_TYPE_NAME | STR_GRID_VAR_TYPE_NAME_ALT => VarType::StringGrid,
-            #[cfg(feature = "grids")]
-            INT_GRID_VAR_TYPE_NAME | INT_GRID_VAR_TYPE_NAME_ALT => VarType::IntGrid,
-            #[cfg(feature = "grids")]
-            FLOAT_GRID_VAR_TYPE_NAME | FLOAT_GRID_VAR_TYPE_NAME_ALT => VarType::FloatGrid,
-            #[cfg(feature = "grids")]
-            BOOL_GRID_VAR_TYPE_NAME | BOOL_GRID_VAR_TYPE_NAME_ALT => VarType::BoolGrid,
-            #[cfg(feature = "grids")]
-            BYTE_GRID_VAR_TYPE_NAME => VarType::ByteGrid,
+            VEC2_VAR_TYPE_NAME => VarType::Vec2,
+            VEC3_VAR_TYPE_NAME => VarType::Vec3,
+            _ => {
+                let split = s.split(VAR_TYPE_NAME_SEPARATOR).collect::<Vec<&str>>();
+                if split.len() != 2 {
+                    unimplemented!()
+                }
+                match split[0] {
+                    LIST_VAR_TYPE_NAME => match split[1] {
+                        STRING_VAR_TYPE_NAME => VarType::StringList,
+                        INT_VAR_TYPE_NAME => VarType::IntList,
+                        FLOAT_VAR_TYPE_NAME => VarType::FloatList,
+                        BOOL_VAR_TYPE_NAME => VarType::BoolList,
+                        BYTE_VAR_TYPE_NAME => VarType::ByteList,
+                        VEC2_VAR_TYPE_NAME => VarType::Vec2List,
+                        VEC3_VAR_TYPE_NAME => VarType::Vec3List,
+                        _ => unimplemented!(),
+                    },
+                    GRID_VAR_TYPE_NAME => match split[1] {
+                        STRING_VAR_TYPE_NAME => VarType::StringGrid,
+                        INT_VAR_TYPE_NAME => VarType::IntGrid,
+                        FLOAT_VAR_TYPE_NAME => VarType::FloatGrid,
+                        BOOL_VAR_TYPE_NAME => VarType::BoolGrid,
+                        BYTE_VAR_TYPE_NAME => VarType::ByteGrid,
+                        VEC2_VAR_TYPE_NAME => VarType::Vec2Grid,
+                        VEC3_VAR_TYPE_NAME => VarType::Vec3Grid,
+                        _ => unimplemented!(),
+                    },
+                    MAP_VAR_TYPE_NAME => VarType::Map,
+                    _ => unimplemented!(),
+                }
+            }
             _ => return Err(Error::InvalidVarType(s.to_string())),
         };
         Ok(var_type)
@@ -124,26 +123,16 @@ impl VarType {
     /// Creates new `VarType` from str. Panics on invalid input.
     pub fn from_str_unchecked(s: &str) -> VarType {
         let var_type = match s {
-            STR_VAR_TYPE_NAME | STR_VAR_TYPE_NAME_ALT => VarType::String,
-            INT_VAR_TYPE_NAME | INT_VAR_TYPE_NAME_ALT => VarType::Int,
-            FLOAT_VAR_TYPE_NAME | FLOAT_VAR_TYPE_NAME_ALT => VarType::Float,
-            BOOL_VAR_TYPE_NAME | BOOL_VAR_TYPE_NAME_ALT => VarType::Bool,
+            STRING_VAR_TYPE_NAME => VarType::String,
+            INT_VAR_TYPE_NAME => VarType::Int,
+            FLOAT_VAR_TYPE_NAME => VarType::Float,
+            BOOL_VAR_TYPE_NAME => VarType::Bool,
             BYTE_VAR_TYPE_NAME => VarType::Byte,
-            STR_LIST_VAR_TYPE_NAME | STR_LIST_VAR_TYPE_NAME_ALT => VarType::StringList,
-            INT_LIST_VAR_TYPE_NAME | INT_LIST_VAR_TYPE_NAME_ALT => VarType::IntList,
-            FLOAT_LIST_VAR_TYPE_NAME | FLOAT_LIST_VAR_TYPE_NAME_ALT => VarType::FloatList,
-            BOOL_LIST_VAR_TYPE_NAME | BOOL_LIST_VAR_TYPE_NAME_ALT => VarType::BoolList,
-            BYTE_LIST_VAR_TYPE_NAME => VarType::ByteList,
-            #[cfg(feature = "grids")]
-            STR_GRID_VAR_TYPE_NAME | STR_GRID_VAR_TYPE_NAME_ALT => VarType::StringGrid,
-            #[cfg(feature = "grids")]
-            INT_GRID_VAR_TYPE_NAME | INT_GRID_VAR_TYPE_NAME_ALT => VarType::IntGrid,
-            #[cfg(feature = "grids")]
-            FLOAT_GRID_VAR_TYPE_NAME | FLOAT_GRID_VAR_TYPE_NAME_ALT => VarType::FloatGrid,
-            #[cfg(feature = "grids")]
-            BOOL_GRID_VAR_TYPE_NAME | BOOL_GRID_VAR_TYPE_NAME_ALT => VarType::BoolGrid,
-            #[cfg(feature = "grids")]
-            BYTE_GRID_VAR_TYPE_NAME => VarType::ByteGrid,
+            VEC2_VAR_TYPE_NAME => VarType::Vec2,
+            VEC3_VAR_TYPE_NAME => VarType::Vec3,
+            LIST_VAR_TYPE_NAME => VarType::VarList,
+            GRID_VAR_TYPE_NAME => VarType::VarGrid,
+            MAP_VAR_TYPE_NAME => VarType::Map,
             _ => panic!("invalid var type: {}", s),
         };
         var_type
@@ -152,26 +141,30 @@ impl VarType {
     /// Returns string literal name of the `VarType`.
     pub fn to_str(&self) -> &str {
         match self {
-            VarType::String => STR_VAR_TYPE_NAME,
+            VarType::String => STRING_VAR_TYPE_NAME,
             VarType::Int => INT_VAR_TYPE_NAME,
             VarType::Float => FLOAT_VAR_TYPE_NAME,
             VarType::Bool => BOOL_VAR_TYPE_NAME,
             VarType::Byte => BYTE_VAR_TYPE_NAME,
-            VarType::StringList => STR_LIST_VAR_TYPE_NAME,
-            VarType::IntList => INT_LIST_VAR_TYPE_NAME,
-            VarType::FloatList => FLOAT_LIST_VAR_TYPE_NAME,
-            VarType::BoolList => BOOL_LIST_VAR_TYPE_NAME,
-            VarType::ByteList => BYTE_LIST_VAR_TYPE_NAME,
-            #[cfg(feature = "grids")]
-            VarType::StringGrid => STR_GRID_VAR_TYPE_NAME,
-            #[cfg(feature = "grids")]
-            VarType::IntGrid => INT_GRID_VAR_TYPE_NAME,
-            #[cfg(feature = "grids")]
-            VarType::FloatGrid => FLOAT_GRID_VAR_TYPE_NAME,
-            #[cfg(feature = "grids")]
-            VarType::BoolGrid => BOOL_GRID_VAR_TYPE_NAME,
-            #[cfg(feature = "grids")]
-            VarType::ByteGrid => BYTE_GRID_VAR_TYPE_NAME,
+            VarType::Vec2 => VEC2_VAR_TYPE_NAME,
+            VarType::Vec3 => VEC3_VAR_TYPE_NAME,
+            VarType::VarList => LIST_VAR_TYPE_NAME,
+            VarType::VarGrid => GRID_VAR_TYPE_NAME,
+            VarType::Map => MAP_VAR_TYPE_NAME,
+            VarType::StringList => "list_str",
+            VarType::IntList => "list_int",
+            VarType::FloatList => "list_float",
+            VarType::BoolList => "list_bool",
+            VarType::ByteList => "list_byte",
+            VarType::Vec2List => "list_vec2",
+            VarType::Vec3List => "list_vec3",
+            VarType::StringGrid => "grid_str",
+            VarType::IntGrid => "grid_int",
+            VarType::FloatGrid => "grid_float",
+            VarType::BoolGrid => "grid_bool",
+            VarType::ByteGrid => "grid_byte",
+            VarType::Vec2Grid => "grid_vec2",
+            VarType::Vec3Grid => "grid_vec3",
         }
     }
 
@@ -183,49 +176,55 @@ impl VarType {
             VarType::Float => Var::Float(DEFAULT_FLOAT_VALUE),
             VarType::Bool => Var::Bool(DEFAULT_BOOL_VALUE),
             VarType::Byte => Var::Byte(DEFAULT_BYTE_VALUE),
-            VarType::StringList => Var::StringList(Vec::new()),
-            VarType::IntList => Var::IntList(Vec::new()),
-            VarType::FloatList => Var::FloatList(Vec::new()),
-            VarType::BoolList => Var::BoolList(Vec::new()),
-            VarType::ByteList => Var::ByteList(Vec::new()),
-            #[cfg(feature = "grids")]
-            VarType::StringGrid => Var::StringGrid(Vec::new()),
-            #[cfg(feature = "grids")]
-            VarType::IntGrid => Var::IntGrid(Vec::new()),
-            #[cfg(feature = "grids")]
-            VarType::FloatGrid => Var::FloatGrid(Vec::new()),
-            #[cfg(feature = "grids")]
-            VarType::BoolGrid => Var::BoolGrid(Vec::new()),
-            #[cfg(feature = "grids")]
-            VarType::ByteGrid => Var::ByteGrid(Vec::new()),
+            VarType::Vec2 => Var::Vec2(DEFAULT_FLOAT_VALUE, DEFAULT_FLOAT_VALUE),
+            VarType::Vec3 => Var::Vec3(
+                DEFAULT_FLOAT_VALUE,
+                DEFAULT_FLOAT_VALUE,
+                DEFAULT_FLOAT_VALUE,
+            ),
+            VarType::StringList
+            | VarType::IntList
+            | VarType::FloatList
+            | VarType::BoolList
+            | VarType::ByteList
+            | VarType::Vec2List
+            | VarType::Vec3List
+            | VarType::VarList => Var::List(Vec::new()),
+            VarType::StringGrid
+            | VarType::IntGrid
+            | VarType::FloatGrid
+            | VarType::BoolGrid
+            | VarType::ByteGrid
+            | VarType::Vec2Grid
+            | VarType::Vec3Grid
+            | VarType::VarGrid => Var::List(Vec::new()),
+            VarType::Map => Var::Map(BTreeMap::new()),
+            _ => unimplemented!(),
         }
     }
 }
 
 /// Abstraction over all available variables.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-// #[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum Var {
     String(String),
-    Int(crate::Int),
-    Float(crate::Float),
+    Int(Int),
+    Float(Float),
     Bool(bool),
     Byte(u8),
-    StringList(Vec<String>),
-    IntList(Vec<crate::Int>),
-    FloatList(Vec<crate::Float>),
-    BoolList(Vec<bool>),
-    ByteList(Vec<u8>),
-    #[cfg(feature = "grids")]
-    StringGrid(Vec<Vec<String>>),
-    #[cfg(feature = "grids")]
-    IntGrid(Vec<Vec<crate::Int>>),
-    #[cfg(feature = "grids")]
-    FloatGrid(Vec<Vec<crate::Float>>),
-    #[cfg(feature = "grids")]
-    BoolGrid(Vec<Vec<bool>>),
-    #[cfg(feature = "grids")]
-    ByteGrid(Vec<Vec<u8>>),
+    Vec2(Float, Float),
+    Vec3(Float, Float, Float),
+    List(Vec<Var>),
+    Grid(Vec<Vec<Var>>),
+    Map(BTreeMap<Var, Var>),
+}
+
+impl Eq for Var {}
+
+impl Ord for Var {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
 }
 
 impl Var {
@@ -235,9 +234,33 @@ impl Var {
             VarType::Int => Var::Int(DEFAULT_INT_VALUE),
             VarType::Float => Var::Float(DEFAULT_FLOAT_VALUE),
             VarType::Bool => Var::Bool(DEFAULT_BOOL_VALUE),
-            _ => unimplemented!(),
+            VarType::Byte => Var::Byte(DEFAULT_BYTE_VALUE),
+            VarType::Vec2 => Var::Vec2(DEFAULT_FLOAT_VALUE, DEFAULT_FLOAT_VALUE),
+            VarType::Vec3 => Var::Vec3(
+                DEFAULT_FLOAT_VALUE,
+                DEFAULT_FLOAT_VALUE,
+                DEFAULT_FLOAT_VALUE,
+            ),
+            VarType::StringList
+            | VarType::IntList
+            | VarType::FloatList
+            | VarType::BoolList
+            | VarType::ByteList
+            | VarType::Vec2List
+            | VarType::Vec3List
+            | VarType::VarList => Var::List(Vec::new()),
+            VarType::StringGrid
+            | VarType::IntGrid
+            | VarType::FloatGrid
+            | VarType::BoolGrid
+            | VarType::ByteGrid
+            | VarType::Vec2Grid
+            | VarType::Vec3Grid
+            | VarType::VarGrid => Var::Grid(Vec::new()),
+            VarType::Map => Var::Map(Default::default()),
         }
     }
+
     pub fn get_type(&self) -> VarType {
         match self {
             Var::String(_) => VarType::String,
@@ -245,26 +268,74 @@ impl Var {
             Var::Float(_) => VarType::Float,
             Var::Bool(_) => VarType::Bool,
             Var::Byte(_) => VarType::Byte,
-            Var::StringList(_) => VarType::StringList,
-            Var::IntList(_) => VarType::IntList,
-            Var::FloatList(_) => VarType::FloatList,
-            Var::BoolList(_) => VarType::BoolList,
-            Var::ByteList(_) => VarType::ByteList,
-            #[cfg(feature = "grids")]
-            Var::StringGrid(_) => VarType::StringGrid,
-            #[cfg(feature = "grids")]
-            Var::IntGrid(_) => VarType::IntGrid,
-            #[cfg(feature = "grids")]
-            Var::FloatGrid(_) => VarType::FloatGrid,
-            #[cfg(feature = "grids")]
-            Var::BoolGrid(_) => VarType::BoolGrid,
-            #[cfg(feature = "grids")]
-            Var::ByteGrid(_) => VarType::ByteGrid,
+            Var::Vec2(_, _) => VarType::Vec2,
+            Var::Vec3(_, _, _) => VarType::Vec3,
+            Var::List(list) => {
+                if let Some(first) = list.first() {
+                    match first.get_type() {
+                        VarType::String => VarType::StringList,
+                        VarType::Int => VarType::IntList,
+                        VarType::Float => VarType::FloatList,
+                        VarType::Bool => VarType::BoolList,
+                        VarType::Byte => VarType::ByteList,
+                        VarType::Vec2 => VarType::Vec2List,
+                        VarType::Vec3 => VarType::Vec3List,
+                        _ => VarType::VarList,
+                    }
+                } else {
+                    VarType::VarList
+                }
+            }
+            Var::Grid(grid) => {
+                if let Some(first) = grid.first() {
+                    if let Some(_first) = first.first() {
+                        match _first.get_type() {
+                            VarType::String => VarType::StringGrid,
+                            VarType::Int => VarType::IntGrid,
+                            VarType::Float => VarType::FloatGrid,
+                            VarType::Bool => VarType::BoolGrid,
+                            VarType::Byte => VarType::ByteGrid,
+                            VarType::Vec2 => VarType::Vec2Grid,
+                            VarType::Vec3 => VarType::Vec3Grid,
+                            _ => VarType::VarGrid,
+                        }
+                    } else {
+                        VarType::VarGrid
+                    }
+                } else {
+                    VarType::VarGrid
+                }
+            }
+            Var::Map(_) => VarType::Map,
+            _ => unimplemented!(),
         }
+    }
+
+    pub fn set_coerce(&mut self, other: &Var) -> Result<()> {
+        match self {
+            Var::String(v) => *v = other.to_string(),
+            Var::Int(v) => *v = other.to_int(),
+            Var::Float(v) => *v = other.to_float(),
+            Var::Bool(v) => *v = other.to_bool(),
+            // Var::Byte(v) => *v = other.to_byte()?,
+            _ => unimplemented!(),
+        }
+        Ok(())
+    }
+
+    pub fn coerce(&self, target_type: VarType) -> Result<Var> {
+        let out = match target_type {
+            VarType::String => Var::String(self.to_string()),
+            VarType::Int => Var::Int(self.to_int()),
+            VarType::Float => Var::Float(self.to_float()),
+            VarType::Bool => Var::Bool(self.to_bool()),
+            // Var::Byte(v) => *v = other.to_byte()?,
+            _ => unimplemented!(),
+        };
+        Ok(out)
     }
 }
 
-/// Type-strict `is_type` checkers.
 impl Var {
     pub fn is_string(&self) -> bool {
         match self {
@@ -293,39 +364,10 @@ impl Var {
             _ => false,
         }
     }
-
-    pub fn is_string_list(&self) -> bool {
-        match self {
-            Var::StringList(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_int_list(&self) -> bool {
-        match self {
-            Var::IntList(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_float_list(&self) -> bool {
-        match self {
-            Var::FloatList(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_bool_list(&self) -> bool {
-        match self {
-            Var::BoolList(_) => true,
-            _ => false,
-        }
-    }
 }
 
-/// Type-strict `as_type` getters.
 impl Var {
-    pub fn as_str(&self) -> Result<&String> {
+    pub fn as_string(&self) -> Result<&String> {
         match self {
             Var::String(v) => Ok(v),
             _ => Err(Error::InvalidVarType(format!(
@@ -335,7 +377,7 @@ impl Var {
         }
     }
 
-    pub fn as_str_mut(&mut self) -> Result<&mut String> {
+    pub fn as_string_mut(&mut self) -> Result<&mut String> {
         match self {
             Var::String(v) => Ok(v),
             _ => Err(Error::InvalidVarType(format!(
@@ -345,7 +387,7 @@ impl Var {
         }
     }
 
-    pub fn as_int(&self) -> Result<&crate::Int> {
+    pub fn as_int(&self) -> Result<&Int> {
         match self {
             Var::Int(v) => Ok(v),
             _ => Err(Error::InvalidVarType(format!(
@@ -355,7 +397,7 @@ impl Var {
         }
     }
 
-    pub fn as_int_mut(&mut self) -> Result<&mut crate::Int> {
+    pub fn as_int_mut(&mut self) -> Result<&mut Int> {
         match self {
             Var::Int(v) => Ok(v),
             _ => Err(Error::InvalidVarType(format!(
@@ -365,7 +407,7 @@ impl Var {
         }
     }
 
-    pub fn as_float(&self) -> Result<&crate::Float> {
+    pub fn as_float(&self) -> Result<&Float> {
         match self {
             Var::Float(v) => Ok(v),
             _ => Err(Error::InvalidVarType(format!(
@@ -375,7 +417,7 @@ impl Var {
         }
     }
 
-    pub fn as_float_mut(&mut self) -> Result<&mut crate::Float> {
+    pub fn as_float_mut(&mut self) -> Result<&mut Float> {
         match self {
             Var::Float(v) => Ok(v),
             _ => Err(Error::InvalidVarType(format!(
@@ -405,9 +447,37 @@ impl Var {
         }
     }
 
-    pub fn as_str_list(&self) -> Result<&Vec<String>> {
+    pub fn as_list(&self) -> Result<&Vec<Var>> {
         match self {
-            Var::StringList(v) => Ok(v),
+            Var::List(v) => Ok(v),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn as_list_mut(&mut self) -> Result<&mut Vec<Var>> {
+        match self {
+            Var::List(v) => Ok(v),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn as_grid(&self) -> Result<&Vec<Vec<Var>>> {
+        match self {
+            Var::Grid(v) => Ok(v),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn as_grid_mut(&mut self) -> Result<&mut Vec<Vec<Var>>> {
+        match self {
+            Var::Grid(v) => Ok(v),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn as_str_list(&self) -> Result<Vec<&String>> {
+        match self {
+            Var::List(v) => Ok(v.iter().map(|s| s.as_string().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected string list, got {}",
                 self.get_type().to_str()
@@ -415,9 +485,9 @@ impl Var {
         }
     }
 
-    pub fn as_str_list_mut(&mut self) -> Result<&mut Vec<String>> {
+    pub fn as_str_list_mut(&mut self) -> Result<Vec<&mut String>> {
         match self {
-            Var::StringList(v) => Ok(v),
+            Var::List(v) => Ok(v.iter_mut().map(|s| s.as_string_mut().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected string list, got {}",
                 self.get_type().to_str()
@@ -425,9 +495,9 @@ impl Var {
         }
     }
 
-    pub fn as_int_list(&self) -> Result<&Vec<crate::Int>> {
+    pub fn as_int_list(&self) -> Result<Vec<&Int>> {
         match self {
-            Var::IntList(v) => Ok(v),
+            Var::List(v) => Ok(v.iter().map(|_v| _v.as_int().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected int list, got {}",
                 self.get_type().to_str()
@@ -435,9 +505,9 @@ impl Var {
         }
     }
 
-    pub fn as_int_list_mut(&mut self) -> Result<&mut Vec<crate::Int>> {
+    pub fn as_int_list_mut(&mut self) -> Result<Vec<&mut Int>> {
         match self {
-            Var::IntList(v) => Ok(v),
+            Var::List(v) => Ok(v.iter_mut().map(|_v| _v.as_int_mut().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected int list, got {}",
                 self.get_type().to_str()
@@ -445,9 +515,9 @@ impl Var {
         }
     }
 
-    pub fn as_float_list(&self) -> Result<&Vec<crate::Float>> {
+    pub fn as_float_list(&self) -> Result<Vec<&Float>> {
         match self {
-            Var::FloatList(v) => Ok(v),
+            Var::List(v) => Ok(v.iter().map(|_v| _v.as_float().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected float list, got {}",
                 self.get_type().to_str()
@@ -455,9 +525,9 @@ impl Var {
         }
     }
 
-    pub fn as_float_list_mut(&mut self) -> Result<&mut Vec<crate::Float>> {
+    pub fn as_float_list_mut(&mut self) -> Result<Vec<&mut Float>> {
         match self {
-            Var::FloatList(v) => Ok(v),
+            Var::List(v) => Ok(v.iter_mut().map(|_v| _v.as_float_mut().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected float list, got {}",
                 self.get_type().to_str()
@@ -465,9 +535,9 @@ impl Var {
         }
     }
 
-    pub fn as_bool_list(&self) -> Result<&Vec<bool>> {
+    pub fn as_bool_list(&self) -> Result<Vec<&bool>> {
         match self {
-            Var::BoolList(v) => Ok(v),
+            Var::List(v) => Ok(v.iter().map(|_v| _v.as_bool().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected bool list, got {}",
                 self.get_type().to_str()
@@ -475,9 +545,9 @@ impl Var {
         }
     }
 
-    pub fn as_bool_list_mut(&mut self) -> Result<&mut Vec<bool>> {
+    pub fn as_bool_list_mut(&mut self) -> Result<Vec<&mut bool>> {
         match self {
-            Var::BoolList(v) => Ok(v),
+            Var::List(v) => Ok(v.iter_mut().map(|_v| _v.as_bool_mut().unwrap()).collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected bool list, got {}",
                 self.get_type().to_str()
@@ -486,31 +556,43 @@ impl Var {
     }
 }
 
-#[cfg(feature = "grids")]
 impl Var {
-    pub fn as_str_grid(&self) -> Result<&Vec<Vec<String>>> {
+    pub fn as_string_grid(&self) -> Result<Vec<Vec<&String>>> {
         match self {
-            Var::StringGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter()
+                .map(|_v| _v.iter().map(|__v| __v.as_string().unwrap()).collect())
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
-                "expected str grid, got {}",
+                "expected string grid, got {}",
                 self.get_type().to_str()
             ))),
         }
     }
 
-    pub fn as_str_grid_mut(&mut self) -> Result<&mut Vec<Vec<String>>> {
+    pub fn as_string_grid_mut(&mut self) -> Result<Vec<Vec<&mut String>>> {
         match self {
-            Var::StringGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter_mut()
+                .map(|_v| {
+                    _v.iter_mut()
+                        .map(|__v| __v.as_string_mut().unwrap())
+                        .collect()
+                })
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
-                "expected str grid, got {}",
+                "expected string grid, got {}",
                 self.get_type().to_str()
             ))),
         }
     }
 
-    pub fn as_int_grid(&self) -> Result<&Vec<Vec<crate::Int>>> {
+    pub fn as_int_grid(&self) -> Result<Vec<Vec<&Int>>> {
         match self {
-            Var::IntGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter()
+                .map(|_v| _v.iter().map(|__v| __v.as_int().unwrap()).collect())
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected int grid, got {}",
                 self.get_type().to_str()
@@ -518,9 +600,12 @@ impl Var {
         }
     }
 
-    pub fn as_int_grid_mut(&mut self) -> Result<&mut Vec<Vec<crate::Int>>> {
+    pub fn as_int_grid_mut(&mut self) -> Result<Vec<Vec<&mut Int>>> {
         match self {
-            Var::IntGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter_mut()
+                .map(|_v| _v.iter_mut().map(|__v| __v.as_int_mut().unwrap()).collect())
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected int grid, got {}",
                 self.get_type().to_str()
@@ -528,9 +613,12 @@ impl Var {
         }
     }
 
-    pub fn as_float_grid(&self) -> Result<&Vec<Vec<crate::Float>>> {
+    pub fn as_float_grid(&self) -> Result<Vec<Vec<&Float>>> {
         match self {
-            Var::FloatGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter()
+                .map(|_v| _v.iter().map(|__v| __v.as_float().unwrap()).collect())
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected float grid, got {}",
                 self.get_type().to_str()
@@ -538,9 +626,16 @@ impl Var {
         }
     }
 
-    pub fn as_float_grid_mut(&mut self) -> Result<&mut Vec<Vec<crate::Float>>> {
+    pub fn as_float_grid_mut(&mut self) -> Result<Vec<Vec<&mut Float>>> {
         match self {
-            Var::FloatGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter_mut()
+                .map(|_v| {
+                    _v.iter_mut()
+                        .map(|__v| __v.as_float_mut().unwrap())
+                        .collect()
+                })
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected float grid, got {}",
                 self.get_type().to_str()
@@ -548,9 +643,12 @@ impl Var {
         }
     }
 
-    pub fn as_bool_grid(&self) -> Result<&Vec<Vec<bool>>> {
+    pub fn as_bool_grid(&self) -> Result<Vec<Vec<&bool>>> {
         match self {
-            Var::BoolGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter()
+                .map(|_v| _v.iter().map(|__v| __v.as_bool().unwrap()).collect())
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected bool grid, got {}",
                 self.get_type().to_str()
@@ -558,9 +656,16 @@ impl Var {
         }
     }
 
-    pub fn as_bool_grid_mut(&mut self) -> Result<&mut Vec<Vec<bool>>> {
+    pub fn as_bool_grid_mut(&mut self) -> Result<Vec<Vec<&mut bool>>> {
         match self {
-            Var::BoolGrid(v) => Ok(v),
+            Var::Grid(v) => Ok(v
+                .iter_mut()
+                .map(|_v| {
+                    _v.iter_mut()
+                        .map(|__v| __v.as_bool_mut().unwrap())
+                        .collect()
+                })
+                .collect()),
             _ => Err(Error::InvalidVarType(format!(
                 "expected bool grid, got {}",
                 self.get_type().to_str()
@@ -568,62 +673,86 @@ impl Var {
         }
     }
 
-    pub fn is_str_grid(&self) -> bool {
-        match self {
-            Var::StringGrid(_) => true,
-            _ => false,
-        }
+    pub fn is_string_grid(&self) -> bool {
+        self.get_type() == VarType::StringGrid
     }
 
     pub fn is_int_grid(&self) -> bool {
-        match self {
-            Var::IntGrid(_) => true,
-            _ => false,
-        }
+        self.get_type() == VarType::IntGrid
     }
 
     pub fn is_float_grid(&self) -> bool {
-        match self {
-            Var::FloatGrid(_) => true,
-            _ => false,
-        }
+        self.get_type() == VarType::FloatGrid
     }
 
     pub fn is_bool_grid(&self) -> bool {
-        match self {
-            Var::BoolGrid(_) => true,
-            _ => false,
-        }
+        self.get_type() == VarType::BoolGrid
     }
 }
 
 impl Var {
-    pub fn from_str(string: &str, target_type: Option<VarType>) -> Result<Var> {
-        match target_type {
+    pub fn from_str(s: &str, target_type: Option<VarType>) -> Result<Var> {
+        let var = match target_type {
             Some(tt) => match tt {
-                VarType::String => Ok(Var::String(string.to_string())),
-                VarType::Int => Ok(Var::Int(string.parse::<crate::Int>()?)),
-                VarType::Float => Ok(Var::Float(string.parse::<crate::Float>()?)),
-                VarType::Bool => Ok(Var::Bool(string.parse::<bool>()?)),
-                _ => unimplemented!(),
+                VarType::String => Var::String(s.to_string()),
+                VarType::Int => Var::Int(s.parse::<Int>()?),
+                VarType::Float => Var::Float(s.parse::<Float>()?),
+                VarType::Bool => Var::Bool(s.parse::<bool>()?),
+                VarType::Byte => Var::Byte(s.parse::<u8>()?),
+                VarType::Vec2 => {
+                    let split = s.split(VALUE_SEPARATOR).collect::<Vec<&str>>();
+                    if split.len() != 2 {
+                        return Err(Error::FailedCreatingVar(s.to_string()));
+                    }
+                    Var::Vec2(split[0].parse::<Float>()?, split[1].parse::<Float>()?)
+                }
+                VarType::Vec3 => {
+                    let split = s.split(VALUE_SEPARATOR).collect::<Vec<&str>>();
+                    if split.len() != 3 {
+                        return Err(Error::FailedCreatingVar(s.to_string()));
+                    }
+                    Var::Vec3(
+                        split[0].parse::<Float>()?,
+                        split[1].parse::<Float>()?,
+                        split[2].parse::<Float>()?,
+                    )
+                }
+                VarType::StringList
+                | VarType::IntList
+                | VarType::FloatList
+                | VarType::BoolList
+                | VarType::ByteList
+                | VarType::Vec2List
+                | VarType::Vec3List
+                | VarType::VarList => list_from_str(s, tt)?,
+                VarType::StringGrid
+                | VarType::IntGrid
+                | VarType::FloatGrid
+                | VarType::BoolGrid
+                | VarType::ByteGrid
+                | VarType::Vec2Grid
+                | VarType::Vec3Grid
+                | VarType::VarGrid => unimplemented!(),
+                VarType::Map => unimplemented!(),
             },
             None => {
-                if string.starts_with('"') {
-                    if string.ends_with('"') {
-                        return Ok(Var::String(string.to_string()));
+                if s.starts_with('"') {
+                    if s.ends_with('"') {
+                        return Ok(Var::String(s.to_string()));
                     } else {
                         return Err(Error::Other("".to_string()));
                     }
-                } else if string == "true" || string == "false" {
-                    return Ok(Var::Bool(string.parse::<bool>().unwrap()));
+                } else if s == "true" || s == "false" {
+                    return Ok(Var::Bool(s.parse::<bool>().unwrap()));
                 } else {
-                    match string.parse::<crate::Int>() {
+                    match s.parse::<Int>() {
                         Ok(i) => return Ok(Var::Int(i)),
                         Err(e) => return Err(Error::Other(e.to_string())),
                     }
                 }
             }
-        }
+        };
+        Ok(var)
     }
 
     pub fn to_string(&self) -> String {
@@ -633,29 +762,19 @@ impl Var {
             Var::Float(v) => format!("{}", v),
             Var::Bool(v) => format!("{}", v),
             Var::Byte(v) => format!("{}", v),
-            Var::StringList(v) => format!("{:?}", v),
-            Var::IntList(v) => format!("{:?}", v),
-            Var::FloatList(v) => format!("{:?}", v),
-            Var::BoolList(v) => format!("{:?}", v),
-            Var::ByteList(v) => format!("{:?}", v),
-            #[cfg(feature = "grids")]
-            Var::StringGrid(v) => format!("{:?}", v),
-            #[cfg(feature = "grids")]
-            Var::IntGrid(v) => format!("{:?}", v),
-            #[cfg(feature = "grids")]
-            Var::FloatGrid(v) => format!("{:?}", v),
-            #[cfg(feature = "grids")]
-            Var::BoolGrid(v) => format!("{:?}", v),
-            #[cfg(feature = "grids")]
-            Var::ByteGrid(v) => format!("{:?}", v),
+            Var::Vec2(v1, v2) => format!("x: {}, y: {}", v1, v2),
+            Var::Vec3(v1, v2, v3) => format!("x: {}, y: {}, z: {}", v1, v2, v3),
+            Var::List(v) => format!("{:?}", v),
+            Var::Grid(v) => format!("{:?}", v),
+            Var::Map(v) => format!("{:?}", v),
         }
     }
 
-    pub fn to_int(&self) -> crate::Int {
+    pub fn to_int(&self) -> Int {
         match self {
-            Var::String(v) => v.len() as crate::Int,
+            Var::String(v) => v.len() as Int,
             Var::Int(v) => *v,
-            Var::Float(v) => *v as crate::Int,
+            Var::Float(v) => *v as Int,
             Var::Bool(v) => {
                 if *v {
                     1
@@ -663,29 +782,19 @@ impl Var {
                     0
                 }
             }
-            Var::Byte(v) => *v as crate::Int,
-            Var::StringList(v) => v.len() as crate::Int,
-            Var::IntList(v) => v.len() as crate::Int,
-            Var::FloatList(v) => v.len() as crate::Int,
-            Var::BoolList(v) => v.len() as crate::Int,
-            Var::ByteList(v) => v.len() as crate::Int,
-            #[cfg(feature = "grids")]
-            Var::StringGrid(v) => v.len() as crate::Int,
-            #[cfg(feature = "grids")]
-            Var::IntGrid(v) => v.len() as crate::Int,
-            #[cfg(feature = "grids")]
-            Var::FloatGrid(v) => v.len() as crate::Int,
-            #[cfg(feature = "grids")]
-            Var::BoolGrid(v) => v.len() as crate::Int,
-            #[cfg(feature = "grids")]
-            Var::ByteGrid(v) => v.len() as crate::Int,
+            Var::Byte(v) => *v as Int,
+            Var::Vec2(v1, v2) => *v1 as Int + *v2 as Int,
+            Var::Vec3(v1, v2, v3) => *v1 as Int + *v2 as Int + *v3 as Int,
+            Var::List(v) => v.len() as Int,
+            Var::Grid(v) => v.len() as Int,
+            Var::Map(v) => v.len() as Int,
         }
     }
 
-    pub fn to_float(&self) -> crate::Float {
+    pub fn to_float(&self) -> Float {
         match self {
-            Var::String(v) => v.len() as crate::Float,
-            Var::Int(v) => *v as crate::Float,
+            Var::String(v) => v.len() as Float,
+            Var::Int(v) => *v as Float,
             Var::Float(v) => *v,
             Var::Bool(v) => {
                 if *v {
@@ -694,22 +803,12 @@ impl Var {
                     0.0
                 }
             }
-            Var::Byte(v) => *v as crate::Float,
-            Var::StringList(v) => v.len() as crate::Float,
-            Var::IntList(v) => v.len() as crate::Float,
-            Var::FloatList(v) => v.len() as crate::Float,
-            Var::BoolList(v) => v.len() as crate::Float,
-            Var::ByteList(v) => v.len() as crate::Float,
-            #[cfg(feature = "grids")]
-            Var::StringGrid(v) => v.len() as crate::Float,
-            #[cfg(feature = "grids")]
-            Var::IntGrid(v) => v.len() as crate::Float,
-            #[cfg(feature = "grids")]
-            Var::FloatGrid(v) => v.len() as crate::Float,
-            #[cfg(feature = "grids")]
-            Var::BoolGrid(v) => v.len() as crate::Float,
-            #[cfg(feature = "grids")]
-            Var::ByteGrid(v) => v.len() as crate::Float,
+            Var::Byte(v) => *v as Float,
+            Var::Vec2(v1, v2) => v1 + v2,
+            Var::Vec3(v1, v2, v3) => v1 + v2 + v3,
+            Var::List(v) => v.len() as Float,
+            Var::Grid(v) => v.len() as Float,
+            Var::Map(v) => v.len() as Float,
         }
     }
 
@@ -720,21 +819,31 @@ impl Var {
             Var::Float(v) => *v > 0.,
             Var::Bool(v) => return *v,
             Var::Byte(v) => return *v > 0,
-            Var::StringList(v) => v.len() > 0,
-            Var::IntList(v) => v.len() > 0,
-            Var::FloatList(v) => v.len() > 0,
-            Var::BoolList(v) => v.len() > 0,
-            Var::ByteList(v) => v.len() > 0,
-            #[cfg(feature = "grids")]
-            Var::StringGrid(v) => v.len() > 0,
-            #[cfg(feature = "grids")]
-            Var::IntGrid(v) => v.len() > 0,
-            #[cfg(feature = "grids")]
-            Var::FloatGrid(v) => v.len() > 0,
-            #[cfg(feature = "grids")]
-            Var::BoolGrid(v) => v.len() > 0,
-            #[cfg(feature = "grids")]
-            Var::ByteGrid(v) => v.len() > 0,
+            Var::Vec2(v1, v2) => *v1 > 0. && *v2 > 0.,
+            Var::Vec3(v1, v2, v3) => *v1 > 0. && *v2 > 0. && *v3 > 0.,
+            Var::List(v) => v.len() > 0,
+            Var::Grid(v) => v.len() > 0,
+            Var::Map(v) => v.len() > 0,
         }
     }
+}
+
+// TODO support nested lists
+fn list_from_str(s: &str, var_type: VarType) -> Result<Var> {
+    let split = s.split(VALUE_SEPARATOR).collect::<Vec<&str>>();
+    let mut vec = Vec::new();
+    for v in split {
+        let var = match var_type {
+            VarType::StringList => Var::String(v.to_string()),
+            VarType::IntList => Var::Int(v.parse()?),
+            VarType::FloatList => Var::Float(v.parse()?),
+            VarType::BoolList => Var::Bool(v.parse()?),
+            VarType::ByteList => Var::Byte(v.parse()?),
+            // VarType::Vec2List => Var::Vec2(v.parse()?),
+            // VarType::Vec3List => Var::Vec3(v.parse()?),
+            _ => unimplemented!(),
+        };
+        vec.push(var);
+    }
+    Ok(Var::List(vec))
 }

@@ -49,6 +49,7 @@ impl State {
         start_blocks.extend(&super::ifelse::ELSE_COMMAND_NAMES);
         start_blocks.extend(&super::forin::COMMAND_NAMES);
         start_blocks.extend(&super::procedure::COMMAND_NAMES);
+        start_blocks.extend(&super::component::COMMAND_NAMES);
         // other block ending names
         let mut end_blocks = Vec::new();
         end_blocks.extend(&super::end::COMMAND_NAMES);

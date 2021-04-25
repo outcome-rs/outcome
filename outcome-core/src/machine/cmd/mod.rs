@@ -67,7 +67,7 @@ use crate::distr::DistributionPolicy;
 use crate::distr::{CentralCommunication, SimCentral};
 use crate::machine::cmd::CommandResult::JumpToLine;
 use crate::machine::error::{Error, ErrorKind, Result};
-use crate::machine::{CommandPrototype, CommandResultVec, LocationInfo};
+use crate::machine::{CommandPrototype, CommandResultVec, ExecutionContext, LocationInfo};
 
 // pub type CommandResult = std::result::Result<CommandOutcome, Error>;
 
@@ -187,6 +187,7 @@ impl Command {
         match cmd_name.as_str() {
             "print" => Ok(Command::PrintFmt(print::PrintFmt::new(args)?)),
             "set" => Ok(set::Set::new(args, location)?),
+            // "set" => Ok(get::Get::new(args, location)?),
             "spawn" => Ok(Command::Spawn(Spawn::new(args, location)?)),
             "invoke" => Ok(Command::Invoke(Invoke::new(args)?)),
             "sim" => Ok(sim::SimControl::new(args)?),
@@ -216,6 +217,7 @@ impl Command {
             //     args, location, &commands,
             // )?),
             "state" => Ok(flow::state::State::new(args, location, &commands)?),
+            "goto" => Ok(Command::Goto(Goto::new(args)?)),
 
             // flow control
             "jump" => Ok(Command::Jump(Jump::new(args)?)),
@@ -247,8 +249,8 @@ impl Command {
             )),
         }
     }
-    /// Execute `loc` phase command (within the context of
-    /// single entity).
+
+    /// Execute `loc` phase command (within the context of single entity).
     pub fn execute(
         &self,
         ent_storage: &mut Storage,
@@ -256,8 +258,8 @@ impl Command {
         comp_state: &mut StringId,
         call_stack: &mut super::CallStackVec,
         registry: &mut super::Registry,
-        comp_uid: &CompName,
-        ent_uid: &EntityId,
+        comp_name: &CompName,
+        ent_id: &EntityId,
         sim_model: &SimModel,
         location: &LocationInfo,
     ) -> CommandResultVec {
@@ -265,21 +267,21 @@ impl Command {
         let mut out_res = CommandResultVec::new();
         match self {
             Command::Sim(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp_state, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, comp_state, comp_name, location))
             }
             Command::Print(cmd) => out_res.push(cmd.execute_loc(ent_storage)),
             Command::PrintFmt(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp_state, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, comp_state, comp_name, location))
             }
             Command::Set(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, ent_uid, comp_state, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, ent_id, comp_state, comp_name, location))
             }
             Command::SetIntIntAddr(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp_uid, location))
+                out_res.push(cmd.execute_loc(ent_storage, comp_name, location))
             }
 
             Command::Eval(cmd) => {
-                out_res.push(cmd.execute_loc(ent_storage, comp_uid, registry, location))
+                out_res.push(cmd.execute_loc(ent_storage, comp_name, registry, location))
             }
             // Command::EvalReg(cmd) => out_res.push(cmd.execute_loc(registry)),
 
@@ -292,7 +294,7 @@ impl Command {
             ////Command::LibCall(cmd) => out_res.push(cmd.execute_loc(libs, ent_storage)),
             //Command::Attach(cmd) => out_res.push(cmd.execute_loc(ent, sim_model)),
             //Command::Detach(cmd) => out_res.push(cmd.execute_loc(ent, sim_model)),
-            //Command::Goto(cmd) => out_res.push(cmd.execute_loc()),
+            Command::Goto(cmd) => out_res.push(cmd.execute_loc(comp_state)),
             //Command::Jump(cmd) => out_res.push(cmd.execute_loc()),
 
             //Command::Get(cmd) => out_res.push(cmd.execute_loc()),
@@ -301,37 +303,44 @@ impl Command {
             Command::RegisterComponent(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
             Command::RegisterVar(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
             Command::RegisterTrigger(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
+            Command::RegisterEvent(cmd) => out_res.extend(cmd.execute_loc()),
 
             Command::Invoke(cmd) => out_res.push(cmd.execute_loc()),
             Command::Spawn(cmd) => out_res.push(cmd.execute_loc()),
             Command::Call(cmd) => {
-                out_res.push(cmd.execute_loc(call_stack, line, sim_model, comp_uid, location))
+                out_res.push(cmd.execute_loc(call_stack, line, sim_model, comp_name, location))
             }
 
             Command::Jump(cmd) => out_res.push(cmd.execute_loc()),
-            Command::If(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
-            Command::Else(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
-            Command::ForIn(cmd) => {
-                out_res.push(cmd.execute_loc(call_stack, registry, comp_uid, ent_storage, location))
+            Command::If(cmd) => {
+                out_res.push(cmd.execute_loc(call_stack, ent_storage, comp_name, line))
             }
+            Command::Else(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
+            Command::ForIn(cmd) => out_res.push(cmd.execute_loc(
+                call_stack,
+                registry,
+                comp_name,
+                ent_storage,
+                location,
+            )),
             Command::Loop(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
             Command::Break(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, location)),
 
             Command::End(cmd) => {
-                out_res.push(cmd.execute_loc(call_stack, comp_uid, ent_storage, location))
+                out_res.push(cmd.execute_loc(call_stack, comp_name, ent_storage, location))
             }
             Command::Procedure(cmd) => out_res.push(cmd.execute_loc(call_stack, ent_storage, line)),
 
             Command::State(cmd) => {
-                out_res.extend(cmd.execute_loc(call_stack, ent_uid, comp_uid, line))
+                out_res.extend(cmd.execute_loc(call_stack, ent_id, comp_name, line))
             }
             Command::Component(cmd) => {
-                out_res.extend(cmd.execute_loc(call_stack, ent_uid, comp_uid, line))
+                out_res.extend(cmd.execute_loc(call_stack, ent_id, comp_name, line))
             }
 
             Command::Extend(cmd) => out_res.push(cmd.execute_loc()),
             // Command::Register(cmd) => out_res.extend(cmd.execute_loc(call_stack)),
-            Command::Range(cmd) => out_res.push(cmd.execute_loc(ent_storage, comp_uid, location)),
+            Command::Range(cmd) => out_res.push(cmd.execute_loc(ent_storage, comp_name, location)),
 
             _ => out_res.push(CommandResult::Continue),
         };
@@ -381,26 +390,21 @@ impl CentralRemoteCommand {
         comp_uid: &CompName,
     ) -> Result<()> {
         match self {
-            CentralRemoteCommand::Sim(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::Sim(cmd) => cmd.execute_ext(sim),
 
-            CentralRemoteCommand::RegisterComponent(cmd) => {
-                return cmd.execute_ext(sim, ent_uid, comp_uid)
-            }
-            CentralRemoteCommand::RegisterEntityPrefab(cmd) => return cmd.execute_ext(sim),
-            CentralRemoteCommand::RegisterTrigger(cmd) => {
-                // unimplemented!()
-                return cmd.execute_ext(sim, ent_uid, comp_uid);
-            }
-            CentralRemoteCommand::RegisterVar(cmd) => {
-                return cmd.execute_ext(sim, ent_uid, comp_uid)
-            }
+            CentralRemoteCommand::RegisterComponent(cmd) => cmd.execute_ext(sim, ent_uid, comp_uid),
+            CentralRemoteCommand::RegisterEntityPrefab(cmd) => cmd.execute_ext(sim),
 
-            CentralRemoteCommand::Extend(cmd) => return cmd.execute_ext(sim, ent_uid),
-            CentralRemoteCommand::Invoke(cmd) => return cmd.execute_ext(sim),
-            CentralRemoteCommand::Spawn(cmd) => return cmd.execute_ext(sim, ent_uid),
+            CentralRemoteCommand::RegisterEvent(cmd) => cmd.execute_ext(sim),
+            CentralRemoteCommand::RegisterTrigger(cmd) => cmd.execute_ext(sim, ent_uid, comp_uid),
+            CentralRemoteCommand::RegisterVar(cmd) => cmd.execute_ext(sim, ent_uid, comp_uid),
+
+            CentralRemoteCommand::Extend(cmd) => cmd.execute_ext(sim, ent_uid),
+            CentralRemoteCommand::Invoke(cmd) => cmd.execute_ext(sim),
+            CentralRemoteCommand::Spawn(cmd) => cmd.execute_ext(sim, ent_uid),
             // CentralRemoteCommand::Prefab(cmd) => return cmd.execute_ext(sim),
-            CentralRemoteCommand::State(cmd) => return cmd.execute_ext(sim),
-            CentralRemoteCommand::Component(cmd) => return cmd.execute_ext(sim),
+            CentralRemoteCommand::State(cmd) => cmd.execute_ext(sim),
+            CentralRemoteCommand::Component(cmd) => cmd.execute_ext(sim),
 
             _ => return Ok(()),
         }
@@ -412,13 +416,15 @@ impl CentralRemoteCommand {
         comp_name: &CompName,
     ) -> Result<()> {
         match self {
-            CentralRemoteCommand::Spawn(cmd) => cmd.execute_ext_distr(central).unwrap(),
+            CentralRemoteCommand::Spawn(cmd) => cmd.execute_ext_distr(central)?,
             CentralRemoteCommand::RegisterEntityPrefab(cmd) => cmd.execute_ext_distr(central)?,
             CentralRemoteCommand::RegisterComponent(cmd) => cmd.execute_ext_distr(central)?,
-            CentralRemoteCommand::RegisterVar(cmd) => cmd.execute_ext_distr(central)?,
+            CentralRemoteCommand::RegisterVar(cmd) => cmd.execute_ext_distr(central, comp_name)?,
             CentralRemoteCommand::RegisterTrigger(cmd) => cmd.execute_ext_distr(central)?,
+            CentralRemoteCommand::RegisterEvent(cmd) => cmd.execute_ext_distr(central)?,
             CentralRemoteCommand::State(cmd) => cmd.execute_ext_distr(central)?,
             CentralRemoteCommand::Component(cmd) => cmd.execute_ext_distr(central)?,
+            CentralRemoteCommand::Invoke(cmd) => cmd.execute_ext_distr(central)?,
             _ => error!("unimplemented: {:?}", self),
         }
         Ok(())
@@ -443,13 +449,14 @@ impl ExtCommand {
     pub fn execute(
         &self,
         mut sim: &mut Sim,
-        ent_uid: &EntityId,
-        comp_uid: &CompName,
+        ent_id: &EntityId,
+        comp_name: &CompName,
+        location: &LocationInfo,
     ) -> Result<()> {
         match self {
-            ExtCommand::Get(cmd) => return cmd.execute_ext(sim, ent_uid),
-            ExtCommand::Set(cmd) => return cmd.execute_ext(sim, ent_uid),
-            ExtCommand::SetVar(cmd) => return cmd.execute_ext(sim, ent_uid),
+            // ExtCommand::Get(cmd) => return cmd.execute_ext(sim, ent_uid, comp_uid, location),
+            ExtCommand::Set(cmd) => return cmd.execute_ext(sim, ent_id, comp_name, location),
+            // ExtCommand::SetVar(cmd) => return cmd.execute_ext(sim, exec_ctx),
             _ => return Ok(()),
         }
     }
@@ -559,14 +566,15 @@ pub struct Goto {
     pub target_state: StringId,
 }
 impl Goto {
-    fn from_str(args_str: &str) -> Result<Self> {
+    fn new(args: Vec<String>) -> Result<Self> {
         Ok(Goto {
-            target_state: arraystring::new_truncate(args_str),
+            target_state: arraystring::new_truncate(&args[0]),
         })
     }
-    pub fn execute_loc(&self) -> CommandResult {
-        unimplemented!();
-        //CommandResult::GoToState(self.target_state.clone())
+    pub fn execute_loc(&self, comp_state: &mut StringId) -> CommandResult {
+        *comp_state = self.target_state;
+        CommandResult::Continue
+        // CommandResult::GoToState(self.target_state.clone())
     }
 }
 
@@ -636,6 +644,14 @@ impl Invoke {
         }
         Ok(())
     }
+    pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
+        for event in &self.events {
+            if !central.event_queue.contains(event) {
+                central.event_queue.push(event.to_owned());
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Spawn
@@ -682,50 +698,23 @@ impl Spawn {
             ));
         }
     }
-    // pub fn from_str(args_str: &str) -> MachineResult<Self> {
-    //     let split: Vec<&str> = args_str.split(" ").collect();
-    //     if split.len() < 3 {
-    //         return Err(MachineError::Initialization(format!(
-    //             "spawn needs at least 3 arguments"
-    //         )));
-    //     }
-    //     return Ok(Spawn {
-    //         prefab: match StringIndex::from_str(split[0]) {
-    //             Ok(a) => a,
-    //             Err(e) => return Err(MachineError::Initialization(format!("{}", split[0]))),
-    //         },
-    //         spawn_id: StringIndex::from_str(split[1]).unwrap(),
-    //         /* model_type: SmallString::from_str("reg").unwrap(),
-    //          * model_id: SmallString::from_str("germany").unwrap(),
-    //          * spawn_id: SmallString::from_str("ger_new").unwrap(), */
-    //     });
-    // }
+
     pub fn execute_loc(&self) -> CommandResult {
         CommandResult::ExecCentralExt(CentralRemoteCommand::Spawn(*self))
     }
+
     pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
-        // let model = &sim.model;
-        // let my_model_n = model
-        //.entities
-        //.iter()
-        //.enumerate()
-        //.find(|(n, e)| &e.type_ == self.model_type.as_str() &&
-        //.find(|(n, &e.id == self.model_id.as_str())
-        //.map(|(n, _)| n)
-        //.unwrap();
-        sim.spawn_entity(self.prefab.as_ref(), self.spawn_id);
-        #[cfg(feature = "machine_lua")]
-        sim.setup_lua_state_ent();
+        sim.spawn_entity(self.prefab.as_ref(), self.spawn_id)?;
+        // #[cfg(feature = "machine_lua")]
+        // sim.setup_lua_state_ent();
         Ok(())
     }
     pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
-        central
-            .spawn_entity(
-                self.prefab.clone(),
-                self.spawn_id.clone(),
-                DistributionPolicy::Random,
-            )
-            .unwrap();
+        central.spawn_entity(
+            self.prefab.clone(),
+            self.spawn_id.clone(),
+            DistributionPolicy::Random,
+        )?;
         Ok(())
     }
 }

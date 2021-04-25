@@ -57,7 +57,7 @@ impl Entity {
         #[cfg(feature = "machine")]
         {
             // ent.comp_queue.insert(
-            //     arraystring::new_unchecked(crate::DEFAULT_TRIGGER_EVENT),
+            //     arraystring::new_unchecked(crate::DEFAULT_STEP_EVENT),
             //     Vec::new(),
             // );
             ent.comp_queue.insert(
@@ -76,17 +76,6 @@ impl Entity {
         }
 
         // TODO setup dyn libs
-        // let mut libs = HashMap::new();
-        // for comp_model in comp_models {
-        //     for lib_path in &comp_model.lib_files {
-        //         let lib = Library::new(lib_path.clone()).unwrap();
-        //         libs.insert(
-        //             format!("{}", lib_path.file_stem().unwrap().to_str().unwrap()),
-        //             lib,
-        //         );
-        //     }
-        // }
-        // ent.libs = libs;
 
         Ok(ent)
     }

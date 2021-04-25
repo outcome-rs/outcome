@@ -1,6 +1,7 @@
 use crate::Error;
 use serde_repr::*;
 use std::convert::TryInto;
+use std::str::FromStr;
 
 /// Alternative query structure compatible with environments that don't
 /// support native query's variant enum layout.
@@ -97,9 +98,9 @@ impl TryInto<outcome::Query> for Query {
             TriggerType::Event => outcome::query::Trigger::Event(
                 outcome::arraystring::new_truncate(&self.trigger.args[0]),
             ),
-            TriggerType::Mutation => outcome::query::Trigger::Mutation(outcome::Address::from_str(
-                &self.trigger.args[0],
-            )?),
+            TriggerType::Mutation => {
+                outcome::query::Trigger::Mutation(self.trigger.args[0].parse()?)
+            }
         };
 
         query.description = match self.description {
