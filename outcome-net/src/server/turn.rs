@@ -9,6 +9,8 @@ use crate::{Error, Result};
 use outcome::distr::NodeCommunication;
 
 impl Server {
+    // fn advance_turn(&mut self, tick_num: u32) -> Result<()> {}
+
     pub fn handle_turn_advance_request(
         &mut self,
         msg: Message,
@@ -17,32 +19,36 @@ impl Server {
         let req: TurnAdvanceRequest =
             msg.unpack_payload(self.clients.get(client_id).unwrap().connection.encoding())?;
 
-        let mut client_furthest_tick = 0;
+        let mut client_furthest_step = 0;
 
         let mut no_blocking_clients = true;
-        let current_tick = match &self.sim {
+        let mut step_before_advance = match &self.sim {
             SimConnection::Local(s) => s.get_clock(),
-            SimConnection::ClusterCoord(c) => c.central.clock,
-            SimConnection::ClusterWorker(w) => w.sim_node.as_ref().unwrap().clock,
+            SimConnection::UnionOrganizer(c) => c.central.clock,
+            SimConnection::UnionWorker(w) => w.sim_node.as_ref().unwrap().clock,
         };
-        trace!("current_tick before: {}", current_tick);
-        let mut common_furthest_tick = current_tick + 99999;
-        for (id, _client) in &mut self.clients {
-            if _client.id == *client_id {
-                trace!(
-                    "({}) furthest_tick: {}, current_tick: {}",
-                    _client.id,
-                    _client.furthest_step,
-                    current_tick
-                );
-                if _client.furthest_step < current_tick {
-                    _client.furthest_step = current_tick;
-                }
-                if _client.furthest_step - current_tick < req.tick_count as usize {
-                    _client.furthest_step = _client.furthest_step + req.tick_count as usize;
-                }
-                client_furthest_tick = _client.furthest_step.clone();
+
+        trace!("step count before advance attempt: {}", step_before_advance);
+        let mut common_furthest_step = step_before_advance + 99999;
+
+        if let Some(_client) = self.clients.get_mut(&client_id) {
+            trace!(
+                "[client_id: {}] current_step: {}, furthest_step: {:?}",
+                _client.id,
+                step_before_advance,
+                _client.furthest_step,
+            );
+
+            if _client.furthest_step < step_before_advance {
+                _client.furthest_step = step_before_advance;
             }
+            if _client.furthest_step - step_before_advance < req.step_count as usize {
+                _client.furthest_step = _client.furthest_step + req.step_count as usize;
+            }
+            client_furthest_step = _client.furthest_step;
+        }
+
+        for (id, _client) in &mut self.clients {
             if !_client.is_blocking {
                 trace!("omit non-blocking client..");
                 continue;
@@ -53,45 +59,53 @@ impl Server {
                 "client_furthest_tick inside loop: {}",
                 _client.furthest_step
             );
-            if _client.furthest_step == current_tick {
-                common_furthest_tick = current_tick;
-                break;
-            }
-            if _client.furthest_step < common_furthest_tick {
-                common_furthest_tick = _client.furthest_step;
+            // if _client.furthest_step < current_step {
+            //     common_furthest_step = current_step;
+            //     break;
+            // }
+            if _client.furthest_step < common_furthest_step {
+                common_furthest_step = _client.furthest_step;
             }
         }
+
         if no_blocking_clients {
-            let t = self.clients.get(&client_id).unwrap().furthest_step;
-            common_furthest_tick = t;
+            if let Some(client) = self.clients.get(&client_id) {
+                common_furthest_step = client.furthest_step;
+            }
         } else {
             match &mut self.sim {
-                SimConnection::ClusterCoord(coord) => {
+                SimConnection::UnionOrganizer(coord) => {
                     coord.is_blocking_step = true;
                 }
                 _ => (),
             }
         }
 
-        trace!("common_furthest_tick: {}", common_furthest_tick);
-        if common_furthest_tick > current_tick {
+        let mut clock_after_advance = step_before_advance;
+        trace!(
+            "common_furthest_step: {}, step_before_advance: {}",
+            common_furthest_step,
+            step_before_advance
+        );
+        if common_furthest_step > step_before_advance {
             match &mut self.sim {
                 SimConnection::Local(sim_instance) => {
                     // for local sim instance simply step until common
                     // furthest step is achieved
-                    for _ in 0..common_furthest_tick - current_tick {
+                    for _ in 0..common_furthest_step - step_before_advance {
                         sim_instance.step();
+                        clock_after_advance += 1;
                         // let events = sim_instance.event_queue.clone();
                         trace!("processed single tick");
                         trace!(
-                            "common_furthest_tick: {}, current_tick: {}",
-                            common_furthest_tick,
-                            current_tick
+                            "common_furthest_step: {}, step_before_advance: {}",
+                            common_furthest_step,
+                            step_before_advance
                         );
 
                         // advanced turn, check if any scheduled transfers/queries need sending
                         for (_, client) in &mut self.clients {
-                            for (event, dts_list) in &client.scheduled_dts.clone() {
+                            for (event, dts_list) in &client.scheduled_transfers.clone() {
                                 trace!("handling scheduled data transfer: event: {}", event);
                                 if sim_instance.event_queue.contains(&event) {
                                     for dtr in dts_list {
@@ -132,11 +146,30 @@ impl Server {
                                     }
                                 }
                             }
+
+                            if &client.id == client_id {
+                                continue;
+                            }
+                            if let Some(scheduled_step) = client.scheduled_advance_response {
+                                trace!(
+                                    "[client: {}] scheduled_step: {}, current_step: {}",
+                                    client.id,
+                                    scheduled_step,
+                                    clock_after_advance
+                                );
+                                if scheduled_step == clock_after_advance {
+                                    let resp = TurnAdvanceResponse {
+                                        error: String::new(),
+                                    };
+                                    client.connection.send_payload(resp, None)?;
+                                    client.scheduled_advance_response = None;
+                                }
+                            }
                         }
                     }
-                    trace!("current_tick after: {}", sim_instance.get_clock());
+                    trace!("clock step after advance: {}", clock_after_advance);
                 }
-                SimConnection::ClusterCoord(coord) => {
+                SimConnection::UnionOrganizer(coord) => {
                     let mut event_queue = coord.central.event_queue.clone();
 
                     let step_event_name = outcome::arraystring::new_unchecked("step");
@@ -170,7 +203,7 @@ impl Server {
                     // }
                     //coord.main.step(&coord.entity_node_map, &mut addr_book);
                 }
-                SimConnection::ClusterWorker(worker) => {
+                SimConnection::UnionWorker(worker) => {
                     // worker can't initiate step processing on it's own, it
                     // has to signal to the coordinator
 
@@ -186,7 +219,7 @@ impl Server {
                     worker.network.sig_send_central(
                         1220,
                         outcome::distr::Signal::WorkerStepAdvanceRequest(
-                            (common_furthest_tick - current_tick) as u32,
+                            (common_furthest_step - step_before_advance) as u32,
                         ),
                     )?;
                     // once coordinator receives this request, it will store that
@@ -202,7 +235,7 @@ impl Server {
             };
         } else {
             match &mut self.sim {
-                SimConnection::ClusterCoord(coord) => {
+                SimConnection::UnionOrganizer(coord) => {
                     coord.is_blocking_step = true;
                 }
                 _ => (),
@@ -211,27 +244,58 @@ impl Server {
 
         let client = self.clients.get_mut(client_id).unwrap();
 
-        // responses
-        if common_furthest_tick == current_tick {
-            let resp = TurnAdvanceResponse {
-                error: "BlockedFully".to_string(),
-            };
+        // clock wasn't moved
+        // if common_furthest_step == current_step {
+        if common_furthest_step == step_before_advance {
             trace!("BlockedFully");
-            client.connection.send_payload(resp, None)?;
-        } else if common_furthest_tick < client_furthest_tick {
-            let resp = TurnAdvanceResponse {
-                error: "BlockedPartially".to_string(),
-            };
+            // client.scheduled_advance_response = Some(client.)
+            // immediate response requested
+            if !req.wait {
+                let resp = TurnAdvanceResponse {
+                    error: "BlockedFully".to_string(),
+                };
+                client.connection.send_payload(resp, None)?;
+            } else {
+                client.scheduled_advance_response = Some(client.furthest_step);
+            }
+        } else if common_furthest_step < client_furthest_step {
             trace!("BlockedPartially");
-            client.connection.send_payload(resp, None)?;
+            if !req.wait {
+                let resp = TurnAdvanceResponse {
+                    error: "BlockedPartially".to_string(),
+                };
+                client.connection.send_payload(resp, None)?;
+            } else {
+                client.scheduled_advance_response = Some(client.furthest_step);
+            }
             //        } else if common_furthest_tick == client_furthest_tick {
         } else {
+            trace!("Didn't block");
             let resp = TurnAdvanceResponse {
                 error: String::new(),
             };
-            trace!("Didn't block");
             client.connection.send_payload(resp, None)?;
         }
+
+        // // check the clients for scheduled step advance responses
+        // for (_, client) in &mut self.clients {
+        //     if &client.id == client_id {
+        //         continue;
+        //     }
+        //     if let Some(scheduled_step) = client.scheduled_advance_response {
+        //         warn!:
+        //             "[client: {}] scheduled_step: {}, current_step: {}",
+        //             client.id, scheduled_step, clock_after_advance
+        //         );
+        //         if scheduled_step == clock_after_advance {
+        //             let resp = TurnAdvanceResponse {
+        //                 error: String::new(),
+        //             };
+        //             client.connection.send_payload(resp, None)?;
+        //             client.scheduled_advance_response = None;
+        //         }
+        //     }
+        // }
 
         Ok(())
     }

@@ -48,7 +48,7 @@ pub fn main() -> Result<()> {
         if advance_turn {
             client
                 .connection
-                .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+                .send_payload(TurnAdvanceRequest { step_count: 1 }, None)?;
             advance_turn = false;
 
             // if !data.is_empty() {

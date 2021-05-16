@@ -5,7 +5,13 @@ version = "0.1.0"
 engine = "*"
 
 #[services.hello_service]
+##path = "hello_service/target/debug/hello_service"
 #path = "hello_service/target/release/hello_service"
 #instancing = "one_per_worker"
 ##instancing = "one_globally"
 #args = ["--managed"]
+
+[libraries.hello_lib]
+#path = "hello_lib/target/debug/libhello_lib"
+#project = "hello_lib"
+project = { path = "hello_lib", mode = "debug" }

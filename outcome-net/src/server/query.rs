@@ -2,11 +2,11 @@ use std::convert::TryInto;
 
 use outcome::distr::{CentralCommunication, Signal};
 
-use crate::coord::CoordTask;
 use crate::msg::{
     DataTransferResponse, Message, NativeQueryRequest, NativeQueryResponse, QueryRequest,
     TransferResponseData,
 };
+use crate::organizer::OrganizerTask;
 use crate::server::{ClientId, ServerTask};
 use crate::{Error, Result};
 use crate::{Server, SimConnection};
@@ -45,7 +45,7 @@ impl Server {
                     // println!("msg taskid: {}", msg.task_id);
                 }
             }
-            SimConnection::ClusterCoord(coord) => {
+            SimConnection::UnionOrganizer(coord) => {
                 // TODO real query
                 let query = outcome::Query {
                     trigger: outcome::query::Trigger::Event(
@@ -59,7 +59,7 @@ impl Server {
                     mappings: vec![outcome::query::Map::All],
                 };
 
-                let task_id = coord.register_task(CoordTask::WaitForQueryResponses {
+                let task_id = coord.register_task(OrganizerTask::WaitForQueryResponses {
                     remaining: coord.net.workers.len() as u32,
                     products: vec![],
                 })?;
@@ -70,7 +70,7 @@ impl Server {
                     .broadcast_sig(task_id, Signal::QueryRequest(query))?;
             }
 
-            SimConnection::ClusterWorker(worker) => {
+            SimConnection::UnionWorker(worker) => {
                 // // check if query wants local entities only
                 // if query.filters.contains(&outcome::query::Filter::Node(0)) {}
             }
@@ -98,12 +98,12 @@ impl Server {
                     None,
                 )?;
             }
-            SimConnection::ClusterCoord(ref mut coord) => {
+            SimConnection::UnionOrganizer(ref mut coord) => {
                 coord.net.broadcast_sig(0, Signal::DataRequestAll);
                 // coord.net.
                 // TODO
             }
-            SimConnection::ClusterWorker(worker) => {
+            SimConnection::UnionWorker(worker) => {
                 if let Some(node) = &worker.sim_node {
                     let product = qr.query.process(&node.entities, &node.entities_idx)?;
                     client.connection.send_payload(

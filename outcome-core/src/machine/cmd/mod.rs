@@ -18,7 +18,7 @@
 extern crate getopts;
 extern crate strsim;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env::args;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -49,6 +49,9 @@ pub mod get_set;
 
 #[cfg(feature = "machine_dynlib")]
 pub mod lib;
+#[cfg(feature = "machine_dynlib")]
+use crate::machine::cmd::lib::LibCall;
+
 #[cfg(feature = "machine_lua")]
 pub mod lua;
 
@@ -243,6 +246,10 @@ impl Command {
             "range" => Ok(Command::Range(range::Range::new(args)?)),
 
             "eval" => Ok(eval::Eval::new(args)?),
+
+            #[cfg(feature = "machine_dynlib")]
+            "lib_call" => Ok(LibCall::new(args)?),
+
             _ => Err(Error::new(
                 *location,
                 ErrorKind::UnknownCommand(cmd_name.to_string()),
@@ -262,6 +269,7 @@ impl Command {
         ent_id: &EntityId,
         sim_model: &SimModel,
         location: &LocationInfo,
+        #[cfg(feature = "machine_dynlib")] libs: &super::Libraries,
     ) -> CommandResultVec {
         let line = location.line.unwrap();
         let mut out_res = CommandResultVec::new();
@@ -291,7 +299,8 @@ impl Command {
 
             //// Command::LuaScript(cmd) => out_res.push(cmd.execute_loc(ent_storage, comp_uid)),
             //Command::LuaCall(cmd) => out_res.extend(cmd.execute_loc_lua(sim_model, ent)),
-            ////Command::LibCall(cmd) => out_res.push(cmd.execute_loc(libs, ent_storage)),
+            #[cfg(feature = "machine_dynlib")]
+            Command::LibCall(cmd) => out_res.push(cmd.execute_loc(libs, ent_id, ent_storage)),
             //Command::Attach(cmd) => out_res.push(cmd.execute_loc(ent, sim_model)),
             //Command::Detach(cmd) => out_res.push(cmd.execute_loc(ent, sim_model)),
             Command::Goto(cmd) => out_res.push(cmd.execute_loc(comp_state)),

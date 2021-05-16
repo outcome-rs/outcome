@@ -15,8 +15,14 @@ use crate::entity::StorageIndex;
 use crate::{
     CompName, EntityId, EntityName, LongString, MedString, ShortString, StringId, VarType,
 };
+use std::collections::BTreeMap;
 
 pub const START_STATE_NAME: &'static str = "start";
+
+#[cfg(feature = "machine_dynlib")]
+pub type Libraries = BTreeMap<String, Library>;
+#[cfg(feature = "machine_dynlib")]
+use libloading::Library;
 
 /// Holds instruction location information.
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]

@@ -29,6 +29,7 @@ outcome-core = { version = "0.1.0", path = "../outcome-core" }
 
 serde = "1.0.117"
 serde_repr = "0.1.6"
+serde_bytes = "*"
 thiserror = "1.0.21"
 id-pool = { version = "0.2.1", default-features = false, features = ["u32", "serde"] }
 log = "0.4.11"

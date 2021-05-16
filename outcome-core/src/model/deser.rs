@@ -35,7 +35,7 @@ pub struct ModuleManifest {
     #[serde(default)]
     pub reqs: Vec<String>,
     #[serde(default)]
-    pub libs: HashMap<String, toml::Value>,
+    pub libraries: HashMap<String, toml::Value>,
     #[serde(default)]
     pub services: HashMap<String, toml::Value>,
 }

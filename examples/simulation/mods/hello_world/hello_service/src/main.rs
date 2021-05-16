@@ -12,7 +12,7 @@ use outcome_net::msg::{
     PullRequestData, TransferResponseData, TurnAdvanceRequest, TurnAdvanceResponse,
     TypedSimDataPack, VarSimDataPack, VarSimDataPackOrdered,
 };
-use outcome_net::{Client, ClientConfig, CompressionPolicy, SocketEvent};
+use outcome_net::{Client, ClientConfig, CompressionPolicy, SocketEvent, SocketEventType};
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 
@@ -25,7 +25,7 @@ pub fn main() -> Result<()> {
         args.push(arg);
     }
 
-    println!("{}", hello_string);
+    println!("[hello_service] {}", hello_string);
 
     let mut client = Client::new_with_config(ClientConfig {
         name: "hello_service".to_string(),
@@ -35,21 +35,26 @@ pub fn main() -> Result<()> {
     })?;
 
     // TODO get server address from stdin
-    client.connect(args[0].clone(), None);
+    client.connect(&args[0], None);
 
-    let mut advanced_turn = true;
+    let mut advanced_turn = false;
     let mut received_data = true;
 
     // println!("connected");
 
-    client
-        .connection
-        .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+    client.connection.send_payload(
+        TurnAdvanceRequest {
+            step_count: 1,
+            wait: true,
+        },
+        None,
+    )?;
 
     let start = Instant::now();
 
     loop {
         // println!("loop");
+        // println!("advanced_turn: {}", advanced_turn);
         if advanced_turn {
             let mut data = VarSimDataPack {
                 vars: Default::default(),
@@ -58,10 +63,10 @@ pub fn main() -> Result<()> {
                 // "2:hello_greetable:str:hello".to_string(),
                 (
                     EntityName::from("2").unwrap(),
-                    CompName::from("hello_greetable").unwrap(),
+                    CompName::from("greeting").unwrap(),
                     VarName::from("hello").unwrap(),
                 ),
-                outcome_core::Var::Str(format!(
+                outcome_core::Var::String(format!(
                     "hello since {}",
                     Instant::now().duration_since(start).as_millis()
                 )),
@@ -72,30 +77,46 @@ pub fn main() -> Result<()> {
                 },
                 None,
             )?;
-            client
-                .connection
-                .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
+            client.connection.send_payload(
+                TurnAdvanceRequest {
+                    step_count: 1,
+                    wait: true,
+                },
+                None,
+            )?;
+            // println!("[hello_service] just sent turn advance request");
             advanced_turn = false;
         }
 
         loop {
             if let Ok((addr, event)) = client.connection.try_recv() {
-                match event {
-                    SocketEvent::Bytes(bytes) => {
-                        let msg = Message::from_bytes(bytes)?;
+                match event.type_ {
+                    SocketEventType::Bytes => {
+                        let msg = Message::from_bytes(event.bytes, client.connection.encoding())?;
                         match MessageType::try_from(msg.type_)? {
                             MessageType::TurnAdvanceResponse => {
                                 let resp: TurnAdvanceResponse =
                                     msg.unpack_payload(client.connection.encoding())?;
+
+                                // println!(
+                                //     "[hello_service] received turn advance response: {:?}",
+                                //     resp
+                                // );
+
                                 if resp.error.is_empty() {
                                     // println!("[{:?}] advanced turn", std::time::SystemTime::now());
                                     advanced_turn = true;
-                                } else {
-                                    // println!("{}", resp.error);
-                                    client
-                                        .connection
-                                        .send_payload(TurnAdvanceRequest { tick_count: 1 }, None)?;
                                 }
+                                // else {
+                                //     // println!("{}", resp.error);
+                                //     client.connection.send_payload(
+                                //         TurnAdvanceRequest {
+                                //             step_count: 1,
+                                //             wait: true,
+                                //         },
+                                //         None,
+                                //     )?;
+                                // }
                             }
                             MessageType::DataTransferResponse => {
                                 println!("received data transfer response");
@@ -118,11 +139,11 @@ pub fn main() -> Result<()> {
                             _ => (),
                         }
                     }
-                    SocketEvent::Disconnect => {
+                    SocketEventType::Disconnect => {
                         println!("server disconnected");
                         return Ok(());
                     }
-                    SocketEvent::Heartbeat => (),
+                    SocketEventType::Heartbeat => (),
                     _ => println!("unhandled event: {:?}", event),
                 }
             } else {
@@ -130,7 +151,7 @@ pub fn main() -> Result<()> {
             }
         }
 
-        std::thread::sleep(std::time::Duration::from_nanos(1000));
+        // std::thread::sleep(std::time::Duration::from_millis(1));
 
         // let data_pack = client.get_vars()?;
         // println!("data_pack: {:?}", data_pack);

@@ -4,7 +4,7 @@ pub mod step;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Stdout};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -23,6 +23,7 @@ use crate::{arraystring, model, EntityName, EventName, Result, SimModel, Var, Va
 use crate::{EntityId, StringId};
 use fnv::FnvHashMap;
 use id_pool::IdPool;
+use std::process::Stdio;
 use std::str::FromStr;
 use std::time::Instant;
 
@@ -187,20 +188,69 @@ impl Sim {
             entities: FnvHashMap::default(),
             entity_idx: FnvHashMap::default(),
             entity_pool: id_pool::IdPool::new(),
+            #[cfg(feature = "machine_lua")]
+            entity_lua_state: Default::default(),
+            #[cfg(feature = "machine_dynlib")]
+            libs: Default::default(),
         };
 
-        // TODO load dynlibs
-        // load dynamic libraries as seen in component models
-        // let mut libs = HashMap::new();
-        // for comp_model in &sim.model.components {
-        //     for lib_path in &comp_model.lib_files {
-        //         let lib = Library::new(lib_path.clone()).unwrap();
-        //         libs.insert(
-        //             format!("{}", lib_path.file_stem().unwrap().to_str().unwrap()),
-        //             lib,
-        //         );
-        //     }
-        // }
+        #[cfg(feature = "machine_dynlib")]
+        {
+            for module in &sim.model.scenario.modules {
+                for module_lib in &module.manifest.libraries {
+                    // use paths to existing shared library files
+                    if let Some(lib_path) = &module_lib.path {
+                        let mut full_path = module.path.join(lib_path);
+                        // set extension based on detected system
+                        if full_path.extension().is_none() {
+                            #[cfg(target_os = "windows")]
+                            full_path.set_extension("dll");
+                            #[cfg(target_os = "linux")]
+                            full_path.set_extension("so");
+                        }
+                        let lib = Library::new(full_path).unwrap();
+                        sim.libs.insert(module_lib.name.clone(), lib);
+                    }
+                    // build rust projects as library using cargo
+                    else if let Some(lib_project_path) = &module_lib.project_path {
+                        let lib_project_path = PathBuf::from(lib_project_path);
+                        let lib_project_path_full = module.path.join(lib_project_path.clone());
+
+                        info!(
+                            "building library from rust project: {}",
+                            lib_project_path_full.to_str().unwrap()
+                        );
+
+                        let mut cmd = std::process::Command::new("cargo");
+                        cmd.current_dir(lib_project_path_full.clone()).arg("build");
+
+                        if let Some(mode) = &module_lib.project_mode {
+                            if mode.as_str() == "release" {
+                                cmd.arg("--release");
+                            }
+                        } else {
+                            cmd.arg("--release");
+                        }
+
+                        let status = cmd.status()?;
+
+                        let mut lib_path_full = lib_project_path_full.join(format!(
+                            "target/release/lib{}",
+                            lib_project_path.file_name().unwrap().to_str().unwrap()
+                        ));
+                        // set extension based on detected system
+                        if lib_path_full.extension().is_none() {
+                            #[cfg(target_os = "windows")]
+                            lib_path_full.set_extension("dll");
+                            #[cfg(target_os = "linux")]
+                            lib_path_full.set_extension("so");
+                        }
+                        let lib = Library::new(lib_path_full).unwrap();
+                        sim.libs.insert(module_lib.name.clone(), lib);
+                    }
+                }
+            }
+        }
         // let mut arc_libs = Arc::new(Mutex::new(libs));
         // TODO setup lua state
 

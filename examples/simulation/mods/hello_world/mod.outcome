@@ -14,7 +14,7 @@ component greeting
     var vec3:position = 1.,2.42,39233.932
 
     trigger step
-    trigger additional
+    #trigger additional
 	state start
 	    print here
         component realm
@@ -29,8 +29,9 @@ component greeting
 	end
 
 	state main
-#        spawn greeter
-        invoke additional
+	    #spawn greeter
+        #invoke additional
+        lib_call hello_lib fn calculate_entity
 	    set str:realm world:realm:str:name => bool:do
 	    if bool:do
 		    print "{}, {}" str:hello str:realm

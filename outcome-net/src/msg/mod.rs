@@ -28,11 +28,6 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, TryFromPrimitive, Deserialize_repr, Serialize_repr)]
 #[repr(u8)]
 pub enum MessageType {
-    Bytes,
-    Heartbeat,
-    Disconnect,
-    Connect,
-
     PingRequest,
     PingResponse,
 
@@ -88,6 +83,7 @@ pub struct Message {
     /// Describes what is stored within the payload
     pub type_: MessageType,
     /// Byte representation of the message payload
+    #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
 }
 

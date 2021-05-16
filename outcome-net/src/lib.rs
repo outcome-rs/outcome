@@ -93,7 +93,7 @@ pub use socket::{SocketEvent, SocketEventType};
 pub use client::{Client, ClientConfig, CompressionPolicy};
 pub use server::{Server, ServerConfig, SimConnection};
 
-pub use coord::Coord;
+pub use organizer::Organizer;
 pub use relay::Relay;
 pub use worker::Worker;
 
@@ -102,8 +102,8 @@ pub mod msg;
 mod sig;
 
 mod client;
-mod coord;
 mod error;
+mod organizer;
 mod relay;
 mod server;
 mod service;

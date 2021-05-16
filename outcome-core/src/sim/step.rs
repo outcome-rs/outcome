@@ -11,6 +11,13 @@ use crate::machine::{cmd::CentralRemoteCommand, cmd::ExtCommand, exec, Execution
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
 
+#[cfg(feature = "machine_dynlib")]
+use crate::machine::Libraries;
+#[cfg(feature = "machine_dynlib")]
+use libloading::Library;
+
+use std::collections::BTreeMap;
+
 use super::Sim;
 
 /// Single step processing functions.
@@ -43,6 +50,9 @@ impl Sim {
         {
             let model = &self.model;
 
+            #[cfg(feature = "machine_dynlib")]
+            let libs = &self.libs;
+
             // declare atomic vecs for ext and central-ext commands
             let ext_cmds: Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>> =
                 Arc::new(Mutex::new(Vec::new()));
@@ -59,6 +69,8 @@ impl Sim {
                         entity,
                         &ext_cmds,
                         &central_ext_cmds,
+                        #[cfg(feature = "machine_dynlib")]
+                        libs,
                     );
                 },
             );
@@ -93,6 +105,7 @@ pub(crate) fn step_entity_local(
     mut entity: &mut Entity,
     ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, ExtCommand)>>>,
     central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>>,
+    #[cfg(feature = "machine_dynlib")] libs: &Libraries,
 ) -> Result<(), Error> {
     trace!(
         "step_entity_local(): entity.comp_queue: {:?}",
@@ -128,6 +141,8 @@ pub(crate) fn step_entity_local(
                             &central_ext_cmds,
                             start,
                             end,
+                            #[cfg(feature = "machine_dynlib")]
+                            libs,
                         )?;
                     }
                 }

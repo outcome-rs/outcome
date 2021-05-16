@@ -9,7 +9,11 @@ use crate::{Sim, SimModel};
 
 use super::cmd::{CentralRemoteCommand, Command, CommandResult, ExtCommand};
 use super::{error::Error, CallStackVec, ExecutionContext, LocationInfo, Registry};
+
 use crate::machine::{ErrorKind, Result};
+
+#[cfg(feature = "machine_dynlib")]
+use crate::machine::Libraries;
 
 /// Executes a given set of central-external commands.
 //TODO missing component uid information
@@ -72,6 +76,7 @@ pub(crate) fn execute_loc(
     central_ext_cmds: &Arc<Mutex<Vec<(ExecutionContext, CentralRemoteCommand)>>>,
     start: Option<usize>,
     end: Option<usize>,
+    #[cfg(feature = "machine_dynlib")] libs: &Libraries,
 ) -> Result<()> {
     trace!(
         "execute_loc (start:{:?}, end:{:?}): cmds: {:?}",
@@ -117,6 +122,8 @@ pub(crate) fn execute_loc(
             ent_uid,
             &sim_model,
             location_info,
+            #[cfg(feature = "machine_dynlib")]
+            libs,
         );
         for result in results {
             match result {
@@ -176,6 +183,7 @@ pub fn execute(
     mut sim: &mut Sim,
     start: Option<usize>,
     end: Option<usize>,
+    #[cfg(feature = "machine_dynlib")] libs: &Libraries,
 ) -> Result<()> {
     // initialize a new call stack
     let mut call_stack = CallStackVec::new();
@@ -245,6 +253,8 @@ pub fn execute(
             ent_id,
             &sim.model,
             &location,
+            #[cfg(feature = "machine_dynlib")]
+            libs,
         );
         for result in results {
             match result {

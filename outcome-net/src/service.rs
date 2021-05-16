@@ -1,11 +1,13 @@
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read, Stdout, Write};
 use std::process;
 use std::time::{Duration, Instant};
 
 use crate::{Error, Result};
 use outcome::model::ServiceModel;
+use std::fs::File;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process::{ChildStdout, Stdio};
 use std::str::FromStr;
 
 /// Describes all possible types of managed services.
@@ -119,6 +121,8 @@ pub struct Service {
 
     /// Cumulative log for stdout
     pub std_out_log: String,
+
+    pub output_path: Option<PathBuf>,
 }
 
 // TODO support compiling rust services from path to src using cargo
@@ -135,8 +139,9 @@ impl Service {
         let mut cmd = process::Command::new(model.executable.as_ref().unwrap());
         cmd.arg(server_addr.clone());
         cmd.args(&model.args);
+        cmd.stdout(Stdio::inherit());
         let started_at = Instant::now();
-        let child = cmd.spawn()?;
+        let mut child = cmd.spawn()?;
 
         let service = Self {
             type_: if let Some(t) = model.type_ {
@@ -152,6 +157,7 @@ impl Service {
             address: None,
             server_address: SocketAddr::from_str(&server_addr).unwrap(),
             std_out_log: "".to_string(),
+            output_path: model.output.map(|o| PathBuf::from_str(&o).unwrap()),
         };
 
         Ok(service)
@@ -162,6 +168,31 @@ impl Service {
     }
 
     pub fn monitor(&mut self) {
+        // let mut buf = [0; 100];
+        // if let Ok(n) = &self.stdout.as_mut().unwrap().read(&mut buf) {
+
+        // {
+        //     let mut stdout = self.handle.stdout.as_mut().unwrap();
+        //     let stdout_reader = BufReader::new(&mut stdout);
+        //     let stdout_lines = stdout_reader.lines().;
+        //     for line in stdout_lines {
+        //         println!("Read: {:?}", line);
+        //     }
+        // }
+        // println!("finished");
+
+        // if let Ok(n) = self.stdout.read(&mut buf) {
+        //     println!("inside");
+        //     trace!("read number of bytes from service stdout: {}", n);
+        //     let new_output = String::from_utf8_lossy(&buf[0..n]);
+        //     self.std_out_log.push_str(&new_output);
+        //     println!("{}", new_output);
+        //     // if let Some(output_path) = &self.output_path {
+        //     //     let mut file = File::open(output_path).unwrap();
+        //     //     file.write_all(&buf);
+        //     // }
+        // }
+
         // check if the service is running
         if let Ok(status) = self.handle.try_wait() {
             if let Some(s) = status {
@@ -172,12 +203,6 @@ impl Service {
                 self.restart(false);
             }
             return;
-        }
-
-        let mut buf = [0; 1000];
-        if let Ok(n) = self.handle.stdout.as_mut().unwrap().read(&mut buf) {
-            trace!("read number of bytes from service stdout: {}", n);
-            self.std_out_log.push_str(&String::from_utf8_lossy(&buf));
         }
     }
 

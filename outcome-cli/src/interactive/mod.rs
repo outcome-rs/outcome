@@ -534,6 +534,9 @@ pub fn start(
                                             continue;
                                         }
                                     },
+                                    // SimDriver::Remote(client) => {
+                                    //     // client.
+                                    // }
                                     _ => unimplemented!(),
                                 };
                                 file.write(&data)?;

@@ -7,16 +7,6 @@ use crate::{Encoding, Transport};
 use fnv::FnvHashMap;
 use outcome::Address;
 
-/// One-way heartbeat message.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct Heartbeat {}
-pub(crate) const HEARTBEAT: &str = "Heartbeat";
-impl Payload for Heartbeat {
-    fn type_(&self) -> MessageType {
-        MessageType::Heartbeat
-    }
-}
-
 /// Requests a simple `PingResponse` message. Can be used to check
 /// the connection to the server.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -44,8 +34,6 @@ impl Payload for PingResponse {
 
 /// Requests a few variables related to the current status of
 /// the server.
-///
-/// NOT IMPLEMENTED `format` can specify what information is needed
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct StatusRequest {
     pub format: String,
@@ -116,13 +104,11 @@ impl Payload for RegisterClientRequest {
 }
 
 /// Response to a `RegisterClientRequest` message.
-///
-/// `error` contains the report of any errors that might have occurred:
-/// - `WrongPassword` if the connecting client provided a wrong password
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct RegisterClientResponse {
-    pub redirect: String,
-    pub error: String,
+    pub encoding: Encoding,
+    pub transport: Transport,
+    pub address: String,
 }
 pub(crate) const REGISTER_CLIENT_RESPONSE: &str = "RegisterClientResponse";
 impl Payload for RegisterClientResponse {
@@ -431,7 +417,10 @@ impl Payload for TypedDataPullResponse {
 /// is processed.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TurnAdvanceRequest {
-    pub tick_count: u32,
+    /// Number of steps to advance the simulation by
+    pub step_count: u32,
+    /// Require response to be sent only once once the request was fulfilled
+    pub wait: bool,
 }
 pub(crate) const TURN_ADVANCE_REQUEST: &str = "TurnAdvanceRequest";
 impl Payload for TurnAdvanceRequest {

@@ -15,14 +15,14 @@ use outcome::{arraystring, Address, EventName, Sim, SimModel, StringId, VarType}
 use crate::msg::*;
 use crate::service::Service;
 
-use crate::coord::CoordTask;
 use crate::msg::TransferResponseData::AddressedVar;
+use crate::organizer::OrganizerTask;
 use crate::socket::{
     pack, unpack, CompositeSocketAddress, Encoding, Socket, SocketAddress, SocketConfig,
     SocketEvent, SocketEventType, SocketType, Transport,
 };
 use crate::{error::Error, Result, TaskId};
-use crate::{Coord, Worker};
+use crate::{Organizer, Worker};
 use outcome::distr::{CentralCommunication, NodeCommunication, Signal};
 use std::str::FromStr;
 
@@ -39,9 +39,9 @@ pub enum ServerTask {
 /// High-level representation of the simulation interface.
 pub enum SimConnection {
     Local(Sim),
-    ClusterCoord(Coord),
-    ClusterWorker(Worker),
-    // ClusterRelay(Relay),
+    UnionOrganizer(Organizer),
+    UnionWorker(Worker),
+    // UnionRelay(Relay),
 }
 
 /// Connected client as seen by the server.
@@ -67,13 +67,15 @@ pub struct Client {
 
     /// Authentication pair used by the client
     pub auth_pair: Option<(String, String)>,
-    /// Client self-assigned name
+    /// Self-assigned name
     pub name: String,
 
     /// List of scheduled data transfers
-    pub scheduled_dts: FnvHashMap<EventName, Vec<DataTransferRequest>>,
+    pub scheduled_transfers: FnvHashMap<EventName, Vec<DataTransferRequest>>,
     /// List of scheduled queries
     pub scheduled_queries: FnvHashMap<EventName, Vec<(TaskId, outcome::Query)>>,
+    /// Clock step on which client needs to be notified of step advance success
+    pub scheduled_advance_response: Option<usize>,
 
     pub order_store: FnvHashMap<u32, Vec<Address>>,
     pub order_id_pool: IdPool,
@@ -146,6 +148,8 @@ impl Default for ServerConfig {
 
             transports: vec![
                 Transport::Tcp,
+                #[cfg(feature = "laminar_transport")]
+                Transport::LaminarUdp,
                 #[cfg(feature = "zmq_transport")]
                 Transport::ZmqTcp,
             ],
@@ -256,15 +260,37 @@ impl Server {
                 ..Default::default()
             };
 
+            // if composite address for greeter includes transport, then don't
+            // attempt to set up multiple greeters with different transports
             if let Some(trans) = greeter_addr.transport {
-                let sock = Socket::new_with_config(
-                    Some(greeter_addr.address.clone()),
-                    trans,
-                    greeter_config,
-                )?;
-                println!("sock binded");
-                greeters.push(sock);
+                match greeter_addr.address {
+                    SocketAddress::Net(addr) => {
+                        let socket = match Socket::new_with_config(
+                            Some(greeter_addr.address.clone()),
+                            trans,
+                            greeter_config,
+                        ) {
+                            Ok(s) => s,
+                            // any error here is likely due to address already being in use
+                            // in such case, try once again with no specific port selected
+                            Err(e) => Socket::new_with_config(
+                                Some(SocketAddress::Net(SocketAddr::new(addr.ip(), 0))),
+                                trans,
+                                greeter_config,
+                            )?,
+                        };
+                        info!(
+                            "starting listener on: {} (transport: {:?}, encoding: {:?})",
+                            socket.listener_addr()?,
+                            trans,
+                            greeter_config.encoding
+                        );
+                        greeters.push(socket);
+                    }
+                    _ => unimplemented!(),
+                }
             } else {
+                // set up multiple greeters for different transports
                 for transport in &config.transports {
                     match &greeter_addr.address {
                         SocketAddress::Net(addr) => {
@@ -277,11 +303,21 @@ impl Server {
                                 "starting listener on: {} (transport: {:?}, encoding: {:?})",
                                 greeter_addr.address, transport, greeter_config.encoding
                             );
-                            greeters.push(Socket::new_with_config(
+                            let socket = match Socket::new_with_config(
                                 Some(_address),
                                 *transport,
                                 greeter_config,
-                            )?);
+                            ) {
+                                Ok(s) => s,
+                                // any error here is likely due to address already being in use
+                                // in such case, try once again with no specific port selected
+                                Err(e) => Socket::new_with_config(
+                                    Some(SocketAddress::Net(SocketAddr::new(addr.ip(), 0))),
+                                    *transport,
+                                    greeter_config,
+                                )?,
+                            };
+                            greeters.push(socket);
                         }
                         // port = port + 1;
                         SocketAddress::File(path) => greeters.push(Socket::new_with_config(
@@ -300,7 +336,6 @@ impl Server {
             config,
             // TODO select transport based on config's transport list
             greeters,
-            // TODO make this easier to find by defining it as a constant
             port_count: 0,
             clients: Default::default(),
             uptime: Default::default(),
@@ -337,7 +372,7 @@ impl Server {
                     }
                 }
             }
-            SimConnection::ClusterWorker(worker) => {
+            SimConnection::UnionWorker(worker) => {
                 if let Some(node) = &worker.sim_node {
                     for service_model in &node.model.services {
                         if self
@@ -356,7 +391,7 @@ impl Server {
                     }
                 }
             }
-            SimConnection::ClusterCoord(coord) => {
+            SimConnection::UnionOrganizer(coord) => {
                 // warn!("not starting any services since it's a coordinator-backed server");
             }
         }
@@ -411,9 +446,9 @@ impl Server {
         for (client_id, client) in &mut self.clients {
             let time_since_last_event = Instant::now() - client.last_event;
             // println!(
-            //     "handling idle clients, client: {}, time since last event: {}ms",
+            //     "time since last event for client {}: {}ms",
             //     client_id,
-            //     client.time_since_last_event.as_millis()
+            //     time_since_last_event.as_millis()
             // );
             if let Some(keepalive) = client.keepalive {
                 if time_since_last_event > keepalive {
@@ -432,7 +467,7 @@ impl Server {
         }
 
         // handle coord poll if applicable
-        if let SimConnection::ClusterCoord(coord) = &mut self.sim {
+        if let SimConnection::UnionOrganizer(coord) = &mut self.sim {
             // perform the manual poll
             coord.manual_poll()?;
             // handle any tasks that might have been finished
@@ -440,13 +475,14 @@ impl Server {
         }
 
         // handle worker poll if applicable
-        if let SimConnection::ClusterWorker(worker) = &mut self.sim {
+        if let SimConnection::UnionWorker(worker) = &mut self.sim {
             worker.manual_poll()?;
         }
 
         // handle events from clients
         let client_ids: Vec<u32> = self.clients.keys().cloned().collect();
         for client_id in client_ids {
+            // self.clients.get_mut(&client_id).unwrap().connection.
             let (addr, event) = match self
                 .clients
                 .get_mut(&client_id)
@@ -456,7 +492,9 @@ impl Server {
             {
                 Ok(e) => e,
                 Err(e) => match e {
-                    Error::WouldBlock => continue,
+                    Error::WouldBlock => {
+                        continue;
+                    }
                     _ => {
                         warn!("try_handle_client failed: {:?}", e);
                         continue;
@@ -541,7 +579,12 @@ impl Server {
             // negotiate transport and encoding for the communication channel
             let mut new_config = greeter.config();
             let mut new_transport = greeter.transport();
+            println!(
+                "transports available on server: {:?}",
+                self.config.transports
+            );
             for transport in req.transports {
+                println!("checking: {}", transport);
                 if self.config.transports.contains(&transport) {
                     new_transport = transport;
                     break;
@@ -560,12 +603,15 @@ impl Server {
                 _ => {
                     if let SocketAddress::Net(_addr) = greeter.listener_addr()? {
                         SocketAddress::Net(SocketAddr::new(_addr.ip(), 0))
+                        // SocketAddress::Net(SocketAddr::from_str("127.0.0.1:0")?)
                     } else {
                         SocketAddress::Net(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
                     }
                 }
                 _ => unimplemented!(),
             };
+
+            println!("new_transport: {}", new_transport);
 
             let socket =
                 Socket::new_with_config(Some(new_address.clone()), new_transport, new_config)?;
@@ -574,14 +620,15 @@ impl Server {
             debug!("redirect address: {:?}", socket_addr);
 
             let resp = RegisterClientResponse {
-                //redirect: format!("192.168.2.106:{}", client_id),
-                redirect: socket_addr.to_string(),
-                error: String::new(),
+                encoding: socket_addr.encoding.unwrap(),
+                transport: socket_addr.transport.unwrap(),
+                address: socket_addr.address.to_string(),
             };
 
             println!("peer_addr: {:?}", peer_addr);
             greeter.send_payload(resp, Some(peer_addr.clone()))?;
-            greeter.disconnect(Some(greeter.listener_addr()?));
+            // greeter.disconnect(Some(greeter.listener_addr()?));
+            // greeter.disconnect(Some(peer_addr.clone()))?;
             // greeter.send_payload(resp, None)?;
 
             debug!("responded to client: {}", self.port_count);
@@ -596,10 +643,11 @@ impl Server {
                 last_event: Instant::now(),
                 auth_pair: None,
                 name: "".to_string(),
+                // furthest_step: None,
                 furthest_step: match &self.sim {
                     SimConnection::Local(sim) => sim.get_clock(),
-                    SimConnection::ClusterCoord(coord) => coord.central.get_clock(),
-                    SimConnection::ClusterWorker(worker) => {
+                    SimConnection::UnionOrganizer(coord) => coord.central.get_clock(),
+                    SimConnection::UnionWorker(worker) => {
                         if let Some(node) = &worker.sim_node {
                             node.clock
                         } else {
@@ -607,8 +655,9 @@ impl Server {
                         }
                     }
                 },
-                scheduled_dts: Default::default(),
+                scheduled_transfers: Default::default(),
                 scheduled_queries: Default::default(),
+                scheduled_advance_response: None,
                 order_store: Default::default(),
                 order_id_pool: IdPool::new(),
             };
@@ -667,7 +716,7 @@ impl Server {
 
     /// Handle message, delegating further processing to a specialized function.
     fn handle_event(&mut self, event: SocketEvent, client_id: &ClientId) -> Result<()> {
-        debug!("handling event: {:?}", event);
+        debug!("handling event: {:?}, from client_id: {}", event, client_id);
         let encoding = self
             .clients
             .get(client_id)
@@ -808,8 +857,8 @@ impl Server {
         let req: StatusRequest = msg.unpack_payload(client.connection.encoding())?;
         let model_scenario = match &self.sim {
             SimConnection::Local(sim) => sim.model.scenario.clone(),
-            SimConnection::ClusterCoord(coord) => coord.central.model.scenario.clone(),
-            SimConnection::ClusterWorker(worker) => {
+            SimConnection::UnionOrganizer(coord) => coord.central.model.scenario.clone(),
+            SimConnection::UnionWorker(worker) => {
                 if let Some(node) = &worker.sim_node {
                     node.model.scenario.clone()
                 } else {
@@ -826,8 +875,8 @@ impl Server {
             uptime: self.uptime.as_millis() as usize,
             current_tick: match &self.sim {
                 SimConnection::Local(sim) => sim.get_clock(),
-                SimConnection::ClusterCoord(coord) => coord.central.get_clock(),
-                SimConnection::ClusterWorker(worker) => worker.sim_node.as_ref().unwrap().clock,
+                SimConnection::UnionOrganizer(coord) => coord.central.get_clock(),
+                SimConnection::UnionWorker(worker) => worker.sim_node.as_ref().unwrap().clock,
             },
             scenario_name: model_scenario.manifest.name.clone(),
             scenario_title: model_scenario
@@ -896,7 +945,7 @@ impl Server {
             SimConnection::Local(sim_instance) => {
                 handle_data_transfer_request_local(&dtr, sim_instance, client)?
             }
-            SimConnection::ClusterCoord(coord) => {
+            SimConnection::UnionOrganizer(coord) => {
                 let mut collection = Vec::new();
                 match dtr.transfer_type.as_str() {
                     "Full" => {
@@ -939,7 +988,7 @@ impl Server {
                     _ => unimplemented!(),
                 }
             }
-            SimConnection::ClusterWorker(worker) => {
+            SimConnection::UnionWorker(worker) => {
                 //TODO
                 // categorize worker connection to the cluster, whether it's only connected
                 // to the coordinator, to coord and to all workers, or some other way
@@ -1077,14 +1126,18 @@ impl Server {
             msg.unpack_payload(client.connection.encoding())?;
         for event_trigger in sdtr.event_triggers {
             let event_id = outcome::arraystring::new(&event_trigger)?;
-            if !client.scheduled_dts.contains_key(&event_id) {
-                client.scheduled_dts.insert(event_id, Vec::new());
+            if !client.scheduled_transfers.contains_key(&event_id) {
+                client.scheduled_transfers.insert(event_id, Vec::new());
             }
             let dtr = DataTransferRequest {
                 transfer_type: sdtr.transfer_type.clone(),
                 selection: sdtr.selection.clone(),
             };
-            client.scheduled_dts.get_mut(&event_id).unwrap().push(dtr);
+            client
+                .scheduled_transfers
+                .get_mut(&event_id)
+                .unwrap()
+                .push(dtr);
         }
 
         Ok(())
@@ -1275,7 +1328,7 @@ impl Server {
     fn handle_coord_tasks(
         tasks: &mut HashMap<TaskId, ServerTask>,
         clients: &HashMap<ClientId, Client>,
-        coord: &mut Coord,
+        coord: &mut Organizer,
     ) -> Result<()> {
         let mut finished_tasks = Vec::new();
         for (task_id, coord_task) in &mut coord.tasks {
@@ -1292,7 +1345,9 @@ impl Server {
                             ServerTask::WaitForCoordQueryResponse(client_id) => {
                                 if let Some(client) = clients.get(client_id) {
                                     match coord_task {
-                                        CoordTask::WaitForQueryResponses { products, .. } => {
+                                        OrganizerTask::WaitForQueryResponses {
+                                            products, ..
+                                        } => {
                                             let qp =
                                                 outcome::query::QueryProduct::combine(products);
                                             // if let outcome::query::QueryProduct::AddressedTyped(

@@ -252,6 +252,10 @@ impl TcpSocket {
     }
 
     pub fn send_bytes(&self, bytes: Vec<u8>, addr: Option<SocketAddress>) -> Result<()> {
+        debug!(
+            "sending bytes, connections stored by the socket: {:?}",
+            self.connections
+        );
         self.out_sender
             .send((
                 addr.unwrap_or(
@@ -339,17 +343,17 @@ impl ConnectionHandler {
     ///
     /// Delta time argument represents duration since last manual poll call.
     pub fn manual_poll(&mut self, delta_time: Duration) -> Result<()> {
-        // send heartbeats
-        if let Some(heartbeat) = self.heartbeat_interval {
-            self.time_since_heartbeat += delta_time;
-            if self.time_since_heartbeat > heartbeat {
-                self.time_since_heartbeat = Duration::from_millis(0);
-                for (addr, _) in &self.connections {
-                    self.out_sender
-                        .send((addr.clone(), SocketEvent::new(SocketEventType::Heartbeat)));
-                }
-            }
-        }
+        // // send heartbeats
+        // if let Some(heartbeat) = self.heartbeat_interval {
+        //     self.time_since_heartbeat += delta_time;
+        //     if self.time_since_heartbeat > heartbeat {
+        //         self.time_since_heartbeat = Duration::from_millis(0);
+        //         for (addr, _) in &self.connections {
+        //             self.out_sender
+        //                 .send((addr.clone(), SocketEvent::new(SocketEventType::Heartbeat)));
+        //         }
+        //     }
+        // }
 
         // read incoming events
         for (addr, (stream, buffer)) in &mut self.connections {
@@ -409,7 +413,7 @@ impl ConnectionHandler {
                     self.connections
                         .insert(address.clone(), (stream, Vec::new()));
                 }
-                // SocketEvent::Disconnect => {
+                // SocketEventType::Disconnect => {
                 //     self.connections.remove(&address);
                 //     // stream.shutdown(std::net::Shutdown::Both);
                 //     continue;

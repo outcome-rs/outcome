@@ -108,6 +108,7 @@ impl LaminarSocket {
 
     pub fn disconnect(&mut self, addr: Option<SocketAddress>) -> Result<()> {
         if let Some(address) = addr {
+            // self.send_event(SocketEvent::new(SocketEventType::Disconnect), None);
             if let Some(idx) = self.connections.iter().position(|a| a == &address) {
                 self.connections.remove(idx);
             }

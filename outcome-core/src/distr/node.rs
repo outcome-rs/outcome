@@ -15,6 +15,9 @@ use crate::error::Error;
 #[cfg(feature = "machine")]
 use rayon::prelude::*;
 
+#[cfg(feature = "machine_dynlib")]
+use crate::machine::Libraries;
+
 /// Distributed simulation node.
 ///
 /// It holds the current clock value, a full copy of the sim model, and
@@ -215,6 +218,9 @@ impl SimNode {
                     entity,
                     &ext_cmds,
                     &central_ext_cmds,
+                    // TODO make nodes store their libraries
+                    #[cfg(feature = "machine_dynlib")]
+                    &Libraries::default(),
                 );
             });
         trace!("sim_node finished local phase");

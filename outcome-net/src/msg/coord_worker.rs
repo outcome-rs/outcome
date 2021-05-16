@@ -1,10 +1,10 @@
-//! Protocol used by cluster coordinator and workers.
+//! Protocol used by union coordinator and workers.
 //!
 //! # Overview
 //!
-//! On cluster initialization, coordinator connects to listed worker
+//! On union initialization, coordinator connects to listed worker
 //! addresses and sends introductory messages. Each worker creates
-//! a list of all the other workers in the cluster. This way all
+//! a list of all the other workers in the union. This way all
 //! the workers can exchange information with each other without
 //! the need for centralized broker. Each worker keeps a map of entities
 //! and their current node location.

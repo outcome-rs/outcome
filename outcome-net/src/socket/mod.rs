@@ -2,6 +2,7 @@ use crate::msg::{msg_bytes_from_payload, Message, Payload};
 use crate::sig::Signal;
 use crate::{sig, Error, Result, TaskId};
 use serde::{Deserialize, Serialize};
+use serde_repr::*;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Display, Formatter};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -59,7 +60,7 @@ impl Socket {
         match &self.inner {
             InnerSocket::SimpleTcp(socket) => Transport::Tcp,
             #[cfg(feature = "laminar_transport")]
-            InnerSocket::Laminar(socket) => Transport::Laminar,
+            InnerSocket::Laminar(socket) => Transport::LaminarUdp,
             #[cfg(feature = "zmq_transport")]
             InnerSocket::Zmq(socket) => match socket.transport {
                 zmq::ZmqTransport::Tcp => Transport::ZmqTcp,
@@ -97,7 +98,7 @@ impl Socket {
             Transport::Tcp => {
                 InnerSocket::SimpleTcp(tcp::TcpSocket::new_with_config(addr, config)?)
             }
-            Transport::Laminar => {
+            Transport::LaminarUdp => {
                 #[cfg(not(feature = "laminar_transport"))]
                 return Err(Error::TransportUnavailable(transport));
                 #[cfg(feature = "laminar_transport")]
@@ -376,6 +377,7 @@ impl Socket {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SocketEvent {
     pub type_: SocketEventType,
+    #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
 }
 
@@ -394,7 +396,7 @@ impl SocketEvent {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize_repr, Serialize_repr)]
 #[repr(u8)]
 pub enum SocketEventType {
     Bytes,
@@ -420,8 +422,8 @@ pub enum SocketType {
     Rep,
     Pair,
     Stream,
-    //Router,
-    //Dealer,
+    Router,
+    Dealer,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -523,13 +525,14 @@ impl Display for SocketAddress {
 
 /// List of possible network transports.
 // TODO websockets
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize_repr, Serialize_repr)]
+#[repr(u8)]
 pub enum Transport {
     /// Basic TCP transport built with rust's standard library
     Tcp,
     // TODO provide separate laminar udp transports for reliable/unreliable
     /// UDP transport with customizable reliability using the laminar library
-    Laminar,
+    LaminarUdp,
     /// ZeroMQ based TCP transport
     ZmqTcp,
     /// ZeroMQ based IPC transport
@@ -544,7 +547,7 @@ impl Display for Transport {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Tcp => write!(f, "tcp"),
-            Self::Laminar => write!(f, "udp"),
+            Self::LaminarUdp => write!(f, "udp"),
             Self::ZmqTcp => write!(f, "zmq_tcp"),
             Self::ZmqIpc => write!(f, "zmq_ipc"),
             Self::NngIpc => write!(f, "nng_ipc"),
@@ -578,7 +581,7 @@ impl FromStr for Transport {
             }
             "laminar" | "udp" => {
                 #[cfg(feature = "laminar_transport")]
-                return Ok(Transport::Laminar);
+                return Ok(Transport::LaminarUdp);
                 #[cfg(not(feature = "laminar_transport"))]
                 return Err(Error::Other(format!(
                     "trying to use transport: {}, but crate feature laminar_transport is not enabled",
@@ -599,14 +602,15 @@ impl Transport {
     /// Checks if laminar transport is available, otherwise falls back on tcp.
     pub fn prefer_laminar() -> Self {
         #[cfg(feature = "laminar_transport")]
-        return Self::Laminar;
+        return Self::LaminarUdp;
         #[cfg(not(feature = "laminar_transport"))]
         return Self::Tcp;
     }
 }
 
 /// List of possible formats for encoding data sent over the network.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Deserialize_repr, Serialize_repr)]
+#[repr(u8)]
 pub enum Encoding {
     /// Fast binary format, useful for communicating directly between Rust apps
     Bincode,
@@ -620,11 +624,11 @@ impl FromStr for Encoding {
     type Err = Error;
     fn from_str(s: &str) -> core::result::Result<Self, Error> {
         let e = match s.to_lowercase().as_str() {
-            "bincode" => Self::Bincode,
+            "bincode" | "bin" => Self::Bincode,
             #[cfg(feature = "msgpack_encoding")]
             "msgpack" | "messagepack" | "rmp" => Self::MsgPack,
             #[cfg(feature = "json_encoding")]
-            "json" => Self::MsgPack,
+            "json" => Self::Json,
             _ => {
                 return Err(Error::Other(format!(
                     "failed parsing encoding from string: {}",
@@ -668,7 +672,7 @@ pub(crate) fn pack<S: Serialize>(obj: S, encoding: &Encoding) -> Result<Vec<u8>>
             panic!("trying to use json encoding, but json_encoding crate feature is not enabled");
             #[cfg(feature = "json_encoding")]
             {
-                unimplemented!()
+                serde_json::to_vec(&obj)?
             }
         }
     };
@@ -685,7 +689,7 @@ pub fn unpack<'de, P: Deserialize<'de>>(bytes: &'de [u8], encoding: &Encoding) -
             #[cfg(feature = "msgpack_encoding")]
             {
                 use rmp_serde::config::StructMapConfig;
-                let mut de = rmp_serde::Deserializer::new(bytes);
+                let mut de = rmp_serde::Deserializer::new(bytes).with_binary();
                 Deserialize::deserialize(&mut de)?
             }
         }
@@ -694,7 +698,7 @@ pub fn unpack<'de, P: Deserialize<'de>>(bytes: &'de [u8], encoding: &Encoding) -
             panic!("trying to unpack using json encoding, but json_encoding crate feature is not enabled");
             #[cfg(feature = "json_encoding")]
             {
-                unimplemented!()
+                serde_json::from_slice(bytes)?
             }
         }
     };

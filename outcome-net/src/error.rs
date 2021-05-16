@@ -28,6 +28,8 @@ pub enum Error {
     #[error("other: {0}")]
     Other(String),
 
+    #[error("failed parsing int: {0}")]
+    IntParseError(#[from] std::num::ParseIntError),
     #[error("failed parsing address: {0}")]
     AddrParseError(#[from] std::net::AddrParseError),
     #[error("transport unavailable: {0}")]
@@ -58,6 +60,10 @@ pub enum Error {
     #[cfg(feature = "msgpack_encoding")]
     #[error("rmp_serde encode error")]
     RmpsEncodeError(#[from] rmp_serde::encode::Error),
+
+    #[cfg(feature = "json_encoding")]
+    #[error("serde_json error: {0}")]
+    JsonError(#[from] serde_json::Error),
 
     #[error("unknown message code: {0}")]
     UnknownMsgCode(#[from] TryFromPrimitiveError<msg::MessageType>),

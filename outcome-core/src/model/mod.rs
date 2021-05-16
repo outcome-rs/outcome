@@ -641,7 +641,7 @@ pub struct ModuleManifest {
     /// List of required target addrs
     pub reqs: Vec<String>,
 
-    pub libs: Vec<ModuleLib>,
+    pub libraries: Vec<ModuleLib>,
     pub services: Vec<ServiceModel>,
 
     // optional
@@ -693,14 +693,33 @@ impl ModuleManifest {
             }
         }
         let mut libs = Vec::new();
-        for (lib_name, lib_value) in deser_manifest.libs {
+        for (lib_name, lib_value) in deser_manifest.libraries {
             let mut library_path = None;
             let mut project_path = None;
+            let mut project_mode = None;
             if let Some(table) = lib_value.as_table() {
                 for (name, value) in table {
                     match name.as_str() {
-                        "path" | "library" => library_path = Some(value.to_string()),
-                        "project" => project_path = Some(value.to_string()),
+                        "path" | "library" => {
+                            library_path = Some(value.as_str().unwrap().to_string())
+                        }
+                        "project" => {
+                            if let Some(project_table) = value.as_table() {
+                                for (name, value) in project_table {
+                                    match name.as_str() {
+                                        "path" => {
+                                            project_path = Some(value.as_str().unwrap().to_string())
+                                        }
+                                        "mode" => {
+                                            project_mode = Some(value.as_str().unwrap().to_string())
+                                        }
+                                        _ => (),
+                                    }
+                                }
+                            } else {
+                                project_path = Some(value.as_str().unwrap().to_string());
+                            }
+                        }
                         _ => (),
                     }
                 }
@@ -708,8 +727,10 @@ impl ModuleManifest {
                 library_path = Some(s.to_string());
             }
             let lib = ModuleLib {
+                name: lib_name,
                 path: library_path,
-                project: project_path,
+                project_path,
+                project_mode,
             };
             libs.push(lib);
         }
@@ -722,6 +743,7 @@ impl ModuleManifest {
             let mut type_args = None;
             let mut managed = true;
             let mut args = Vec::new();
+            let mut output = None;
 
             if let Some(table) = service_value.as_table() {
                 for (name, value) in table {
@@ -749,6 +771,7 @@ impl ModuleManifest {
                                 args = arr.iter().map(|v| v.to_string()).collect();
                             }
                         }
+                        "output" => output = Some(value.to_string()),
                         _ => (),
                     }
                 }
@@ -766,6 +789,7 @@ impl ModuleManifest {
                 project: project_path,
                 managed,
                 args,
+                output,
             };
             services.push(service);
         }
@@ -777,7 +801,7 @@ impl ModuleManifest {
             version: deser_manifest._mod.version,
             dependencies: dep_map,
             reqs: req_vec,
-            libs,
+            libraries: libs,
             services,
             title: match deser_manifest._mod.title.as_str() {
                 "" => None,
@@ -814,10 +838,13 @@ pub struct ModuleDep {
 /// Library declared by a module.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleLib {
+    pub name: String,
     /// Path to dynamic library file relative to module root
-    path: Option<String>,
+    pub path: Option<String>,
     /// Path to buildable project
-    project: Option<String>,
+    pub project_path: Option<String>,
+    /// Build the project in debug or release mode
+    pub project_mode: Option<String>,
 }
 
 /// Service declared by a module.
@@ -835,6 +862,7 @@ pub struct ServiceModel {
     pub managed: bool,
     /// Arguments string passed to the executable
     pub args: Vec<String>,
+    pub output: Option<String>,
 }
 
 /// Module model.

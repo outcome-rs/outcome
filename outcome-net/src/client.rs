@@ -5,9 +5,9 @@ use std::thread;
 use std::time::Duration;
 
 use crate::msg::{
-    DataTransferRequest, DataTransferResponse, Heartbeat, Message, PingRequest,
-    RegisterClientRequest, RegisterClientResponse, ScheduledDataTransferRequest, StatusRequest,
-    StatusResponse, TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
+    DataTransferRequest, DataTransferResponse, Message, PingRequest, RegisterClientRequest,
+    RegisterClientResponse, ScheduledDataTransferRequest, StatusRequest, StatusResponse,
+    TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
 };
 use crate::socket::{
     CompositeSocketAddress, Encoding, Socket, SocketAddress, SocketConfig, SocketType, Transport,
@@ -177,11 +177,15 @@ impl Client {
         debug!("got response from server: {:?}", resp);
 
         // perform redirection using address provided by the server
-        if !resp.redirect.is_empty() {
+        if !resp.address.is_empty() {
             self.connection.disconnect(None)?;
             // std::thread::sleep(Duration::from_millis(100));
             // self.connection.disconnect(Some(address))?;
-            let composite: CompositeSocketAddress = resp.redirect.parse()?;
+            let composite = CompositeSocketAddress {
+                encoding: Some(resp.encoding),
+                transport: Some(resp.transport),
+                address: resp.address.parse()?,
+            };
             if let Some(_encoding) = composite.encoding {
                 socket_config.encoding = _encoding;
             }
@@ -191,9 +195,9 @@ impl Client {
             self.connection.connect(composite.address)?;
         }
 
-        if !resp.error.is_empty() {
-            return Err(Error::Other(resp.error));
-        }
+        // if !resp.error.is_empty() {
+        //     return Err(Error::Other(resp.error));
+        // }
 
         self.connected = true;
 
@@ -219,8 +223,13 @@ impl Client {
     }
 
     pub fn server_step_request(&mut self, steps: u32) -> Result<Message> {
-        self.connection
-            .send_payload(TurnAdvanceRequest { tick_count: steps }, None)?;
+        self.connection.send_payload(
+            TurnAdvanceRequest {
+                step_count: steps,
+                wait: false,
+            },
+            None,
+        )?;
         let (_, resp) = self.connection.recv_msg()?;
         Ok(resp)
     }

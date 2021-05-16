@@ -30,7 +30,7 @@ use std::convert::TryFrom;
 
 const COORD_ADDRESS: &str = "0.0.0.0:5912";
 
-/// Single worker as seen by the coordinator.
+/// Single worker as seen by the organizer.
 pub struct Worker {
     //pub id: WorkerId,
     pub address: SocketAddress,
@@ -42,8 +42,8 @@ pub struct Worker {
     pub is_blocking_step: bool,
 }
 
-/// Encapsulation of coordinator's networking capabilities.
-pub struct CoordNetwork {
+/// Organizer's networking capabilities.
+pub struct OrganizerNet {
     // TODO multiple greeter sockets with different transports/encodings
     /// Outward facing socket workers can connect to
     greeter: Socket,
@@ -58,33 +58,32 @@ pub struct CoordNetwork {
     task_id_pool: IdPool,
 }
 
-pub enum CoordTask {
+/// Enumeration of all possible tasks tracked by organizer.
+pub enum OrganizerTask {
     WaitForQueryResponses {
         remaining: u32,
         products: Vec<outcome::query::QueryProduct>,
     },
 }
 
-impl CoordTask {
+impl OrganizerTask {
     pub fn is_finished(&self) -> bool {
         match self {
-            CoordTask::WaitForQueryResponses { remaining, .. } => *remaining == 0,
+            OrganizerTask::WaitForQueryResponses { remaining, .. } => *remaining == 0,
             _ => unimplemented!(),
         }
     }
 }
 
-/// Cluster coordinator abstraction.
-///
-/// Coordinator holds simulation's central authority struct and manages
+/// Organizer holds simulation's central authority struct and manages
 /// a network of workers.
 ///
 /// It doesn't hold any entity state, leaving that entirely to workers.
-pub struct Coord {
+pub struct Organizer {
     /// Simulation's central authority structure
     pub central: SimCentral,
     /// Network connections
-    pub net: CoordNetwork,
+    pub net: OrganizerNet,
 
     /// IP address of the coordinator
     pub address: SocketAddress,
@@ -93,11 +92,11 @@ pub struct Coord {
 
     pub is_blocking_step: bool,
 
-    pub tasks: HashMap<u32, CoordTask>,
+    pub tasks: HashMap<u32, OrganizerTask>,
 }
 
-impl Coord {
-    /// Starts a new coordinator at a randomly chosen localhost port.
+impl Organizer {
+    /// Starts a new organizer at a randomly chosen localhost port.
     pub fn new_at_any(central: SimCentral, worker_addrs: Vec<String>) -> Result<Self> {
         Self::new(central, "0.0.0.0:0", worker_addrs)
     }
@@ -106,7 +105,7 @@ impl Coord {
     pub fn new(central: SimCentral, addr: &str, worker_addrs: Vec<String>) -> Result<Self> {
         let greeter_target: CompositeSocketAddress = addr.parse()?;
         let addr_ip = addr.split(":").collect::<Vec<&str>>()[0];
-        let net = CoordNetwork {
+        let net = OrganizerNet {
             greeter: Socket::new(Some(greeter_target.address.clone()), Transport::Tcp)?,
             inviter: Socket::new(None, greeter_target.transport.unwrap_or(Transport::Tcp))?,
             workers: Default::default(),
@@ -327,7 +326,7 @@ impl Coord {
                         )?;
                     }
                     Signal::QueryResponse(product) => {
-                        if let Some(CoordTask::WaitForQueryResponses {
+                        if let Some(OrganizerTask::WaitForQueryResponses {
                             remaining,
                             products,
                         }) = self.tasks.get_mut(&task_id)
@@ -370,12 +369,12 @@ impl Coord {
         let scenario = outcome::model::Scenario::from_path(PathBuf::from(scenario_path))?;
         let model = SimModel::from_scenario(scenario)?;
         let sim_central = SimCentral::from_model(model)?;
-        let mut coord = Coord::new(sim_central, addr, worker_addrs)?;
+        let mut coord = Organizer::new(sim_central, addr, worker_addrs)?;
         debug!("created new cluster coordinator");
         Ok(coord)
     }
 
-    pub fn register_task(&mut self, task: CoordTask) -> Result<u32> {
+    pub fn register_task(&mut self, task: OrganizerTask) -> Result<u32> {
         let task_id = self.net.task_id_pool.request_id().unwrap();
         self.tasks.insert(task_id, task);
         Ok(task_id)
@@ -388,7 +387,7 @@ impl Coord {
     }
 }
 
-impl outcome::distr::CentralCommunication for CoordNetwork {
+impl outcome::distr::CentralCommunication for OrganizerNet {
     fn request_task_id(&mut self) -> outcome::Result<u32> {
         self.task_id_pool
             .request_id()

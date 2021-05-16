@@ -7,16 +7,19 @@ use self::libloading::{Library, Symbol};
 use serde_yaml::Value;
 
 use crate::address::Address;
-use crate::component::Component;
+// use crate::;
 use crate::entity::{Entity, Storage};
+use crate::error::{Error, Result};
 use crate::machine::cmd::{Command, CommandResult};
+use crate::machine::Libraries;
 use crate::model::SimModel;
-use crate::{model, util};
+use crate::{model, util, EntityId, Int};
 use crate::{Sim, VarType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LibCallSign {
     Void,
+    VoidEntity,
     VoidArg(VarType),
     VoidArgArg(VarType, VarType),
     Ret(VarType),
@@ -34,24 +37,26 @@ pub struct LibCall {
     pipe_out: Option<Address>,
 }
 impl LibCall {
-    pub fn from_str(mut args_str: &str) -> Result<Self, String> {
+    pub fn new(args: Vec<String>) -> Result<Command> {
         // first separate the pipe_out ending, if there is a pipe
         // present
         let mut pipe_out = None;
-        if args_str.contains("|") {
-            let split: Vec<&str> = args_str.splitn(2, "|").collect::<Vec<&str>>();
-            args_str = split[0].trim();
-            let pipe_addr = Address::from_str_with_context(split[1].trim(), None, None).unwrap();
-            pipe_out = Some(pipe_addr);
-        }
-        let split: Vec<&str> = args_str.split(" ").collect();
-        let sign = split[1].trim();
+        // TODO
+        // if args_str.contains("|") {
+        //     let split: Vec<&str> = args_str.splitn(2, "|").collect::<Vec<&str>>();
+        //     args_str = split[0].trim();
+        //     let pipe_addr = Address::from_str_with_context(split[1].trim(), None, None).unwrap();
+        //     pipe_out = Some(pipe_addr);
+        // }
+
+        // let split: Vec<&str> = args_str.split(" ").collect();
+        let sign = args[1].trim();
         let sign_split: Vec<&str> = sign.split(".").collect::<Vec<&str>>();
-        let mut signature = LibCallSign::Void;
+        let mut signature = LibCallSign::VoidEntity;
         let mut ret = None;
         let mut vt1 = None;
         let mut vt2 = None;
-        let mut args = Vec::new();
+        // let mut args = Vec::new();
         match sign_split[0] {
             "fn" => {
                 ret = None;
@@ -59,7 +64,8 @@ impl LibCall {
             "var" => {}
             _ => {
                 if sign_split[0].starts_with("fn->") {
-                    ret = VarType::from_str(sign_split[0].split("->").collect::<Vec<&str>>()[1]);
+                    ret =
+                        VarType::from_str(sign_split[0].split("->").collect::<Vec<&str>>()[1]).ok();
                 }
             }
             //            "var" => match sign_split
@@ -67,10 +73,10 @@ impl LibCall {
         }
         match sign_split.get(1) {
             Some(one) => {
-                vt1 = VarType::from_str(one);
+                vt1 = VarType::from_str(one).ok();
                 match sign_split.get(2) {
                     Some(two) => {
-                        vt2 = VarType::from_str(two);
+                        vt2 = VarType::from_str(two).ok();
                     }
                     None => (),
                 }
@@ -83,7 +89,7 @@ impl LibCall {
                     Some(v2) => LibCallSign::VoidArgArg(v1, v2),
                     None => LibCallSign::VoidArg(v1),
                 },
-                None => LibCallSign::Void,
+                None => LibCallSign::VoidEntity,
             },
             Some(r) => match vt1 {
                 Some(v1) => match vt2 {
@@ -94,20 +100,28 @@ impl LibCall {
             },
         };
 
-        Ok(LibCall {
-            lib: split[0].to_string(),
-            func_name: split[2].to_string(),
+        let cmd = Command::LibCall(LibCall {
+            lib: args[0].to_string(),
+            func_name: args[2].to_string(),
             func_signature: signature,
-            args,
+            args: Default::default(),
             pipe_out,
-        })
+        });
+        println!("lib_call: {:?}", cmd);
+        Ok(cmd)
     }
-    pub fn from_map(map: &HashMap<String, Value>) -> Result<Self, String> {
+    pub fn from_map(map: &HashMap<String, Value>) -> Result<Self> {
         unimplemented!()
     }
 }
 impl LibCall {
-    pub fn execute_loc(&self, libs: &HashMap<String, Library>, es: &mut Storage) -> CommandResult {
+    pub fn execute_loc(
+        &self,
+        libs: &Libraries,
+        entity_id: &EntityId,
+        mut storage: &mut Storage,
+    ) -> CommandResult {
+        info!("executing lib_call: {:?}, libs: {:?}", self, libs);
         //        let lock = libs.try_lock().expect("failed to lock
         // arcmut");
         let lib = libs.get(&self.lib).expect("failed to get lib from lock");
@@ -122,6 +136,12 @@ impl LibCall {
                             Err(e) => panic!("{}", e),
                         };
                     func();
+                }
+                LibCallSign::VoidEntity => {
+                    let func: libloading::Symbol<unsafe extern "C" fn(u32, &mut Storage)> =
+                        lib.get(self.func_name.as_bytes()).unwrap();
+                    func(*entity_id, &mut storage);
+                    println!("called VoidEntity function");
                 }
                 LibCallSign::VoidArg(arg_vt) => match arg_vt {
                     VarType::IntGrid => {
@@ -155,8 +175,11 @@ impl LibCall {
                             let int: i32 = func();
                             //                            let ref_ =
                             // comp.loc_vars.get(self.pipe_out.unwrap()).unwrap();
-                            *es.get_int_mut(&self.pipe_out.unwrap().storage_index())
-                                .unwrap() = int;
+                            *storage
+                                .get_var_mut(&self.pipe_out.unwrap().storage_index())
+                                .unwrap()
+                                .as_int_mut()
+                                .unwrap() = int as Int;
                         }
                         _ => (),
                     }

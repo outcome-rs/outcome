@@ -54,7 +54,7 @@ impl Server {
             data: PullRequestData::AddressedVars(map),
         };
         let mock_msg = pack(mock, client.connection.encoding())?;
-        println!("mock: {:?}", mock_msg);
+        // println!("mock: {:?}", mock_msg);
 
         {
             let use_compression = self.config.use_compression.clone();
@@ -63,6 +63,7 @@ impl Server {
                 SimConnection::Local(sim) => {
                     //TODO
                     let dpr: DataPullRequest = msg.unpack_payload(client.connection.encoding())?;
+                    // println!("dpr: {:?}", dpr);
                     match dpr.data {
                         PullRequestData::Typed(data) => {
                             // //TODO handle errors
@@ -93,15 +94,15 @@ impl Server {
                             unimplemented!()
                         }
                         PullRequestData::NativeAddressedVars(data) => {
-                            for ((ent, comp, var), v) in data.vars {
+                            for ((ent, comp, var_name), v) in data.vars {
                                 // let addr = Address::from_str(&k)?;
-                                *sim.entities
-                                    .get_mut(&ent.parse().unwrap())
-                                    .unwrap()
-                                    .storage
-                                    .map
-                                    .get_mut(&(comp, var))
-                                    .unwrap() = v;
+                                let ent_id = ent.parse::<outcome::EntityId>()?;
+                                if let Some(entity) = sim.entities.get_mut(&ent_id) {
+                                    if let Some(var) = entity.storage.map.get_mut(&(comp, var_name))
+                                    {
+                                        *var = v;
+                                    }
+                                }
                                 // sim_instance * sim_instance.get_var_mut(&addr)? = v;
                             }
                         }
@@ -133,10 +134,10 @@ impl Server {
                         }
                     }
                 }
-                SimConnection::ClusterCoord(coord) => {
+                SimConnection::UnionOrganizer(coord) => {
                     // TODO
                 }
-                SimConnection::ClusterWorker(worker) => {
+                SimConnection::UnionWorker(worker) => {
                     //TODO
                     let dpr: DataPullRequest = msg.unpack_payload(client.connection.encoding())?;
                     match dpr.data {
@@ -216,7 +217,7 @@ impl Server {
                 // send_message(message_from_payload(resp, false), stream, None);
                 client.connection.send_payload(resp, None)?;
             }
-            SimConnection::ClusterCoord(coord) => {
+            SimConnection::UnionOrganizer(coord) => {
                 let mut data_vec = Vec::new();
                 for (fs, f) in data.floats {
                     data_vec.push((fs.into(), outcome::Var::Float(f)));
@@ -225,7 +226,7 @@ impl Server {
                     .net
                     .broadcast_sig(22, Signal::DataPullRequest(data_vec))?;
             }
-            SimConnection::ClusterWorker(worker) => unimplemented!(),
+            SimConnection::UnionWorker(worker) => unimplemented!(),
         };
 
         Ok(())

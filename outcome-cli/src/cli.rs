@@ -12,8 +12,8 @@ use anyhow::{Error, Result};
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use outcome::Sim;
 use outcome_net::{
-    CompressionPolicy, Coord, Server, ServerConfig, SimConnection, SocketEvent, SocketEventType,
-    Worker,
+    CompressionPolicy, Organizer, Server, ServerConfig, SimConnection, SocketEvent,
+    SocketEventType, Worker,
 };
 
 #[cfg(feature = "watcher")]
@@ -44,7 +44,7 @@ pub fn app_matches() -> ArgMatches<'static> {
             .default_value("info")
             .global(true)
             .help("Set the verbosity of the log output \
-            [possible values: debug, error, info, trace, warn]"))
+            [possible values: trace, debug, info, warn, error, none]"))
 
         // new
         .subcommand(SubCommand::with_name("new")
@@ -75,7 +75,7 @@ pub fn app_matches() -> ArgMatches<'static> {
 
         // run
         .subcommand(SubCommand::with_name("run")
-            .about("Run simulation from scenario, snapshot or experiment")
+            .about("Run a simulation locally")
             .display_order(20)
             .long_about("Run simulation from scenario, snapshot or experiment.\n\
                 If there are no arguments supplied the program will look for a scenario,\n\
@@ -118,10 +118,15 @@ pub fn app_matches() -> ArgMatches<'static> {
         // server
         .subcommand(SubCommand::with_name("server")
             .about("Start a server")
-            .long_about("Start a server\n\n\
-            NOTE: data sent between client and server is not encrypted, connection \n\
-            is not secure! Passwords are used, but they are more of a convenience than a \n\
-            serious security measure.")
+            .long_about("Start a server. Server listens to incoming client connections \n\
+            and fulfills client requests, anything from data transfers to entity spawning.\n\n\
+            `server` subcommand allows for quickly starting either a local- or union-backed \n\
+            server. Simulation can be started with either a path to scenario or a snapshot.\n\n\
+            `outcome server -s ./scenarios/hello_world` \n    \
+            (starts a server backed by local simulation process, based on a selected scenario)\n\n\
+            NOTE: data sent between client and server is not encrypted, connection is not \n\
+            secure! Basic authentication methods are provided, but they are more of \n\
+            a convenience than a serious security measure.")
             .display_order(21)
             .arg(Arg::with_name("scenario")
                 .long("scenario")
@@ -159,23 +164,32 @@ pub fn app_matches() -> ArgMatches<'static> {
                 .value_name("seconds"))
             .arg(Arg::with_name("compress")
                 .long("compress")
+                .short("c")
                 .help("Use lz4 compression based on selected policy")
                 .display_order(6)
                 .takes_value(true)
                 .value_name("compression-policy")
                 .possible_values(&["all", "bigger_than_[n_bytes]"]))
-            .arg(Arg::with_name("cluster")
-                .long("cluster")
-                .short("c")
-                .help("Run the sim in cluster mode, using multiple worker nodes instead of a single machine")
+            .arg(Arg::with_name("organizer")
+                .long("organizer")
+                .short("o")
+                .help("Start a server backed by a union organizer")
                 .display_order(100)
+                .takes_value(true)
+                .value_name("organizer-address"))
+            .arg(Arg::with_name("union")
+                .long("union")
+                .short("u")
+                .help("Start a server backed by an organizer and a workplace")
+                .display_order(101)
                 .takes_value(true)
                 .value_name("coordinator-address"))
             .arg(Arg::with_name("workers")
                 .long("workers")
                 .short("w")
-                .help("List of cluster workers' addresses, only applicable if `--cluster` option is also present")
-                .display_order(101)
+                .help("List of known union workers' addresses, only applicable if \
+                `--organizer`or `--union` option is also present")
+                .display_order(102)
                 .takes_value(true)
                 .value_name("worker-addresses"))
             .arg(Arg::with_name("encodings")
@@ -183,15 +197,13 @@ pub fn app_matches() -> ArgMatches<'static> {
                 .short("e")
                 .help("List of supported encodings")
                 .takes_value(true)
-                .value_name("encodings-list")
-                .default_value("bincode"))
+                .value_name("encodings-list"))
             .arg(Arg::with_name("transports")
                 .long("transports")
                 .short("t")
                 .help("List of supported transports")
                 .takes_value(true)
-                .value_name("transports-list")
-                .default_value("tcp"))
+                .value_name("transports-list"))
         )
 
         // client
@@ -265,11 +277,99 @@ pub fn app_matches() -> ArgMatches<'static> {
                 .default_value("tcp"))
         )
 
-        // TODO add more options for worker
-        // worker
         .subcommand(SubCommand::with_name("worker")
-            .about("Start a worker node")
+            .about("Start a worker")
+            .long_about("Start a worker. Worker is the smallest independent part\n\
+            of a system where a collection of worker nodes collaboratively\n\
+            simulate a larger world.\n\n\
+            Worker must have a connection to the main organizer, whether direct\n\
+            or indirect. Indirect connection to organizer can happen through another\n\
+            worker or a relay.")
             .display_order(23)
+            .arg(Arg::with_name("address")
+                .long("address")
+                .short("a")
+                .help("Set the address for the worker")
+                .value_name("address"))
+            .arg(Arg::with_name("organizer")
+                .long("organizer")
+                .short("o")
+                .help("Address of the union organizer to connect to")
+                .takes_value(true)
+                .value_name("address"))
+            .arg(Arg::with_name("server")
+                .long("server")
+                .short("s")
+                .help("Establish a server backed by this worker")
+                .takes_value(true)
+                .min_values(0)
+                .value_name("address"))
+        )
+
+        .subcommand(SubCommand::with_name("workplace")
+            .about("Start a workplace")
+            .long_about("Start a workplace. Workplace is a collection of\n\
+            workers grouped under a single relay.\n\n\
+            Workplace is intended to represent a single machine. Organizers\n\
+            from different unions can request workplace workers to join their union.\n\n\
+            Machines intended for simulation work can be setup as workplaces,\n\
+            and then be left for the automated access from authorized organizers.")
+            .display_order(24)
+            .arg(Arg::with_name("address")
+                .long("address")
+                .short("a")
+                .help("Set the address of the workplace")
+                .value_name("address"))
+            .arg(Arg::with_name("organize")
+                .long("organize")
+                .short("o")
+                .help("Address of the union organizer to contact")
+                .takes_value(true)
+                .value_name("address"))
+            .arg(Arg::with_name("server")
+                .long("server")
+                .short("s")
+                .help("Establish a server at the level of the workplace")
+                .takes_value(true)
+                .min_values(0)
+                .value_name("address"))
+        )
+
+        .subcommand(SubCommand::with_name("union")
+            .about("Start a union")
+            .long_about("Start a union. Union is a collection of workers that work \n\
+            together to simulate a single world, coordinated by an organizer.\n\n\
+            Workers and organizers can join and leave the union at runtime.\n\
+            At any given time, only a single organizer is considered a central\n\
+            authority on key issues like model mutation.")
+            .display_order(25)
+            .arg(Arg::with_name("config")
+                .long("config")
+                .short("c")
+                .help("Specify path to union configuration file")
+                .value_name("path"))
+            .arg(Arg::with_name("address")
+                .long("address")
+                .help("Set the address for the worker")
+                .value_name("address"))
+            .arg(Arg::with_name("organizer")
+                .long("organizer")
+                .short("o")
+                .help("Set the address of the union organizer")
+                .takes_value(true)
+                .value_name("address"))
+            .arg(Arg::with_name("server")
+                .long("server")
+                .short("s")
+                .help("Make the worker into a server able to handle clients")
+                .takes_value(true)
+                .min_values(0)
+                .value_name("address"))
+        )
+
+        .subcommand(SubCommand::with_name("organizer")
+            .about("Start a union organizer")
+            .display_order(26)
             .arg(Arg::with_name("address")
                 .long("address")
                 .help("Set the address for the worker")
@@ -556,6 +656,8 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         info!("listening for new workers on: {}", &cluster_addr);
     }
 
+    let default = ServerConfig::default();
+    println!("default transports list: {:?}", default.transports);
     let config = ServerConfig {
         name: match matches.value_of("name") {
             Some(n) => n.to_string(),
@@ -594,6 +696,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         auth_pairs: vec![],
         transports: match matches.value_of("transports") {
             Some(trans) => {
+                println!("trans: {}", trans);
                 let split = trans.split(',').collect::<Vec<&str>>();
                 let mut transports = Vec::new();
                 for transport_str in split {
@@ -603,7 +706,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
                 }
                 transports
             }
-            None => Vec::new(),
+            None => default.transports,
         },
         encodings: match matches.value_of("encodings") {
             Some(enc) => {
@@ -616,7 +719,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
                 }
                 encodings
             }
-            None => Vec::new(),
+            None => default.encodings,
         },
     };
 
@@ -631,7 +734,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
     let sim_instance = match matches.value_of("cluster") {
         Some(addr) => {
             if let Some(scenario_path) = matches.value_of("scenario") {
-                SimConnection::ClusterCoord(Coord::new_with_path(
+                SimConnection::UnionOrganizer(Organizer::new_with_path(
                     &scenario_path,
                     addr,
                     worker_addrs,
@@ -672,7 +775,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         client.connection.disconnect(None);
     }
     match &server.sim {
-        SimConnection::ClusterCoord(coord) => {
+        SimConnection::UnionOrganizer(coord) => {
             for (_, worker) in &coord.net.workers {
                 worker
                     .connection
@@ -802,7 +905,7 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
         };
 
         // TODO get server address
-        let mut server = Server::new(server_addr, SimConnection::ClusterWorker(worker))?;
+        let mut server = Server::new(server_addr, SimConnection::UnionWorker(worker))?;
         server.initialize_services()?;
 
         server.start_polling(running);

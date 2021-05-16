@@ -6,6 +6,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::error::{Error, Result};
+use crate::msg::MessageType::RegisterClientRequest;
 use crate::msg::{Message, MessageType, Payload};
 use crate::sig::Signal;
 use crate::socket::{
@@ -50,6 +51,8 @@ impl ZmqSocket {
             SocketType::Req => zmq::SocketType::REQ,
             SocketType::Rep => zmq::SocketType::REP,
             SocketType::Pair => zmq::SocketType::PAIR,
+            SocketType::Router => zmq::SocketType::ROUTER,
+            SocketType::Dealer => zmq::SocketType::DEALER,
             _ => unimplemented!(),
         };
         println!("socket_type: {:?}", socket_type);
@@ -67,6 +70,8 @@ impl ZmqSocket {
             // socket.set_rcvtimeo(10)?;
             // socket.set_sndtimeo(10)?;
         }
+        // socket.set_rcvtimeo(100)?;
+        // socket.set_sndtimeo(100)?;
         Ok(Self {
             config,
             transport,
@@ -131,13 +136,13 @@ impl ZmqSocket {
                 &self.transport,
             ))?;
         }
-        self.inner.set_sndtimeo(-1);
+        // self.inner.set_sndtimeo(-1);
         Ok(())
     }
 
     /// Waits for the next socket event, blocking until one is available.
     pub fn recv(&self) -> Result<(SocketAddress, SocketEvent)> {
-        self.inner.set_rcvtimeo(-1)?;
+        //self.inner.set_rcvtimeo(-1)?;
         let bytes = self.inner.recv_bytes(0)?;
         let event: SocketEvent = unpack(&bytes, &self.config.encoding)?;
 
@@ -197,10 +202,12 @@ impl ZmqSocket {
         if !events.contains(zmq::POLLIN) {
             return Err(Error::WouldBlock);
         }
+        // println!("can read");
         let bytes = match poll {
-            0 => return Err(Error::WouldBlock),
+            // 0 => return Err(Error::WouldBlock),
             _ => self.inner.recv_bytes(0)?,
         };
+        // println!("got bytes: {:?}", bytes);
         let event: SocketEvent = unpack(&bytes, &self.config.encoding)?;
         // let msg: Message = unpack(&bytes, &self.config.encoding)?;
         // let event = self.match_event(msg)?;
@@ -256,7 +263,8 @@ impl ZmqSocket {
                 // self.inner.disconnect(&lep)?;
                 if self.config.type_ == SocketType::Pair {
                     let lep = self.inner.get_last_endpoint().unwrap().unwrap();
-                    self.inner.bind(&lep)?;
+                    // self.inner.disconnect(&lep)?;
+                    // self.inner.bind(&lep)?;
                 }
             }
             _ => (),
