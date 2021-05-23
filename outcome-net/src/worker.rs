@@ -8,8 +8,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::msg::coord_worker::{
-    IntroduceCoordRequest, IntroduceCoordResponse, IntroduceWorkerToCoordRequest,
-    IntroduceWorkerToCoordResponse,
+    IntroduceCoordRequest, IntroduceCoordResponse, IntroduceWorkerToCoordResponse,
+    IntroduceWorkerToOrganizerRequest,
 };
 use crate::msg::*;
 use crate::socket::{
@@ -23,7 +23,7 @@ use outcome::Sim;
 use outcome_core::distr::{NodeCommunication, Signal, SimNode};
 use outcome_core::query::{Query, QueryProduct};
 use outcome_core::{
-    arraystring, Address, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType,
+    string, Address, CompName, EntityId, EntityName, SimModel, StringId, Var, VarType,
 };
 use std::str::FromStr;
 
@@ -34,15 +34,15 @@ pub enum WorkerTask {
 /// Network-unique identifier for a single worker
 pub type WorkerId = u32;
 
-/// Represents a single cluster node.
+/// Represents a single union node.
 ///
-/// `Worker`s are connected to, and orchestrated by, a cluster coordinator.
+/// `Worker`s are connected to, and orchestrated by, a union organizer.
 /// They are also connected to each other, either directly or not, depending
 /// on network topology used.
 ///
 /// # Usage details
 ///
-/// In a simulation cluster made up of multiple machines, there is at least
+/// In a simulation union made up of multiple machines, there is at least
 /// one `Worker` running on each machine.
 ///
 /// In terms of initialization, `Worker`s can either actively reach out to
@@ -50,7 +50,7 @@ pub type WorkerId = u32;
 /// connection from a coordinator.
 ///
 /// Unless configured otherwise, new `Worker`s can dynamically join into
-/// already initialized clusters, allowing for on-the-fly changes to the
+/// already initialized unions, introducing on-the-fly changes to the
 /// cluster composition.
 ///
 /// # Discussion
@@ -89,8 +89,8 @@ pub struct Worker {
 pub struct WorkerNetwork {
     /// List of other workers in the cluster
     pub comrades: FnvHashMap<u32, Comrade>,
-    /// Main coordinator
-    pub coord: Option<Socket>,
+    /// Organizer connection
+    pub organizer: Option<Socket>,
 
     task_id_pool: IdPool,
 }
@@ -110,7 +110,7 @@ impl Worker {
             inviter: Socket::new(None, Transport::Tcp)?,
             network: WorkerNetwork {
                 comrades: FnvHashMap::default(),
-                coord: None,
+                organizer: None,
                 task_id_pool: IdPool::new(),
             },
             use_auth: false,
@@ -136,24 +136,40 @@ impl Worker {
     }
 
     pub fn initiate_coord_connection(&mut self, addr: &str, timeout: Duration) -> Result<()> {
-        self.inviter.connect(addr.parse()?)?;
-        thread::sleep(Duration::from_millis(100));
-        self.inviter.send_payload(
-            IntroduceWorkerToCoordRequest {
-                worker_addr: self.greeter.listener_addr().unwrap().to_string(),
+        // self.inviter.connect(addr.parse()?)?;
+        let mut socket_config = SocketConfig::default();
+        // socket_config.heartbeat_interval = Some(Duration::from_secs(1));
+        let socket = Socket::new_with_config(None, Transport::Tcp, socket_config)?;
+        self.network.organizer = Some(socket);
+        let organizer = self.network.organizer.as_mut().unwrap();
+        organizer.connect(addr.parse()?)?;
+        // thread::sleep(Duration::from_millis(100));
+
+        organizer.send_payload(
+            IntroduceWorkerToOrganizerRequest {
+                worker_addr: None,
+                // worker_addr: self.greeter.listener_addr().unwrap().to_string(),
                 //TODO
                 worker_passwd: "".to_string(),
             },
             None,
         )?;
 
-        let resp: IntroduceWorkerToCoordResponse = self
-            .inviter
-            .try_recv_msg()?
+        let resp: IntroduceWorkerToCoordResponse = organizer
+            .recv_msg()?
             .1
             .unpack_payload(self.inviter.encoding())?;
 
-        self.inviter.disconnect(None)?;
+        organizer.disconnect(None)?;
+
+        println!("trying to connect to: {}", resp.redirect);
+
+        organizer.connect(resp.redirect.parse()?)?;
+        organizer.send_sig(crate::sig::Signal::from(0, Signal::WorkerConnected), None);
+
+        // thread::sleep(Duration::from_millis(1000));
+        self.manual_poll()?;
+
         Ok(())
     }
 
@@ -208,7 +224,7 @@ impl Worker {
 
         coord.send_sig(sig::Signal::from(0, Signal::EndOfMessages), None)?;
 
-        self.network.coord = Some(coord);
+        self.network.organizer = Some(coord);
 
         // loop {
         //     // sleep a little to make this thread less expensive
@@ -229,14 +245,18 @@ impl Worker {
 impl Worker {
     pub fn manual_poll(&mut self) -> Result<()> {
         loop {
-            if let Some(coord) = self.network.coord.as_mut() {
-                match coord.try_recv() {
+            if let Some(organ_connection) = self.network.organizer.as_mut() {
+                // if let Some(heartbeat_interval) = organ_connection.config().heartbeat_interval {
+                //     organ_connection.send_event(SocketEvent::new(SocketEventType::Heartbeat), None);
+                // }
+                match organ_connection.try_recv() {
                     Ok((addr, event)) => match event.type_ {
                         SocketEventType::Bytes => {
                             let sig =
                                 crate::sig::Signal::from_bytes(&event.bytes, &Encoding::Bincode)?;
                             let (task_id, sig) = sig.into_inner();
-                            self.handle_coord_signal(task_id, sig)?;
+                            self.handle_coord_signal(task_id, sig)
+                                .unwrap_or_else(|e| error!("{:?}", e));
                         }
                         SocketEventType::Heartbeat => (),
                         SocketEventType::Connect => {
@@ -248,7 +268,8 @@ impl Worker {
                         }
                         SocketEventType::Disconnect => {
                             info!("coordinator ended the connection");
-                            return Err(Error::SocketNotConnected);
+                            break;
+                            // return Err(Error::SocketNotConnected);
                         }
                     },
                     Err(e) => {
@@ -335,24 +356,23 @@ impl Worker {
     }
 
     fn handle_sig_data_request_all(&mut self) -> Result<()> {
-        let mut collection = Vec::new();
+        let mut collection = FnvHashMap::default();
         for (entity_uid, entity) in &self.sim_node.as_ref().unwrap().entities {
             for ((comp_id, var_id), var) in entity.storage.map.iter() {
                 warn!("sending: {}:{} = {:?}", comp_id, var_id, var);
-                collection.push((
-                    Address {
-                        entity: arraystring::new_truncate(&entity_uid.to_string()),
-                        component: *comp_id,
-                        var_type: var.get_type(),
-                        var_name: *var_id,
-                    },
+                collection.insert(
+                    (
+                        string::new_truncate(&entity_uid.to_string()),
+                        comp_id.clone(),
+                        var_id.clone(),
+                    ),
                     var.clone(),
-                ))
+                );
             }
         }
         let signal = Signal::DataResponse(collection);
         self.network
-            .coord
+            .organizer
             .as_mut()
             .unwrap()
             .send_sig(sig::Signal::from(0, signal), None)?;
@@ -536,7 +556,7 @@ impl outcome::distr::NodeCommunication for WorkerNetwork {
     }
 
     fn sig_read_central(&mut self) -> outcome::Result<(u32, Signal)> {
-        if let Some(coord) = &mut self.coord {
+        if let Some(coord) = &mut self.organizer {
             let sig = match coord.recv_sig() {
                 Ok((addr, sig)) => sig,
                 Err(e) => return Err(outcome::error::Error::Other(e.to_string())),
@@ -548,7 +568,7 @@ impl outcome::distr::NodeCommunication for WorkerNetwork {
     }
 
     fn sig_send_central(&mut self, task_id: u32, signal: Signal) -> outcome::Result<()> {
-        self.coord
+        self.organizer
             .as_mut()
             .unwrap()
             .send_sig(sig::Signal::from(task_id, signal), None)

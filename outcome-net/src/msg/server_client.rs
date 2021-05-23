@@ -216,7 +216,7 @@ pub struct VarSimDataPackOrdered {
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct VarSimDataPack {
-    pub vars: HashMap<(outcome::EntityName, outcome::CompName, outcome::VarName), outcome::Var>,
+    pub vars: FnvHashMap<(outcome::EntityName, outcome::CompName, outcome::VarName), outcome::Var>,
 }
 
 /// Structure holding all data organized based on data types.
@@ -270,18 +270,23 @@ impl TypedSimDataPack {
     pub fn add(&mut self, addr: &outcome::Address, value_str: &str) {
         match addr.var_type {
             outcome::VarType::String => {
-                self.strings.insert(*addr, value_str.to_owned());
+                self.strings.insert(addr.clone(), value_str.to_owned());
             }
             outcome::VarType::Int => {
-                self.ints
-                    .insert(*addr, value_str.parse::<outcome_core::Int>().unwrap());
+                self.ints.insert(
+                    addr.clone(),
+                    value_str.parse::<outcome_core::Int>().unwrap(),
+                );
             }
             outcome::VarType::Float => {
-                self.floats
-                    .insert(*addr, value_str.parse::<outcome_core::Float>().unwrap());
+                self.floats.insert(
+                    addr.clone(),
+                    value_str.parse::<outcome_core::Float>().unwrap(),
+                );
             }
             outcome::VarType::Bool => {
-                self.bools.insert(*addr, value_str.parse::<bool>().unwrap());
+                self.bools
+                    .insert(addr.clone(), value_str.parse::<bool>().unwrap());
             }
             _ => (),
         };

@@ -172,7 +172,7 @@ impl Server {
                 SimConnection::UnionOrganizer(coord) => {
                     let mut event_queue = coord.central.event_queue.clone();
 
-                    let step_event_name = outcome::arraystring::new_unchecked("step");
+                    let step_event_name = outcome::string::new_truncate("step");
                     if !event_queue.contains(&step_event_name) {
                         event_queue.push(step_event_name);
                     }

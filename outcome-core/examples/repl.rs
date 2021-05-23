@@ -26,13 +26,13 @@ fn main() {
     };
 
     let (ent_uid, ent) = sim.entities.iter().nth(1).unwrap();
-    let comp_uid = *ent.components.map.iter().next().unwrap().0;
+    let comp_uid = ent.components.iter().next().unwrap().clone();
     let ent_uid = *ent_uid;
     let ent_index = sim
         .entity_idx
         .iter()
         .find(|(_, euid)| euid == &&ent_uid)
-        .map(|(str_idx, _)| *str_idx)
+        .map(|(str_idx, _)| str_idx.clone())
         .unwrap();
 
     let mut input_amalg = String::new();
@@ -52,7 +52,7 @@ fn main() {
             input = input_amalg.clone();
             input_amalg = String::new();
         }
-        let instructions = match script::parser::parse_lines(&input, "") {
+        let instructions = match script::parser::parse_lines(&input, LocationInfo::empty()) {
             Ok(i) => i,
             Err(e) => {
                 println!("{:?}", e);

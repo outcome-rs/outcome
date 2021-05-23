@@ -3,7 +3,7 @@ use std::iter::FromIterator;
 
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, Address, ShortString};
+use crate::{string, Address, ShortString};
 
 use super::super::super::{
     error::Error, CallInfo, CallStackVec, IfElseCallInfo, IfElseMetaData, ProcedureCallInfo,
@@ -15,7 +15,8 @@ use crate::machine::Result;
 
 pub const COMMAND_NAMES: [&'static str; 2] = ["proc", "procedure"];
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Procedure {
     pub name: ShortString,
     pub start_line: usize,
@@ -60,7 +61,7 @@ impl Procedure {
             Ok(po) => po,
             Err(e) => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(e.to_string()),
                 ))
             }
@@ -68,13 +69,13 @@ impl Procedure {
 
         match positions_options {
             Some(positions) => Ok(Procedure {
-                name: arraystring::new_truncate(&args[0]),
+                name: args[0].parse().unwrap(),
                 start_line: line,
                 end_line: positions.0,
                 output_variable: None,
             }),
             None => Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("End of procedure block not found".to_string()),
             )),
         }

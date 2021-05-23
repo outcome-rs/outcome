@@ -4,8 +4,8 @@ use anyhow::Result;
 
 use outcome_core::machine::cmd::CommandResult;
 use outcome_core::{
-    arraystring::new_truncate, entity::Storage, entity::StorageIndex, CompName, EntityId,
-    EntityName, VarName,
+    entity::Storage, entity::StorageIndex, string::new_truncate, CompName, EntityId, EntityName,
+    VarName,
 };
 use outcome_net::msg::{
     DataPullRequest, DataTransferRequest, DataTransferResponse, Message, MessageType,

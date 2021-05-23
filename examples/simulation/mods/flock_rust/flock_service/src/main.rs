@@ -5,7 +5,7 @@ use anyhow::Result;
 use outcome_core::machine::cmd::CommandResult;
 use outcome_core::query::{Description, Filter, Layout, Map, Trigger};
 use outcome_core::{
-    arraystring::new_truncate, entity::Storage, entity::StorageIndex, CompName, EntityId, Query,
+    entity::Storage, entity::StorageIndex, string::new_truncate, CompName, EntityId, Query,
     QueryProduct, Var, VarName, VarType,
 };
 use outcome_net::msg::MessageType::DataPullResponse;

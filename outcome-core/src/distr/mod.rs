@@ -52,6 +52,8 @@ pub enum Signal {
 
     SnapshotRequest,
 
+    WorkerConnected,
+
     WorkerStepAdvanceRequest(u32),
     WorkerReady,
     WorkerNotReady,
@@ -78,7 +80,8 @@ pub enum Signal {
     /// Request selected data from the node
     DataRequestSelect(Vec<Address>),
     /// Response containing the requested data
-    DataResponse(Vec<(Address, Var)>),
+    // DataResponse(Vec<(Address, Var)>),
+    DataResponse(FnvHashMap<(crate::EntityName, crate::CompName, crate::VarName), Var>),
 
     /// Request pulling the provided data
     DataPullRequest(Vec<(Address, Var)>),

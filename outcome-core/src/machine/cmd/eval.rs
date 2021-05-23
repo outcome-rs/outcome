@@ -18,7 +18,7 @@ use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage};
 // use crate::error::Error;
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompName, MedString, Sim, StringId, Var, VarType};
+use crate::{string, CompName, Sim, StringId, Var, VarType};
 
 use super::super::{CommandPrototype, Error, LocationInfo, Registry, RegistryTarget, Result};
 use super::{Command, CommandResult};
@@ -60,7 +60,7 @@ impl Eval {
             let split = free_arg.split('=').collect::<Vec<&str>>();
             if split.len() == 2 {
                 eval_args.push((
-                    arraystring::new_truncate(split[0]),
+                    string::new_truncate(split[0]),
                     ShortLocalAddress::from_str(&split[1])?,
                 ));
             }
@@ -83,11 +83,11 @@ impl Eval {
         let mut ns = fasteval::StringToF64Namespace::new();
         // let mut map = BTreeMap::new();
         for (arg_name, arg_addr) in &self.args {
-            let val = match storage.get_var(&arg_addr.storage_index_using(*comp_name)) {
+            let val = match storage.get_var(&arg_addr.storage_index_using(comp_name.clone())) {
                 Ok(v) => v.to_float(),
                 Err(e) => {
                     return CommandResult::Err(Error::new(
-                        *location,
+                        location.clone(),
                         ErrorKind::CoreError(e.to_string()),
                     ));
                 }
@@ -101,9 +101,9 @@ impl Eval {
         // let val = fasteval::eval_compiled!(self.expr, &self.slab, &mut ns);
         // println!("evaled val: {}", val);
 
-        if let Some(out) = self.out {
+        if let Some(out) = &self.out {
             let mut target = storage
-                .get_var_mut(&out.storage_index_using(*comp_name))
+                .get_var_mut(&out.storage_index_using(comp_name.clone()))
                 .unwrap();
             // *target = crate::Var::fr
             // let v = crate::Var::Float(val as crate::Float);

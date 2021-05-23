@@ -11,7 +11,7 @@ use crate::entity::Storage;
 use crate::model::{ComponentModel, EntityPrefab, EventModel, LogicModel, SimModel};
 use crate::sim::Sim;
 use crate::var::Var;
-use crate::{arraystring, CompName, MedString, ShortString, StringId};
+use crate::{string, CompName, ShortString, StringId};
 
 #[cfg(feature = "machine_script")]
 use super::super::script::parse_script_at;
@@ -37,7 +37,7 @@ impl RegisterVar {
             Ok(a) => a,
             Err(e) => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(format!("{}", e)),
                 ))
             }
@@ -75,7 +75,7 @@ impl RegisterVar {
             _ => (),
         }
         Err(Error::new(
-            *location,
+            location.clone(),
             ErrorKind::InvalidCommandBody("failed".to_string()),
         ))
     }
@@ -87,7 +87,7 @@ impl RegisterVar {
             CallInfo::Component(c) => Some(c),
             _ => None,
         }) {
-            new_reg_var.comp = comp_info.name;
+            new_reg_var.comp = comp_info.name.clone();
         }
         out_vec.push(CommandResult::ExecCentralExt(
             CentralRemoteCommand::RegisterVar(new_reg_var),
@@ -112,7 +112,7 @@ impl RegisterVar {
 
         if let Some(comp) = sim.model.get_component_mut(comp_name) {
             comp.vars.push(crate::model::VarModel {
-                id: self.addr.var_name,
+                name: self.addr.var_name.clone(),
                 type_: self.addr.var_type,
                 default: self.val.clone(),
             });
@@ -136,7 +136,7 @@ impl RegisterVar {
 
         if let Some(comp) = central.model.get_component_mut(comp_name) {
             comp.vars.push(crate::model::VarModel {
-                id: self.addr.var_name,
+                name: self.addr.var_name.clone(),
                 type_: self.addr.var_type,
                 default: self.val.clone(),
             });
@@ -160,13 +160,13 @@ impl Extend {
     pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
         if args.len() < 2 {
             return Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody(
                     "`extend` command requires at least 2 arguments".to_string(),
                 ),
             ));
         }
-        let comp_signature = arraystring::new_truncate(&args[0]);
+        let comp_signature = string::new_truncate(&args[0]);
         let mut source_files = Vec::new();
         for i in 1..args.len() {
             // check for potential recursion and abort if present
@@ -204,7 +204,7 @@ pub struct RegisterEvent {
 impl RegisterEvent {
     pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
         Ok(Self {
-            name: arraystring::new_truncate(&args[0]),
+            name: string::new_truncate(&args[0]),
         })
     }
 
@@ -212,20 +212,22 @@ impl RegisterEvent {
         debug!("registering event");
         vec![
             CommandResult::ExecCentralExt(CentralRemoteCommand::RegisterEvent(Self {
-                name: self.name,
+                name: self.name.clone(),
             })),
             CommandResult::Continue,
         ]
     }
 
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
-        sim.add_event(self.name)?;
+        sim.add_event(self.name.clone())?;
         Ok(())
     }
 
     pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
-        central.model.events.push(EventModel { id: self.name });
-        central.event_queue.push(self.name);
+        central.model.events.push(EventModel {
+            id: self.name.clone(),
+        });
+        central.event_queue.push(self.name.clone());
         Ok(())
     }
 }
@@ -242,11 +244,11 @@ pub struct RegisterEntityPrefab {
 impl RegisterEntityPrefab {
     pub fn new(args: Vec<String>, location: &LocationInfo) -> Result<Self> {
         Ok(Self {
-            name: arraystring::new_truncate(&args[0]),
+            name: string::new_truncate(&args[0]),
             components: args
                 .iter()
                 .skip(1)
-                .map(|a| arraystring::new_truncate(a))
+                .map(|a| string::new_truncate(a))
                 .collect(),
         })
     }
@@ -255,7 +257,7 @@ impl RegisterEntityPrefab {
         debug!("registering entity prefab (loc)");
         vec![
             CommandResult::ExecCentralExt(CentralRemoteCommand::RegisterEntityPrefab(Self {
-                name: self.name,
+                name: self.name.clone(),
                 components: self.components.clone(),
             })),
             CommandResult::Continue,
@@ -264,7 +266,7 @@ impl RegisterEntityPrefab {
 
     pub fn execute_ext(&self, sim: &mut Sim) -> Result<()> {
         sim.model.entities.push(EntityPrefab {
-            name: self.name,
+            name: self.name.clone(),
             components: self.components.clone(),
         });
         Ok(())
@@ -272,7 +274,7 @@ impl RegisterEntityPrefab {
 
     pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
         central.model.entities.push(EntityPrefab {
-            name: self.name,
+            name: self.name.clone(),
             components: self.components.clone(),
         });
         Ok(())
@@ -301,7 +303,7 @@ impl RegisterComponent {
         let matches = options.parse(&args).unwrap();
         if matches.opt_present("marker") && !matches.free.is_empty() {
             Ok(Command::RegisterComponent(Self {
-                name: arraystring::new_truncate(&matches.free[0]),
+                name: string::new_truncate(&matches.free[0]),
                 trigger_events: vec![],
                 source_comp: Default::default(),
                 start_line: 0,
@@ -356,7 +358,7 @@ impl RegisterComponent {
         // trace!("source_comp: {:?}", comp_model);
 
         let component = ComponentModel {
-            name: self.name.into(),
+            name: self.name.clone(),
             triggers: self.trigger_events.clone(),
             // logic: comp_model.logic.get_subset(self.start_line, self.end_line),
             // logic: LogicModel {
@@ -405,7 +407,7 @@ impl RegisterComponent {
 
     pub fn execute_ext_distr(&self, central: &mut SimCentral) -> Result<()> {
         let component = ComponentModel {
-            name: self.name.into(),
+            name: self.name.clone(),
             triggers: self.trigger_events.clone(),
             ..ComponentModel::default()
         };
@@ -429,7 +431,7 @@ impl RegisterTrigger {
         // TODO handle cases with wrong number of args
 
         Ok(RegisterTrigger {
-            name: arraystring::new_truncate(&args[0]),
+            name: string::new_truncate(&args[0]),
             comp: Default::default(),
         })
     }
@@ -441,7 +443,7 @@ impl RegisterTrigger {
             CallInfo::Component(c) => Some(c),
             _ => None,
         }) {
-            new_reg_trigger.comp = comp_info.name;
+            new_reg_trigger.comp = comp_info.name.clone();
             debug!("Register::Trigger: comp_info.name: {}", comp_info.name);
         } else {
             // error: called outside of component block
@@ -462,7 +464,7 @@ impl RegisterTrigger {
         debug!("registering comp trigger: {:?}", self);
 
         if let Some(comp) = sim.model.get_component_mut(&self.comp) {
-            comp.triggers.push(self.name);
+            comp.triggers.push(self.name.clone());
         }
 
         Ok(())
@@ -476,7 +478,7 @@ impl RegisterTrigger {
             .get_component_mut(&self.comp)
             .unwrap()
             .triggers
-            .push(self.name);
+            .push(self.name.clone());
 
         Ok(())
     }

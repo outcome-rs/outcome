@@ -72,12 +72,13 @@ pub const SET_REQUEST: &str = "SetRequest";
 pub const SET_RESPONSE: &str = "SetResponse";
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct IntroduceWorkerToCoordRequest {
-    pub worker_addr: String,
+pub struct IntroduceWorkerToOrganizerRequest {
+    /// By default organizer will use the connection initiated by the worker.
+    pub worker_addr: Option<String>,
     pub worker_passwd: String,
 }
 
-impl Payload for IntroduceWorkerToCoordRequest {
+impl Payload for IntroduceWorkerToOrganizerRequest {
     fn type_(&self) -> MessageType {
         MessageType::IntroduceWorkerToCoordRequest
     }
@@ -85,6 +86,7 @@ impl Payload for IntroduceWorkerToCoordRequest {
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct IntroduceWorkerToCoordResponse {
+    pub redirect: String,
     pub error: String,
 }
 

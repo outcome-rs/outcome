@@ -4,9 +4,12 @@ pub mod step;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::{Read, Stdout};
+use std::io::{Read, Stdout, Write};
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 #[cfg(feature = "load_img")]
 use image;
@@ -15,17 +18,19 @@ use libloading::Library;
 #[cfg(feature = "machine_lua")]
 use rlua::Lua;
 
+use fnv::FnvHashMap;
+use id_pool::IdPool;
+
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::error::Error;
 use crate::model::{DataEntry, DataImageEntry, EventModel, Scenario};
-use crate::{arraystring, model, EntityName, EventName, Result, SimModel, Var, VarType};
-use crate::{EntityId, StringId};
-use fnv::FnvHashMap;
-use id_pool::IdPool;
-use std::process::Stdio;
-use std::str::FromStr;
-use std::time::Instant;
+use crate::snapshot::{Snap, Snapshot};
+use crate::{
+    model, string, CompName, EntityId, EntityName, EventName, Result, SimModel, SimStarter,
+    StringId, Var, VarType, FEATURE_NAME_SHORT_STRINGID, FEATURE_NAME_STACK_STRINGID,
+    FEATURE_SHORT_STRINGID, FEATURE_STACK_STRINGID,
+};
 
 /// Local (non-distributed) simulation instance object.
 ///
@@ -85,51 +90,95 @@ impl Sim {
     /// # Compression
     ///
     /// Optional compression using LZ4 algorithm can be performed.
-    pub fn to_snapshot(&self, compress: bool) -> Result<Vec<u8>> {
-        let mut data: Vec<u8> = bincode::serialize(&self).unwrap();
+    pub fn save_snapshot(&self, name: &str, compress: bool) -> Result<()> {
+        let mut data = self.to_snapshot()?;
+        // TODO store project path on Sim struct?
+        let project_path = crate::util::find_project_root(self.model.scenario.path.clone(), 3)?;
+        let snapshot_path = project_path.join(crate::SNAPSHOTS_DIR_NAME).join(name);
+
         #[cfg(feature = "lz4")]
         {
             if compress {
                 data = lz4::block::compress(&data, None, true)?;
             }
         }
-        Ok(data)
+
+        let mut file = File::create(snapshot_path)?;
+        file.write_all(&data);
+
+        Ok(())
     }
 
-    /// Create simulation instance from a vector of bytes representing a snapshot.
-    pub fn from_snapshot(mut buf: &Vec<u8>, compressed: bool) -> Result<Self> {
-        if compressed {
-            #[cfg(feature = "lz4")]
-            let data = lz4::block::decompress(&buf, None)?;
-            #[cfg(feature = "lz4")]
-            let mut sim = match bincode::deserialize::<Sim>(&data) {
-                Ok(ms) => ms,
-                Err(e) => return Err(Error::FailedReadingSnapshot(format!("{}", e))),
+    /// Creates new `Sim` from snapshot, using
+    pub fn load_snapshot(name: &str, compressed: Option<bool>) -> Result<Self> {
+        let project_path = crate::util::find_project_root(std::env::current_dir()?, 3)?;
+        let snapshot_path = project_path.join(crate::SNAPSHOTS_DIR_NAME).join(name);
+        let mut file = File::open(snapshot_path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes);
+        if let Some(compressed) = compressed {
+            if compressed {
+                #[cfg(feature = "lz4")]
+                {
+                    bytes = lz4::block::decompress(&bytes, None)?;
+                }
             };
-            #[cfg(not(feature = "lz4"))]
-            let mut sim: Self = match bincode::deserialize(&buf) {
-                Ok(ms) => ms,
-                Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
-            };
-            // TODO handle additional initialization here or create an init function on `Sim`
-            // sim.setup_lua_state(&model);
-            // sim.setup_lua_state_ent();
-            return Ok(sim);
+            let sim = Sim::from_snapshot(&mut bytes)?;
+            Ok(sim)
         } else {
-            // let mut sim = match bincode::deserialize::<Sim>(&buf) {
-            //     Ok(ms) => ms,
-            //     Err(e) => return Err(Error::FailedReadingSnapshot(format!("{}", e))),
-            // };
-
-            let mut sim = bincode::deserialize::<Sim>(&buf).unwrap();
-            // sim.setup_lua_state(&model);
-            // sim.setup_lua_state_ent();
-            return Ok(sim);
+            // first try reading compressed
+            #[cfg(feature = "lz4")]
+            {
+                // bytes = lz4::block::decompress(&bytes, None)?;
+                match lz4::block::decompress(&bytes, None) {
+                    Ok(mut bytes) => {
+                        let sim = Sim::from_snapshot(&mut bytes)?;
+                        return Ok(sim);
+                    }
+                    Err(_) => {
+                        let sim = Sim::from_snapshot(&mut bytes)?;
+                        return Ok(sim);
+                    }
+                }
+            }
+            #[cfg(not(feature = "lz4"))]
+            {
+                let sim = Sim::from_snapshot(&mut bytes)?;
+                return Ok(sim);
+            }
         }
     }
 
+    // /// Create simulation instance from a vector of bytes representing a snapshot.
+    // pub fn from_snapshot(mut buf: &Vec<u8>, compressed: bool) -> Result<Self> {
+    //     if compressed {
+    //         #[cfg(feature = "lz4")]
+    //         let data = lz4::block::decompress(&buf, None)?;
+    //         #[cfg(feature = "lz4")]
+    //         let mut sim = match bincode::deserialize::<Sim>(&data) {
+    //             Ok(ms) => ms,
+    //             Err(e) => return Err(Error::FailedReadingSnapshot(format!("{}", e))),
+    //         };
+    //         #[cfg(not(feature = "lz4"))]
+    //         let mut sim: Self = match bincode::deserialize(&buf) {
+    //             Ok(ms) => ms,
+    //             Err(e) => return Err(Error::FailedReadingSnapshot("".to_string())),
+    //         };
+    //         // TODO handle additional initialization here or create an init function on `Sim`
+    //         // sim.setup_lua_state(&model);
+    //         // sim.setup_lua_state_ent();
+    //         return Ok(sim);
+    //     } else {
+    //         let sim = Sim::from_snapshot()
+    //         // sim.setup_lua_state(&model);
+    //         // sim.setup_lua_state_ent();
+    //         return Ok(sim);
+    //     }
+    // }
+
     /// Create simulation instance using a path to snapshot file.
     pub fn from_snapshot_at(path: &str) -> Result<Self> {
+        println!("sim from_snapshot_at: {}", path);
         let pathbuf = PathBuf::from(path);
         let path = pathbuf.canonicalize().unwrap();
         let mut file = match File::open(path) {
@@ -143,10 +192,12 @@ impl Sim {
         file.read_to_end(&mut buf);
 
         // first try deserializing as compressed, otherwise it must be uncompressed
-        if let Ok(s) = Self::from_snapshot(&buf, true) {
+        if let Ok(s) = Self::from_snapshot(&mut buf) {
+            // if let Ok(s) = Self::from_snapshot(&buf, true) {
             return Ok(s);
         } else {
-            return Self::from_snapshot(&buf, false);
+            return Self::from_snapshot(&mut buf);
+            // return Self::from_snapshot(&buf, false);
         }
     }
 }
@@ -157,20 +208,48 @@ impl Sim {
         self.clock
     }
 
+    /// Creates a new bare-bones simulation instance.
+    pub fn new() -> Self {
+        Self {
+            model: SimModel::default(),
+            clock: 0,
+            event_queue: Vec::new(),
+            entities: FnvHashMap::default(),
+            entity_idx: FnvHashMap::default(),
+            entity_pool: id_pool::IdPool::new(),
+            #[cfg(feature = "machine_lua")]
+            entity_lua_state: Default::default(),
+            #[cfg(feature = "machine_dynlib")]
+            libs: Default::default(),
+        }
+    }
+
+    pub fn from_project_starter(project_path: PathBuf, starter: SimStarter) -> Result<Self> {
+        match starter {
+            SimStarter::Scenario(scenario) => {
+                Self::from_scenario_at_path(project_path.join(scenario))
+            }
+            SimStarter::Snapshot(snapshot) => {
+                Self::from_snapshot_at(project_path.join(snapshot).to_str().unwrap())
+            }
+            SimStarter::Experiment(_) => unimplemented!(),
+        }
+    }
+
     /// Creates new simulation instance from a path to scenario directory.
-    pub fn from_scenario_at_path(path: PathBuf) -> Result<Sim> {
+    pub fn from_scenario_at_path(path: PathBuf) -> Result<Self> {
         let scenario = Scenario::from_path(path.clone())?;
         Sim::from_scenario(scenario)
     }
 
     /// Creates new simulation instance from a &str path to scenario directory.
-    pub fn from_scenario_at(path: &str) -> Result<Sim> {
+    pub fn from_scenario_at(path: &str) -> Result<Self> {
         let path = PathBuf::from(path).canonicalize()?;
         Sim::from_scenario_at_path(path)
     }
 
     /// Creates new simulation instance from a scenario struct.
-    pub fn from_scenario(scenario: Scenario) -> Result<Sim> {
+    pub fn from_scenario(scenario: Scenario) -> Result<Self> {
         // first create a model using the given scenario
         let model = SimModel::from_scenario(scenario)?;
         // then create a sim struct using that model
@@ -179,7 +258,7 @@ impl Sim {
     }
 
     /// Creates a new simulation instance from a model struct.
-    pub fn from_model(model: model::SimModel) -> Result<Sim> {
+    pub fn from_model(model: model::SimModel) -> Result<Self> {
         // create a new sim object
         let mut sim: Sim = Sim {
             model,
@@ -216,11 +295,6 @@ impl Sim {
                         let lib_project_path = PathBuf::from(lib_project_path);
                         let lib_project_path_full = module.path.join(lib_project_path.clone());
 
-                        info!(
-                            "building library from rust project: {}",
-                            lib_project_path_full.to_str().unwrap()
-                        );
-
                         let mut cmd = std::process::Command::new("cargo");
                         cmd.current_dir(lib_project_path_full.clone()).arg("build");
 
@@ -232,10 +306,52 @@ impl Sim {
                             cmd.arg("--release");
                         }
 
+                        // pass relevant features to the command
+                        let mut features = vec![];
+
+                        // add explicitly selected features
+                        if let Some(project_features) = &module_lib.project_features {
+                            let features_str = project_features.split(",").collect::<Vec<&str>>();
+                            for feature_str in features_str {
+                                features.push(feature_str.to_string());
+                            }
+                        }
+
+                        // inherit features from the current program
+                        if module_lib.project_inherit_features {
+                            if FEATURE_STACK_STRINGID {
+                                features
+                                    .push(format!("outcome-core/{}", FEATURE_NAME_STACK_STRINGID));
+                            }
+                            if FEATURE_SHORT_STRINGID {
+                                features
+                                    .push(format!("outcome-core/{}", FEATURE_NAME_SHORT_STRINGID));
+                            }
+                            // TODO add the rest of the features
+                        }
+
+                        cmd.arg(format!(
+                            "--features={}",
+                            features.iter().as_slice().join(",")
+                        ));
+
+                        info!(
+                            "building library from rust project: {}, mode: {:?} (cmd: {:?})",
+                            lib_project_path_full.to_str().unwrap(),
+                            module_lib.project_mode,
+                            cmd
+                        );
+
+                        // execute the command, building the project
                         let status = cmd.status()?;
 
                         let mut lib_path_full = lib_project_path_full.join(format!(
-                            "target/release/lib{}",
+                            // TODO does DLL output also include 'lib{}' prefix by default?
+                            "target/{}/lib{}",
+                            module_lib
+                                .project_mode
+                                .as_ref()
+                                .unwrap_or(&"debug".to_string()),
                             lib_project_path.file_name().unwrap().to_str().unwrap()
                         ));
                         // set extension based on detected system
@@ -258,11 +374,10 @@ impl Sim {
         #[cfg(feature = "machine_script")]
         {
             sim.spawn_entity(
-                Some(&arraystring::new_unchecked("_mod_init")),
-                Some(arraystring::new_unchecked("_mod_init")),
+                Some(&string::new_truncate("_mod_init")),
+                Some(string::new_truncate("_mod_init")),
             )?;
-            sim.event_queue
-                .push(arraystring::new_unchecked("_scr_init"));
+            sim.event_queue.push(string::new_truncate("_scr_init"));
         }
 
         // add entities
@@ -306,15 +421,15 @@ impl Sim {
         trace!("starting spawn_entity");
 
         trace!("creating new entity");
-        let now = Instant::now();
+        // let now = Instant::now();
         let mut ent = match prefab {
             Some(p) => Entity::from_prefab_name(p, &self.model)?,
             None => Entity::empty(),
         };
-        println!(
-            "creating ent from prefab took: {}ns",
-            now.elapsed().as_nanos()
-        );
+        // trace!(
+        //     "creating ent from prefab took: {}ns",
+        //     now.elapsed().as_nanos()
+        // );
         trace!("done");
 
         trace!("getting new_uid from pool");
@@ -324,7 +439,7 @@ impl Sim {
         trace!("inserting entity");
         if let Some(n) = &name {
             if !self.entity_idx.contains_key(n) {
-                self.entity_idx.insert(*n, new_uid);
+                self.entity_idx.insert(n.clone(), new_uid);
                 self.entities.insert(new_uid, ent);
             } else {
                 return Err(Error::Other(format!(
@@ -341,7 +456,7 @@ impl Sim {
     }
 
     pub fn add_event(&mut self, name: EventName) -> Result<()> {
-        self.model.events.push(EventModel { id: name });
+        self.model.events.push(EventModel { id: name.clone() });
         self.event_queue.push(name);
         Ok(())
     }
@@ -415,16 +530,6 @@ impl Sim {
 
 /// Data access helpers.
 impl Sim {
-    /// Get any var using absolute address and coerce it to string.
-    pub fn get_as_string(&self, addr: &Address) -> Result<String> {
-        Ok(self.get_var(addr)?.to_string())
-    }
-
-    /// Get any var by absolute address and coerce it to integer.
-    pub fn get_as_int(&self, addr: &Address) -> Result<crate::Int> {
-        Ok(self.get_var(addr)?.to_int())
-    }
-
     /// Get all vars, coerce each to string.
     pub fn get_all_as_strings(&self) -> HashMap<String, String> {
         let mut out_map = HashMap::new();
@@ -445,6 +550,29 @@ impl Sim {
         out_map
     }
 
+    pub fn get_vars(&self, find_entity_names: bool) -> Result<Vec<(String, &Var)>> {
+        let mut out = Vec::new();
+        for (ent_id, entity) in &self.entities {
+            let mut ent_name: EntityName = EntityName::from(ent_id.to_string());
+            if find_entity_names {
+                if let Some((_ent_name, _)) = self.entity_idx.iter().find(|(_, id)| id == &ent_id) {
+                    ent_name = _ent_name.clone();
+                }
+            }
+            out.extend(
+                entity
+                    .storage
+                    .map
+                    .iter()
+                    .map(|((comp_name, var_name), var)| {
+                        (format!("{}:{}:{}", ent_name, comp_name, var_name), var)
+                    })
+                    .collect::<Vec<(String, &Var)>>(),
+            );
+        }
+        Ok(out)
+    }
+
     /// Get a `Var` from the sim using an absolute address.
     pub fn get_var(&self, addr: &Address) -> Result<&Var> {
         if let Some(ent_uid) = self.entity_idx.get(&addr.entity) {
@@ -461,7 +589,7 @@ impl Sim {
                 return ent.storage.get_var(&addr.storage_index());
             }
         }
-        Err(Error::FailedGettingVarFromSim(*addr))
+        Err(Error::FailedGettingVarFromSim(addr.clone()))
     }
 
     /// Get a variable from the sim using an absolute address.
@@ -480,7 +608,7 @@ impl Sim {
                 return ent.storage.get_var_mut(&addr.storage_index());
             }
         }
-        Err(Error::FailedGettingVarFromSim(*addr))
+        Err(Error::FailedGettingVarFromSim(addr.clone()))
     }
 
     /// Set a var at address using a string value as input.
@@ -544,6 +672,7 @@ impl Sim {
 }
 
 #[cfg(feature = "grids")]
+/// Grids related functions.
 impl Sim {
     /// Set a var of any type using a string grid as input.
     pub fn set_from_string_grid(&mut self, addr: &Address, vec2d: &Vec<Vec<String>>) -> Result<()> {
@@ -677,6 +806,7 @@ impl Sim {
     }
 }
 
+// TODO revise data applying
 /// Data applying functions.
 impl Sim {
     /// Apply regular data as found in data declarations in user files.
@@ -769,63 +899,100 @@ impl Sim {
 /// Entity and component handling functions.
 impl Sim {
     /// Gets reference to entity using a valid integer id
-    pub fn get_entity(&self, uid: &EntityId) -> Result<&Entity> {
-        self.entities.get(uid).ok_or(Error::NoEntity(*uid))
+    pub fn get_entity(&self, id: &EntityId) -> Result<&Entity> {
+        self.entities
+            .get(id)
+            .ok_or(Error::FailedGettingEntityById(*id))
     }
 
     /// Gets mutable reference to entity using an integer id
-    pub fn get_entity_mut(&mut self, uid: &EntityId) -> Result<&mut Entity> {
-        self.entities.get_mut(uid).ok_or(Error::NoEntity(*uid))
+    pub fn get_entity_mut(&mut self, id: &EntityId) -> Result<&mut Entity> {
+        self.entities
+            .get_mut(id)
+            .ok_or(Error::FailedGettingEntityById(*id))
     }
 
     /// Gets reference to entity using a string id
-    pub fn get_entity_str(&self, name: &StringId) -> Result<&Entity> {
-        let entity_uid = self
+    pub fn get_entity_by_name(&self, name: &EntityName) -> Result<&Entity> {
+        let entity_id = self
             .entity_idx
             .get(name)
-            .ok_or(Error::NoEntityIndexed(name.to_string()))?;
-        self.get_entity(entity_uid)
+            .ok_or(Error::FailedGettingEntityByName(name.to_string()))?;
+        self.get_entity(entity_id)
     }
 
     /// Gets mutable reference to entity using a string id
-    pub fn get_entity_str_mut(&mut self, name: &StringId) -> Result<&mut Entity> {
-        let entity_uid = *self
+    pub fn get_entity_by_name_mut(&mut self, name: &EntityName) -> Result<&mut Entity> {
+        let entity_id = self
             .entity_idx
             .get(name)
-            .ok_or(Error::NoEntityIndexed(name.to_string()))?;
-        self.get_entity_mut(&entity_uid)
+            .ok_or(Error::FailedGettingEntityByName(name.to_string()))?;
+        self.entities
+            .get_mut(entity_id)
+            .ok_or(Error::FailedGettingEntityById(*entity_id))
     }
 
+    /// Gets references to all entity objects
     pub fn get_entities(&self) -> Vec<&Entity> {
         self.entities.values().collect()
     }
 
+    /// Gets mutable references to all entity objects
     pub fn get_entities_mut(&mut self) -> Vec<&mut Entity> {
         self.entities.values_mut().collect()
     }
 
-    /// Gets entities that have the same set of components
-    pub fn get_entities_of_type(&self, type_: &Vec<StringId>) -> Vec<&Entity> {
-        unimplemented!()
+    /// Gets references to all entities that have the same set of components
+    pub fn get_entities_of_type(&self, type_: &Vec<CompName>) -> Vec<&Entity> {
+        self.entities
+            .iter()
+            .filter(|(_, e)| type_.iter().all(|c| e.components.contains(c)))
+            .map(|(_, e)| e)
+            .collect()
+    }
+
+    /// Gets references to component variable collections from all entities,
+    /// content of each collection being same as specified in the component
+    /// model definition.
+    ///
+    /// NOTE: If a variable exists within the context of a component but wasn't
+    /// included in the component model then it will not be retrieved.
+    pub fn get_components(&self, comp_name: &CompName) -> Result<Vec<Vec<&Var>>> {
+        let mut out = Vec::new();
+        let comp_model = self.model.get_component(comp_name)?;
+        for (_, entity) in &self.entities {
+            let mut _out = Vec::new();
+            for model_var in &comp_model.vars {
+                _out.push(
+                    entity
+                        .storage
+                        .get_var(&(comp_name.clone(), model_var.name.clone()))?,
+                );
+            }
+            out.push(_out);
+        }
+        Ok(out)
     }
 }
 
+// TODO use some other (more basic?) scenario
+const TEST_SCENARIO_PATH: &str = "../examples/simulation/scenarios/hello_world.toml";
+
 #[test]
 fn sim_from_scenario_path() {
-    let mut sim = Sim::from_scenario_at("../scenarios/barebones");
-    assert!(sim.is_ok());
+    Sim::from_scenario_at(TEST_SCENARIO_PATH).expect("failed starting sim from path to scenario");
 }
 
-// #[test]
-// fn sim_from_scenario_struct() {
-//     let scenario_manifest = crate::model::ScenarioManifest {};
-//     let scenario = crate::model::Scenario {};
-//     let (model, sim_instance) = match outcome::Sim::from_scenario(scenario) {};
-// }
+#[test]
+fn sim_from_scenario_struct() {
+    let scenario = Scenario::default();
+    Sim::from_scenario(scenario).expect("failed starting sim from empty scenario");
+}
 
 #[test]
 fn sim_step() {
-    let mut sim = Sim::from_scenario_at("../scenarios/barebones").unwrap();
+    let mut sim = Sim::from_scenario_at(TEST_SCENARIO_PATH)
+        .expect("failed starting sim from path to scenario");
     assert!(sim.step().is_ok());
     assert!(sim.step().is_ok());
     assert!(sim.step().is_ok());

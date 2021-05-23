@@ -2,7 +2,8 @@
 name = "hello_world"
 description = "Barebones hello world module."
 version = "0.1.0"
-engine = "*"
+engine = { version = "*", features = ["machine_dynlib"] }
+
 
 #[services.hello_service]
 ##path = "hello_service/target/debug/hello_service"
@@ -12,6 +13,6 @@ engine = "*"
 #args = ["--managed"]
 
 [libraries.hello_lib]
+project = { path = "hello_lib", mode = "release", inherit-features = true, features = "" }
 #path = "hello_lib/target/debug/libhello_lib"
 #project = "hello_lib"
-project = { path = "hello_lib", mode = "debug" }

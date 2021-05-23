@@ -4,7 +4,7 @@ use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, LogicModel, SimModel, VarModel};
 use crate::{
-    arraystring, CompName, EntityId, EntityName, LongString, ShortString, Sim, StringId, VarType,
+    string, CompName, EntityId, EntityName, LongString, ShortString, Sim, StringId, VarType,
 };
 
 use crate::distr::SimCentral;
@@ -71,7 +71,7 @@ impl ComponentBlock {
             Ok(po) => po,
             Err(e) => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(e.to_string()),
                 ))
             }
@@ -79,8 +79,8 @@ impl ComponentBlock {
 
         match positions_options {
             Some(positions) => Ok(Command::Component(ComponentBlock {
-                name: arraystring::new_truncate(&args[0]),
-                source_comp: location.comp_name.unwrap(),
+                name: string::new_truncate(&args[0]),
+                source_comp: location.comp_name.clone().unwrap(),
                 source_file: location.source.unwrap(),
                 start_line: line + 1,
                 end_line: positions.0,
@@ -93,7 +93,7 @@ impl ComponentBlock {
             //     })))
             // }
             None => Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("end of component block not found".to_string()),
             )),
         }
@@ -110,7 +110,7 @@ impl ComponentBlock {
         let mut new_self = self.clone();
 
         call_stack.push(CallInfo::Component(ComponentCallInfo {
-            name: new_self.name,
+            name: new_self.name.clone(),
             start_line: new_self.start_line,
             end_line: new_self.end_line,
         }));
@@ -138,7 +138,7 @@ impl ComponentBlock {
         let comp_model = sim.model.get_component(&self.source_comp).unwrap();
 
         let component = ComponentModel {
-            name: self.name.into(),
+            name: self.name.clone(),
             //start_state: arraystring::new_unchecked("start"),
             // triggers: vec![StringId::from_unchecked("step")],
             // logic: LogicModel {
@@ -173,7 +173,7 @@ impl ComponentBlock {
         let comp_model = central.model.get_component(&self.source_comp).unwrap();
 
         let component = ComponentModel {
-            name: self.name.into(),
+            name: self.name.clone(),
             //start_state: arraystring::new_unchecked("start"),
             // triggers: vec![StringId::from_unchecked("step")],
             // logic: LogicModel {

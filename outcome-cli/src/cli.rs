@@ -10,6 +10,7 @@ use std::{env, thread};
 
 use anyhow::{Error, Result};
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
+use outcome::util::{find_project_root, get_scenario_paths, get_snapshot_paths};
 use outcome::Sim;
 use outcome_net::{
     CompressionPolicy, Organizer, Server, ServerConfig, SimConnection, SocketEvent,
@@ -20,9 +21,7 @@ use outcome_net::{
 use notify::{RecommendedWatcher, Watcher};
 
 use crate::interactive::{OnSignal, OnSignalAction};
-use crate::util::{
-    find_project_root, format_elements_list, get_scenario_paths, get_snapshot_paths,
-};
+use crate::util::format_elements_list;
 use crate::{interactive, test};
 use std::str::FromStr;
 
@@ -637,7 +636,9 @@ fn start_run_snapshot(path: PathBuf, matches: &ArgMatches) -> Result<()> {
     info!("Running interactive session using snapshot at: {:?}", path);
     if matches.is_present("interactive") {
         interactive::start(
-            interactive::InterfaceType::Snapshot(path.to_string_lossy().to_string()),
+            interactive::InterfaceType::Snapshot(
+                path.file_name().unwrap().to_string_lossy().to_string(),
+            ),
             matches.value_of("icfg").unwrap_or(interactive::CONFIG_FILE),
             None,
             None,
@@ -731,7 +732,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
         None => Vec::new(),
     };
 
-    let sim_instance = match matches.value_of("cluster") {
+    let sim_instance = match matches.value_of("organizer") {
         Some(addr) => {
             if let Some(scenario_path) = matches.value_of("scenario") {
                 SimConnection::UnionOrganizer(Organizer::new_with_path(
@@ -740,11 +741,29 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
                     worker_addrs,
                 )?)
             } else if let Some(snapshot_path) = matches.value_of("snapshot") {
-                unimplemented!()
-
-                // SimConnection::ClusterCoord(Coord::new_with_path());
+                let snapshot_path = PathBuf::from(snapshot_path);
+                let project_root = find_project_root(snapshot_path.clone(), 3)?;
+                let central = outcome::distr::central::SimCentral::new_from_project_starter(
+                    project_root,
+                    outcome::SimStarter::Snapshot(String::from(
+                        snapshot_path.file_name().unwrap().to_str().unwrap(),
+                    )),
+                )?;
+                SimConnection::UnionOrganizer(Organizer::new(
+                    central,
+                    matches.value_of("organizer").unwrap_or(""),
+                    matches
+                        .value_of("workers")
+                        .map(|w| {
+                            w.split(",")
+                                .into_iter()
+                                .map(|s| s.to_string())
+                                .collect::<Vec<String>>()
+                        })
+                        .unwrap_or(vec![]),
+                )?)
             } else {
-                panic!()
+                return Err(Error::msg("must provide either scenario or snapshot"));
             }
         }
         None => {
@@ -753,7 +772,7 @@ fn start_server(matches: &ArgMatches) -> Result<()> {
             } else if let Some(snapshot_path) = matches.value_of("snapshot") {
                 SimConnection::Local(Sim::from_snapshot_at(&snapshot_path)?)
             } else {
-                unimplemented!()
+                panic!("")
             }
         }
     };
@@ -879,7 +898,7 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
     let mut worker = Worker::new(matches.value_of("address"))?;
     println!("Now listening on {}", worker.greeter.listener_addr()?);
 
-    if let Some(coord_addr) = matches.value_of("coord") {
+    if let Some(coord_addr) = matches.value_of("organizer") {
         print!("initiating connection with coordinator... ");
         std::io::stdout().flush()?;
 
@@ -887,8 +906,9 @@ fn start_worker(matches: &ArgMatches) -> Result<()> {
             Ok(_) => print!("success\n"),
             Err(e) => print!("failed ({:?})", e),
         }
+    } else {
+        worker.handle_coordinator()?;
     }
-    worker.handle_coordinator()?;
 
     // allow graceful shutdown on signal
     let running = Arc::new(AtomicBool::new(true));

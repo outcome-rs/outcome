@@ -21,7 +21,7 @@ impl Server {
                 let query: outcome::query::Query = qr.query.try_into()?;
 
                 if let outcome::query::Trigger::Event(event_name) = &query.trigger {
-                    client.push_event_triggered_query(*event_name, msg.task_id, query)?;
+                    client.push_event_triggered_query(event_name.clone(), msg.task_id, query)?;
                 } else if let outcome::query::Trigger::Mutation(address) = query.trigger {
                     unimplemented!()
                 } else {
@@ -48,13 +48,11 @@ impl Server {
             SimConnection::UnionOrganizer(coord) => {
                 // TODO real query
                 let query = outcome::Query {
-                    trigger: outcome::query::Trigger::Event(
-                        outcome::EventName::from("step").unwrap(),
-                    ),
+                    trigger: outcome::query::Trigger::Event(outcome::string::new_truncate("step")),
                     description: outcome::query::Description::Addressed,
                     layout: outcome::query::Layout::Typed,
                     filters: vec![outcome::query::Filter::AllComponents(vec![
-                        outcome::CompName::from("transform").unwrap(),
+                        outcome::string::new_truncate("transform"),
                     ])],
                     mappings: vec![outcome::query::Map::All],
                 };

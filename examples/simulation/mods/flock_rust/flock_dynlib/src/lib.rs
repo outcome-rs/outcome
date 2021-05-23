@@ -1,6 +1,6 @@
 use outcome_core::machine::cmd::CommandResult;
 use outcome_core::{
-    arraystring::new_truncate, entity::Storage, entity::StorageIndex, machine::Result, EntityId,
+    entity::Storage, entity::StorageIndex, machine::Result, string::new_truncate, EntityId,
 };
 
 #[no_mangle]

@@ -4,7 +4,7 @@ use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage, StorageIndex};
 use crate::model::{ComponentModel, SimModel};
 use crate::var::Var;
-use crate::{CompName, MedString, StringId, VarType};
+use crate::{CompName, StringId, VarType};
 
 use super::super::{CentralRemoteCommand, Command, CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::cmd::flow::{end, ifelse};
@@ -32,22 +32,24 @@ impl ForIn {
         let line = location.line.unwrap();
 
         let variable = match &args.get(0) {
-            Some(arg) => ShortLocalAddress::from_str(arg)
-                .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
+            Some(arg) => ShortLocalAddress::from_str(arg).map_err(|e| {
+                Error::new(location.clone(), ErrorKind::InvalidAddress(e.to_string()))
+            })?,
             // Some(arg) => StringId::from(arg).unwrap(),
             None => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(format_err_no_arguments(location)),
                 ))
             }
         };
         let target = match args.get(2) {
-            Some(arg) => ShortLocalAddress::from_str(arg)
-                .map_err(|e| Error::new(*location, ErrorKind::InvalidAddress(e.to_string())))?,
+            Some(arg) => ShortLocalAddress::from_str(arg).map_err(|e| {
+                Error::new(location.clone(), ErrorKind::InvalidAddress(e.to_string()))
+            })?,
             None => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody("too few arguments?".to_string()),
                 ))
             }
@@ -81,7 +83,7 @@ impl ForIn {
             Ok(po) => po,
             Err(e) => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(e.to_string()),
                 ))
             }
@@ -101,7 +103,7 @@ impl ForIn {
                 variable,
             }),
             None => Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("End of forin block not found.".to_string()),
             )),
         }
@@ -117,16 +119,17 @@ impl ForIn {
     ) -> CommandResult {
         // get target len
         // let iter_target = match ent_storage.get_var_from_addr(&self.target, Some(comp_uid)) {
-        let iter_target = match ent_storage.get_var(&self.target.storage_index_using(*comp_id)) {
-            Ok(var) => var,
-            Err(_) => {
-                return CommandResult::Err(Error::new(
-                    *location,
-                    //todo
-                    ErrorKind::FailedGettingFromStorage(self.target.to_string()),
-                ));
-            }
-        };
+        let iter_target =
+            match ent_storage.get_var(&self.target.storage_index_using(comp_id.clone())) {
+                Ok(var) => var,
+                Err(_) => {
+                    return CommandResult::Err(Error::new(
+                        location.clone(),
+                        //todo
+                        ErrorKind::FailedGettingFromStorage(self.target.to_string()),
+                    ));
+                }
+            };
 
         let len = match iter_target {
             Var::Int(num) => *num as usize,
@@ -144,15 +147,15 @@ impl ForIn {
         // let variable = (*comp_uid, self.variable.var_id);
         let variable = LocalAddress {
             // comp: self.variable.comp.unwrap_or(*comp_id),
-            comp: self.variable.comp.unwrap_or(*comp_id),
+            comp: self.variable.comp.clone().unwrap_or(comp_id.clone()),
             var_type: self.variable.var_type,
-            var_name: self.variable.var_name,
+            var_name: self.variable.var_name.clone(),
         };
         let target = LocalAddress {
             // comp: self.target.comp.unwrap_or(*comp_id),
-            comp: self.target.comp.unwrap_or(*comp_id),
+            comp: self.target.comp.clone().unwrap_or(comp_id.clone()),
             var_type: self.target.var_type,
-            var_name: self.target.var_name,
+            var_name: self.target.var_name.clone(),
         };
         // let target = (*comp_id, self.target.var_id);
         // let variable_type = self.variable.var_type;

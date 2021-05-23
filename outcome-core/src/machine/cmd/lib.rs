@@ -138,10 +138,12 @@ impl LibCall {
                     func();
                 }
                 LibCallSign::VoidEntity => {
-                    let func: libloading::Symbol<unsafe extern "C" fn(u32, &mut Storage)> =
-                        lib.get(self.func_name.as_bytes()).unwrap();
-                    func(*entity_id, &mut storage);
-                    println!("called VoidEntity function");
+                    let mut func: libloading::Symbol<
+                        unsafe extern "C" fn(&EntityId, &mut Storage) -> CommandResult,
+                    > = lib.get(self.func_name.as_bytes()).unwrap();
+                    let result: CommandResult = func(&entity_id, &mut storage);
+                    // func(&entity_id, &mut storage, &mut result);
+                    debug!("called VoidEntity function, result: {:?}", result);
                 }
                 LibCallSign::VoidArg(arg_vt) => match arg_vt {
                     VarType::IntGrid => {
@@ -176,7 +178,9 @@ impl LibCall {
                             //                            let ref_ =
                             // comp.loc_vars.get(self.pipe_out.unwrap()).unwrap();
                             *storage
-                                .get_var_mut(&self.pipe_out.unwrap().storage_index())
+                                .get_var_mut(
+                                    &self.pipe_out.as_ref().unwrap().storage_index().clone(),
+                                )
                                 .unwrap()
                                 .as_int_mut()
                                 .unwrap() = int as Int;

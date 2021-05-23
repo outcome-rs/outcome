@@ -44,7 +44,7 @@ impl SimNode {
             model: model.clone(),
             entities: FnvHashMap::default(),
             entities_idx: FnvHashMap::default(),
-            event_queue: vec![StringId::from("_scr_init").unwrap()],
+            event_queue: vec![crate::string::new_truncate("_scr_init")],
         };
 
         // sim_node.apply_model_entities(entities);
@@ -88,7 +88,7 @@ impl SimNode {
         ) {
             return ent.storage.get_var(&addr.storage_index());
         }
-        Err(Error::FailedGettingVarFromSim(*addr))
+        Err(Error::FailedGettingVarFromSim(addr.clone()))
     }
 
     /// Get a variable from the sim using an absolute address.
@@ -107,7 +107,7 @@ impl SimNode {
                 return ent.storage.get_var_mut(&addr.storage_index());
             }
         }
-        Err(Error::FailedGettingVarFromSim(*addr))
+        Err(Error::FailedGettingVarFromSim(addr.clone()))
     }
 
     pub fn add_entity(
@@ -300,6 +300,7 @@ impl SimNode {
             match network.sig_read_central()?.1 {
                 Signal::SpawnEntities(e) => {
                     warn!("signal: spawn entities: {:?}", e);
+                    warn!("current model entity prefabs: {:?}", self.model.entities);
                     for (a, b, c) in e {
                         self.add_entity(a, b, c)?;
                     }

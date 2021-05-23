@@ -2,7 +2,7 @@
 
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompName, ShortString, StringId};
+use crate::{string, CompName, ShortString, StringId};
 
 use crate::machine::cmd::{CommandPrototype, CommandResult, LocationInfo};
 use crate::machine::error::{Error, ErrorKind};
@@ -24,7 +24,7 @@ impl Call {
         commands: &Vec<CommandPrototype>,
     ) -> Result<Call, Error> {
         Ok(Call {
-            proc_name: arraystring::new_truncate(&args[0]),
+            proc_name: args[0].parse().unwrap(),
         })
     }
 
@@ -44,7 +44,7 @@ impl Call {
             Some(se) => se,
             None => {
                 return CommandResult::Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(format!(
                     "call failed: procedure with the name `{}` doesn't exist in the current scope",
                     &self.proc_name

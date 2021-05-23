@@ -1,7 +1,7 @@
 use crate::address::Address;
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{arraystring, CompName, EntityId, EntityName, ShortString, Sim, StringId};
+use crate::{string, CompName, EntityId, EntityName, ShortString, Sim, StringId};
 use std::iter::FromIterator;
 
 use super::super::super::{
@@ -15,7 +15,8 @@ use crate::machine::ComponentCallInfo;
 
 pub const COMMAND_NAMES: [&'static str; 1] = ["state"];
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct State {
     pub comp: CompName,
     pub signature: Option<Address>,
@@ -65,7 +66,7 @@ impl State {
             Ok(po) => po,
             Err(e) => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(e.to_string()),
                 ))
             }
@@ -73,15 +74,15 @@ impl State {
 
         match positions_options {
             Some(positions) => Ok(Command::State(State {
-                comp: arraystring::new_truncate(""),
+                comp: string::new_truncate(""),
                 signature: None,
-                name: arraystring::new_truncate(&args[0]),
+                name: string::new_truncate(&args[0]),
                 start_line: line + 1,
                 end_line: positions.0,
                 output_variable: None,
             })),
             None => Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("end of state block not found".to_string()),
             )),
         }
@@ -101,7 +102,7 @@ impl State {
             CallInfo::Component(c) => Some(c),
             _ => None,
         }) {
-            new_self.comp = comp_info.name;
+            new_self.comp = comp_info.name.clone();
             new_self.start_line = self.start_line - comp_info.start_line;
             new_self.end_line = self.end_line - comp_info.start_line;
         }
@@ -119,7 +120,7 @@ impl State {
         //println!("execute ext on state cmd");
         //println!("{:?}", sim.model.components);
         // let comp_name = self.signature.unwrap().component;
-        let comp_name = self.comp;
+        let comp_name = self.comp.clone();
         // trace!("comp_name: {:?}", comp_name);
         for component in &mut sim.model.components {
             if component.name != comp_name {
@@ -128,7 +129,7 @@ impl State {
             component
                 .logic
                 .states
-                .insert(self.name, (self.start_line, self.end_line));
+                .insert(self.name.clone(), (self.start_line, self.end_line));
             debug!("inserted state {:?} at comp {:?}", self, comp_name);
         }
         Ok(())
@@ -138,7 +139,7 @@ impl State {
         //println!("execute ext on state cmd");
         //println!("{:?}", sim.model.components);
         // let comp_name = self.signature.unwrap().component;
-        let comp_name = self.comp;
+        let comp_name = self.comp.clone();
         // trace!("comp_name: {:?}", comp_name);
         for component in &mut central.model.components {
             if component.name != comp_name {
@@ -147,7 +148,7 @@ impl State {
             component
                 .logic
                 .states
-                .insert(self.name, (self.start_line, self.end_line));
+                .insert(self.name.clone(), (self.start_line, self.end_line));
             debug!("inserted state {:?} at comp {:?}", self, comp_name);
         }
         Ok(())

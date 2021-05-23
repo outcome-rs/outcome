@@ -42,8 +42,14 @@ impl Range {
             pointer = pointer + 1;
         }
         // println!("{:?}", list);
-        if !storage.get_var(&(*comp_name, self.output.var_name)).is_ok() {
-            storage.insert((*comp_name, self.output.var_name), Var::List(Vec::new()));
+        if !storage
+            .get_var(&(comp_name.clone(), self.output.var_name.clone()))
+            .is_ok()
+        {
+            storage.insert(
+                (comp_name.clone(), self.output.var_name.clone()),
+                Var::List(Vec::new()),
+            );
         }
         // match storage.get_var_mut(&(*comp_name, self.output.var_id)) {
         //     Ok(il) => *il = Var::List(list),

@@ -156,14 +156,14 @@ fn run_conditionals(instructions: &mut Vec<Instruction>) -> Result<()> {
                     "if" => {
                         if inside_if_if {
                             return Err(Error::new(
-                                instruction.location,
+                                instruction.location.clone(),
                                 ErrorKind::ErrorProcessingDirective(
                                     "nested `if` directives not supported".to_string(),
                                 ),
                             ));
                         } else if inside_if_else {
                             return Err(Error::new(
-                                instruction.location,
+                                instruction.location.clone(),
                                 ErrorKind::ErrorProcessingDirective(
                                     "cannot place `if` inside `else` block".to_string(),
                                 ),
@@ -178,14 +178,14 @@ fn run_conditionals(instructions: &mut Vec<Instruction>) -> Result<()> {
                             inside_if_else = true;
                         } else if inside_if_else {
                             return Err(Error::new(
-                                instruction.location,
+                                instruction.location.clone(),
                                 ErrorKind::ErrorProcessingDirective(
                                     "nested `else` directives are not allowed".to_string(),
                                 ),
                             ));
                         } else {
                             return Err(Error::new(
-                                instruction.location,
+                                instruction.location.clone(),
                                 ErrorKind::ErrorProcessingDirective(
                                     "`else` must be declared inside `if` block".to_string(),
                                 ),
@@ -199,7 +199,7 @@ fn run_conditionals(instructions: &mut Vec<Instruction>) -> Result<()> {
                             inside_if_else = false;
                         } else {
                             return Err(Error::new(
-                                instruction.location,
+                                instruction.location.clone(),
                                 ErrorKind::ErrorProcessingDirective(
                                     "`endif` without preceding `if`".to_string(),
                                 ),
@@ -279,7 +279,7 @@ fn run_print(
                         //None => error!("error"); "ERROR",
                         None => {
                             return Err(Error::new(
-                                *location,
+                                location.clone(),
                                 ErrorKind::ErrorProcessingDirective(format!(
                                     "no data: {}",
                                     &print_string[start_index + 1..end_index],
@@ -297,7 +297,7 @@ fn run_print(
                         Some(val) => val,
                         None => {
                             return Err(Error::new(
-                                *location,
+                                location.clone(),
                                 ErrorKind::ErrorProcessingDirective(format!(
                                     "no data: {}",
                                     &print_string[start_index + 1..]

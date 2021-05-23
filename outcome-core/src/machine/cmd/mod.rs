@@ -31,8 +31,8 @@ use smallvec::SmallVec;
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
 
-use crate::{arraystring, model, util, CompName, EntityId, ShortString};
-use crate::{EntityName, MedString, Sim, StringId, VarType};
+use crate::{model, string, util, CompName, EntityId, ShortString};
+use crate::{EntityName, Sim, StringId, VarType};
 
 use crate::address::{Address, ShortLocalAddress};
 use crate::entity::{Entity, EntityNonSer, Storage};
@@ -181,7 +181,7 @@ impl Command {
     ) -> Result<Command> {
         let cmd_name = match &proto.name {
             Some(c) => c,
-            None => return Err(Error::new(*location, ErrorKind::NoCommandPresent)),
+            None => return Err(Error::new(location.clone(), ErrorKind::NoCommandPresent)),
         };
         let args = match &proto.arguments {
             Some(a) => a.clone(),
@@ -251,7 +251,7 @@ impl Command {
             "lib_call" => Ok(LibCall::new(args)?),
 
             _ => Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::UnknownCommand(cmd_name.to_string()),
             )),
         }
@@ -490,7 +490,8 @@ impl ExtCommand {
 }
 
 /// Attach
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Attach {
     pub model_type: StringId,
     pub model_id: StringId,
@@ -518,7 +519,8 @@ impl Attach {
     }
 }
 /// Detach
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Detach {
     pub signature: Address,
     /* pub comp_model_type: SmallString,
@@ -570,29 +572,32 @@ impl Detach {
 }
 
 /// Goto
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Goto {
     pub target_state: StringId,
 }
 impl Goto {
     fn new(args: Vec<String>) -> Result<Self> {
         Ok(Goto {
-            target_state: arraystring::new_truncate(&args[0]),
+            target_state: string::new_truncate(&args[0]),
         })
     }
     pub fn execute_loc(&self, comp_state: &mut StringId) -> CommandResult {
-        *comp_state = self.target_state;
+        *comp_state = self.target_state.clone();
         CommandResult::Continue
         // CommandResult::GoToState(self.target_state.clone())
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Jump {
     pub target: JumpTarget,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub enum JumpTarget {
     Line(u16),
     Tag(StringId),
@@ -606,9 +611,9 @@ impl Jump {
             })
         } else {
             let tag = if args[0].starts_with('@') {
-                arraystring::new_truncate(&args[0][1..])
+                string::new_truncate(&args[0][1..])
             } else {
-                arraystring::new_truncate(&args[0])
+                string::new_truncate(&args[0])
             };
             Ok(Jump {
                 target: JumpTarget::Tag(tag),
@@ -618,7 +623,7 @@ impl Jump {
     pub fn execute_loc(&self) -> CommandResult {
         match &self.target {
             JumpTarget::Line(line) => CommandResult::JumpToLine(*line as usize),
-            JumpTarget::Tag(tag) => CommandResult::JumpToTag(*tag),
+            JumpTarget::Tag(tag) => CommandResult::JumpToTag(tag.clone()),
         }
     }
 }
@@ -632,11 +637,7 @@ impl Invoke {
     pub fn new(args: Vec<String>) -> Result<Self> {
         let mut events = Vec::new();
         for arg in &args {
-            if let Ok(event_id) = StringId::from(arg) {
-                events.push(event_id);
-            } else {
-                // throw error
-            }
+            events.push(string::new_truncate(arg));
         }
         Ok(Invoke { events })
     }
@@ -664,7 +665,8 @@ impl Invoke {
 }
 
 /// Spawn
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Spawn {
     pub prefab: Option<StringId>,
     pub spawn_id: Option<StringId>,
@@ -675,7 +677,7 @@ impl Spawn {
         let matches = getopts::Options::new()
             .optopt("o", "out", "", "")
             .parse(&args)
-            .map_err(|e| Error::new(*location, ErrorKind::ParseError(e.to_string())))?;
+            .map_err(|e| Error::new(location.clone(), ErrorKind::ParseError(e.to_string())))?;
 
         let out = matches
             .opt_str("out")
@@ -690,30 +692,30 @@ impl Spawn {
             })
         } else if matches.free.len() == 1 {
             Ok(Self {
-                prefab: Some(arraystring::new_truncate(&args[0])),
+                prefab: Some(string::new_truncate(&args[0])),
                 spawn_id: None,
                 out,
             })
         } else if matches.free.len() == 2 {
             Ok(Self {
-                prefab: Some(arraystring::new_truncate(&args[0])),
-                spawn_id: Some(arraystring::new_truncate(&args[1])),
+                prefab: Some(string::new_truncate(&args[0])),
+                spawn_id: Some(string::new_truncate(&args[1])),
                 out,
             })
         } else {
             return Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("can't accept more than 2 arguments".to_string()),
             ));
         }
     }
 
     pub fn execute_loc(&self) -> CommandResult {
-        CommandResult::ExecCentralExt(CentralRemoteCommand::Spawn(*self))
+        CommandResult::ExecCentralExt(CentralRemoteCommand::Spawn(self.clone()))
     }
 
     pub fn execute_ext(&self, sim: &mut Sim, ent_uid: &EntityId) -> Result<()> {
-        sim.spawn_entity(self.prefab.as_ref(), self.spawn_id)?;
+        sim.spawn_entity(self.prefab.as_ref(), self.spawn_id.clone())?;
         // #[cfg(feature = "machine_lua")]
         // sim.setup_lua_state_ent();
         Ok(())

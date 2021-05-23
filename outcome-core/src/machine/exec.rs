@@ -134,8 +134,10 @@ pub(crate) fn execute_loc(
                     continue 'outer;
                 }
                 CommandResult::JumpToTag(t) => {
-                    if let Some((line, _)) =
-                        locations.iter().enumerate().find(|(_, l)| l.tag == Some(t))
+                    if let Some((line, _)) = locations
+                        .iter()
+                        .enumerate()
+                        .find(|(_, l)| l.tag == Some(t.clone()))
                     {
                         cmd_n = line;
                         continue 'outer;
@@ -146,8 +148,8 @@ pub(crate) fn execute_loc(
                     ext_cmds.lock().unwrap().push((
                         ExecutionContext {
                             ent: *ent_uid,
-                            comp: *comp_uid,
-                            location: *location_info,
+                            comp: comp_uid.clone(),
+                            location: location_info.clone(),
                         },
                         ext_cmd,
                     ));
@@ -157,8 +159,8 @@ pub(crate) fn execute_loc(
                     central_ext_cmds.lock().unwrap().push((
                         ExecutionContext {
                             ent: *ent_uid,
-                            comp: *comp_uid,
-                            location: *location_info,
+                            comp: comp_uid.clone(),
+                            location: location_info.clone(),
                         },
                         cext_cmd,
                     ));
@@ -206,14 +208,15 @@ pub fn execute(
             }
         }
         let loc_cmd = cmds.get(cmd_n).unwrap();
-        let location = *sim
+        let location = sim
             .model
             .get_component(comp_uid)
             .expect("can't get component model")
             .logic
             .cmd_location_map
             .get(cmd_n)
-            .unwrap_or(&empty_locinfo);
+            .unwrap_or(&empty_locinfo)
+            .clone();
 
         // let entity = match sim.entities.get_mut(sim.entities_idx.get(ent_uid).unwrap()) {
         let entity = match sim.entities.get_mut(ent_id) {

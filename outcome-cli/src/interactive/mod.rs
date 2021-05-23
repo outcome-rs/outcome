@@ -31,7 +31,7 @@ use outcome::Sim;
 use outcome_net::{Client, SocketEvent, SocketEventType};
 
 use self::compl::MainCompleter;
-use outcome_net::msg::SpawnEntitiesRequest;
+use outcome_net::msg::{SpawnEntitiesRequest, TransferResponseData};
 use std::time::Instant;
 
 // TODO switch to use toml instead of yaml
@@ -213,7 +213,7 @@ pub fn start(
     };
     let mut sim_driver = match _type {
         InterfaceType::Scenario(path) => SimDriver::Local(Sim::from_scenario_at(&path)?),
-        InterfaceType::Snapshot(path) => SimDriver::Local(Sim::from_snapshot_at(&path)?),
+        InterfaceType::Snapshot(path) => SimDriver::Local(Sim::load_snapshot(&path, None)?),
         InterfaceType::Remote(client) => SimDriver::Remote(client),
         _ => unimplemented!(),
     };
@@ -474,20 +474,35 @@ pub fn start(
                                 }
                             }
                             // list variables
+                            // TODO add option to not lookup entity names (faster)
                             "ls" => match driver.deref_mut() {
                                 SimDriver::Local(sim) => {
-                                    let map = sim.get_all_as_strings();
-                                    for (k, v) in map {
-                                        let s = format!("{}: {}", k, v);
+                                    let vars = sim.get_vars(true)?;
+                                    for (addr_str, var) in vars {
+                                        let s = format!("{}: {}", addr_str, var.to_string());
                                         if s.contains(args) || args == "" {
                                             println!("{}", s);
                                         }
                                     }
                                 }
                                 SimDriver::Remote(client) => {
-                                    let data = client.get_vars();
-                                    // TODO proper formatting
-                                    println!("{:?}", data);
+                                    let data = client.get_vars()?;
+                                    if let TransferResponseData::Var(data_pack) = data {
+                                        for ((ent_name, comp_name, var_name), var) in data_pack.vars
+                                        {
+                                            let s = format!(
+                                                "{}:{}:{}:{}: {}",
+                                                ent_name,
+                                                comp_name,
+                                                var.get_type(),
+                                                var_name,
+                                                var.to_string()
+                                            );
+                                            if s.contains(args) || args == "" {
+                                                println!("{}", s);
+                                            }
+                                        }
+                                    }
                                 }
                             },
                             // spawn entity
@@ -506,9 +521,40 @@ pub fn start(
                                     }
                                     SimDriver::Local(sim) => {
                                         sim.spawn_entity(
-                                            Some(&outcome::StringId::from(split[0]).unwrap()),
-                                            Some(outcome::StringId::from(split[1]).unwrap()),
+                                            Some(&outcome::string::new_truncate(split[0])),
+                                            Some(outcome::string::new_truncate(split[1])),
                                         )?;
+                                    }
+                                }
+                            }
+                            "nspawn" => {
+                                let split = args.split(" ").collect::<Vec<&str>>();
+
+                                match driver.deref_mut() {
+                                    SimDriver::Local(sim) => {
+                                        for n in 0..split[0].parse().unwrap() {
+                                            let prefab = match split.get(1) {
+                                                Some(s) => {
+                                                    sim.spawn_entity(
+                                                        Some(&outcome::string::new_truncate(s)),
+                                                        None,
+                                                    )?;
+                                                }
+                                                None => {
+                                                    sim.spawn_entity(None, None)?;
+                                                }
+                                            };
+                                        }
+                                    }
+                                    SimDriver::Remote(client) => {
+                                        client.connection.send_payload(
+                                            SpawnEntitiesRequest {
+                                                entity_prefabs: vec![split[0].to_string()],
+                                                entity_names: vec![split[1].to_string()],
+                                            },
+                                            None,
+                                        )?;
+                                        client.connection.recv_msg()?;
                                     }
                                 }
                             }
@@ -518,28 +564,30 @@ pub fn start(
                                     println!("Snapshot file path cannot contain spaces.");
                                     continue;
                                 }
-                                let target_path = PathBuf::from(args);
-                                let mut file = match fs::File::create(target_path) {
-                                    Ok(f) => f,
-                                    Err(e) => {
-                                        println!("{}", e);
-                                        continue;
-                                    }
-                                };
-                                let data = match driver.deref_mut() {
-                                    SimDriver::Local(sim) => match sim.to_snapshot(false) {
+                                match driver.deref_mut() {
+                                    SimDriver::Local(sim) => match sim.save_snapshot(args, false) {
                                         Ok(d) => d,
                                         Err(e) => {
                                             println!("{}", e);
                                             continue;
                                         }
                                     },
-                                    // SimDriver::Remote(client) => {
-                                    //     // client.
-                                    // }
+                                    SimDriver::Remote(client) => {
+                                        match client.snapshot_request(args.to_string(), true) {
+                                            Ok(snapshot) => {
+                                                println!(
+                                                    "received snapshot len: {}",
+                                                    snapshot.len()
+                                                );
+                                            }
+                                            Err(e) => {
+                                                error!("{}", e);
+                                                continue;
+                                            }
+                                        }
+                                    }
                                     _ => unimplemented!(),
                                 };
-                                file.write(&data)?;
                             }
                             // Write a compressed snapshot to disk.
                             "snapc" => {
@@ -547,16 +595,8 @@ pub fn start(
                                     println!("Snapshot file path cannot contain spaces.");
                                     continue;
                                 }
-                                let target_path = PathBuf::from(args);
-                                let mut file = match fs::File::create(target_path) {
-                                    Ok(f) => f,
-                                    Err(e) => {
-                                        println!("{}", e);
-                                        continue;
-                                    }
-                                };
                                 let data = match driver.deref_mut() {
-                                    SimDriver::Local(sim) => match sim.to_snapshot(true) {
+                                    SimDriver::Local(sim) => match sim.save_snapshot(args, true) {
                                         Ok(d) => d,
                                         Err(e) => {
                                             println!("{}", e);
@@ -565,7 +605,6 @@ pub fn start(
                                     },
                                     _ => unimplemented!(),
                                 };
-                                file.write(&data)?;
                             }
 
                             "help" => {

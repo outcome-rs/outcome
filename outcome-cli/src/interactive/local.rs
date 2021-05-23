@@ -105,12 +105,15 @@ pub fn print_show(sim: &Sim, config: &Config) {
             Ok(a) => a,
             Err(_) => continue,
         };
-        let val = match sim.get_as_string(&addr) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        println!("{}{}{}", addr_str, diff, val);
+        if let Ok(v) = sim.get_var(&addr) {
+            if let Ok(_v) = v.as_string() {
+                println!("{}{}{}", addr_str, diff, _v);
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        }
     }
 }
 

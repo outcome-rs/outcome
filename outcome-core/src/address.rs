@@ -4,14 +4,15 @@ use std::str::FromStr;
 
 use crate::entity::{Storage, StorageIndex};
 use crate::error::{Error, Result};
-use crate::{arraystring, CompName, EntityName, StringId, VarName};
+use crate::{string, CompName, EntityName, StringId, VarName};
 use crate::{Sim, VarType};
 use std::fmt::{Display, Formatter};
 
 pub const SEPARATOR_SYMBOL: &'static str = ":";
 
 /// Entity-scope address that can also handle component-scope locality.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct ShortLocalAddress {
     pub comp: Option<CompName>,
     pub var_type: VarType,
@@ -29,13 +30,13 @@ impl FromStr for ShortLocalAddress {
             Ok(ShortLocalAddress {
                 comp: None,
                 var_type: VarType::from_str(split[0])?,
-                var_name: arraystring::new_truncate(split[1]),
+                var_name: string::new_truncate(split[1]),
             })
         } else if split.len() == 3 {
             Ok(ShortLocalAddress {
-                comp: Some(arraystring::new_truncate(split[0])),
+                comp: Some(string::new_truncate(split[0])),
                 var_type: VarType::from_str(split[1])?,
-                var_name: arraystring::new_truncate(split[2]),
+                var_name: string::new_truncate(split[2]),
             })
         } else {
             Err(Error::InvalidLocalAddress(s.to_string()))
@@ -82,9 +83,9 @@ impl ShortLocalAddress {
 
     pub fn storage_index(&self, comp_id: Option<CompName>) -> Result<StorageIndex> {
         match comp_id {
-            Some(c) => Ok((c, self.var_name)),
-            None => match self.comp {
-                Some(_c) => Ok((_c, self.var_name)),
+            Some(c) => Ok((c, self.var_name.clone())),
+            None => match &self.comp {
+                Some(_c) => Ok((_c.clone(), self.var_name.clone())),
                 None => Err(Error::Other(
                     "failed making storage index, short local address missing component name"
                         .to_string(),
@@ -94,11 +95,11 @@ impl ShortLocalAddress {
     }
 
     pub fn storage_index_using(&self, comp_id: CompName) -> StorageIndex {
-        (comp_id, self.var_name)
+        (comp_id, self.var_name.clone())
     }
 
     pub fn to_string(&self) -> String {
-        match self.comp {
+        match &self.comp {
             Some(c) => format!("{}:{}:{}", c, self.var_type.to_str(), self.var_name),
             None => format!("{}:{}", self.var_type.to_str(), self.var_name),
         }
@@ -106,7 +107,8 @@ impl ShortLocalAddress {
 }
 
 /// Entity-scope address.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct LocalAddress {
     pub comp: CompName,
     pub var_type: VarType,
@@ -120,19 +122,19 @@ impl LocalAddress {
             .collect::<Vec<&str>>();
         if split.len() == 3 {
             Ok(LocalAddress {
-                comp: arraystring::new_truncate(split[0]),
+                comp: string::new_truncate(split[0]),
                 var_type: VarType::from_str(split[1])?,
-                var_name: arraystring::new_truncate(split[1]),
+                var_name: string::new_truncate(split[1]),
             })
         } else {
             Err(Error::InvalidLocalAddress(s.to_string()))
         }
     }
     pub fn storage_index(&self) -> StorageIndex {
-        (self.comp, self.var_name)
+        (self.comp.clone(), self.var_name.clone())
     }
     pub fn storage_index_using(&self, comp_id: CompName) -> StorageIndex {
-        (comp_id, self.var_name)
+        (comp_id, self.var_name.clone())
     }
     pub fn to_string(&self) -> String {
         unimplemented!()
@@ -140,7 +142,8 @@ impl LocalAddress {
 }
 
 /// Globally unique reference to simulation variable.
-#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Address {
     pub entity: EntityName,
     pub component: CompName,
@@ -168,10 +171,10 @@ impl FromStr for Address {
             return Err(Error::FailedCreatingAddress(s.to_string()));
         }
         Ok(Address {
-            entity: arraystring::new_truncate(split[0]),
-            component: arraystring::new_truncate(split[1]),
+            entity: string::new_truncate(split[0]),
+            component: string::new_truncate(split[1]),
             var_type: VarType::from_str(split[2])?,
-            var_name: arraystring::new_truncate(split[3]),
+            var_name: string::new_truncate(split[3]),
         })
     }
 }
@@ -187,12 +190,13 @@ impl Address {
     //     )
     // }
     pub fn storage_index(&self) -> StorageIndex {
-        (self.component, self.var_name)
+        (self.component.clone(), self.var_name.clone())
     }
 }
 
 /// Partial reference to simulation data point.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub enum PartialAddress {
     EntityLocal {
         component: StringId,
@@ -211,14 +215,14 @@ impl PartialAddress {
         if split.len() == 2 {
             Ok(PartialAddress::ComponentLocal {
                 var_type: VarType::from_str(split[0]).unwrap(),
-                var_id: arraystring::new_truncate(split[1]),
+                var_id: string::new_truncate(split[1]),
             })
         } else {
             //if split.len() == 3 {
             Ok(PartialAddress::EntityLocal {
-                component: arraystring::new_truncate(split[0]),
+                component: string::new_truncate(split[0]),
                 var_type: VarType::from_str(split[1]).unwrap(),
-                var_id: arraystring::new_truncate(split[2]),
+                var_id: string::new_truncate(split[2]),
             })
         }
     }

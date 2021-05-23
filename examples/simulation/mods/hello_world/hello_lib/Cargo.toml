@@ -12,3 +12,4 @@ crate-type = ["dylib"]
 
 [dependencies]
 outcome-core = { path = "../../../../../outcome-core", features = ["machine_sandbox"] }
+#outcome-core = { path = "../../../../../outcome-core", features = ["machine_sandbox", "stack_stringid"] }

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::entity::Entity;
 use crate::error::Error;
-use crate::{EntityId, EntityName, SimModel, StringId};
+use crate::{string, EntityId, EntityName, SimModel, StringId};
 
 #[cfg(feature = "machine")]
 use crate::machine::{cmd::CentralRemoteCommand, cmd::ExtCommand, exec, ExecutionContext};
@@ -40,9 +40,9 @@ impl Sim {
         // clone event queue into a local variable
         let mut event_queue = self.event_queue.clone();
 
-        let arrstr_step = StringId::from("step").unwrap();
+        let arrstr_step = string::new_truncate("step");
         if !event_queue.contains(&arrstr_step) {
-            event_queue.push(arrstr_step);
+            event_queue.push(arrstr_step.clone());
         }
         self.event_queue.clear();
 
@@ -112,13 +112,13 @@ pub(crate) fn step_entity_local(
         entity.comp_queue
     );
     for event in event_queue {
-        if let Some(event_queue) = entity.comp_queue.get(event) {
+        if let Some(event_comp_queue) = entity.comp_queue.get(event) {
             // debug!("event_queue: {:?}", event_queue);
-            for comp_uid in event_queue {
+            for comp_uid in event_comp_queue {
                 if let Some(comp_state) = entity.comp_state.get_mut(comp_uid) {
                     debug!("comp_state: {}", comp_state);
                     // let comp_curr_state = &comp.current_state;
-                    if comp_state.as_ref() == "idle" {
+                    if comp_state.as_str() == "idle" {
                         continue;
                     }
                     if let Ok(comp_model) = model.get_component(comp_uid) {

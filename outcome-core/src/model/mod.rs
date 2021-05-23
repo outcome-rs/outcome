@@ -18,7 +18,7 @@ use toml::Value;
 use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::error::Error;
 use crate::util;
-use crate::{arraystring, MedString, ShortString, StringId};
+use crate::{string, ShortString, StringId};
 use crate::{CompName, EntityName, EventName, Result, Var, VarName, VarType};
 use crate::{
     MODULES_DIR_NAME, MODULE_ENTRY_FILE_NAME, MODULE_MANIFEST_FILE, SCENARIOS_DIR_NAME,
@@ -84,11 +84,11 @@ impl SimModel {
         // add hardcoded content
         #[cfg(feature = "machine")]
         model.events.push(crate::model::EventModel {
-            id: ShortString::from(crate::DEFAULT_STEP_EVENT).unwrap(),
+            id: string::new_truncate(crate::DEFAULT_STEP_EVENT),
         });
 
         let mut mod_init_prefab = EntityPrefab {
-            name: StringId::from("_mod_init").unwrap(),
+            name: string::new_truncate("_mod_init"),
             // name: StringId::from(&format!("_mod_init_{}", module.manifest.name)).unwrap(),
             ..EntityPrefab::default()
         };
@@ -124,14 +124,14 @@ impl SimModel {
             #[cfg(feature = "machine_script")]
             {
                 model.events.push(EventModel {
-                    id: ShortString::from("_scr_init").unwrap(),
+                    id: string::new_truncate("_scr_init"),
                 });
 
                 let scr_init_mod_template = ComponentModel {
-                    name: StringId::from("_init_mod_").unwrap(),
-                    triggers: vec![StringId::from("_scr_init").unwrap()],
+                    name: string::new_truncate("_init_mod_"),
+                    triggers: vec![string::new_truncate("_scr_init")],
                     logic: LogicModel {
-                        start_state: StringId::from("main").unwrap(),
+                        start_state: string::new_truncate("main"),
                         ..Default::default()
                     },
                     ..ComponentModel::default()
@@ -193,11 +193,10 @@ impl SimModel {
                 }
 
                 let mut comp_model = scr_init_mod_template.clone();
-                comp_model.name =
-                    arraystring::new_truncate(&format!("init_{}", module.manifest.name));
+                comp_model.name = string::new_truncate(&format!("init_{}", module.manifest.name));
 
                 for (n, cmd_prototype) in cmd_prototypes.iter().enumerate() {
-                    cmd_locations[n].comp_name = Some(comp_model.name.into());
+                    cmd_locations[n].comp_name = Some(comp_model.name.clone());
                     cmd_locations[n].line = Some(n);
 
                     // create command struct from prototype
@@ -223,8 +222,8 @@ impl SimModel {
                 comp_model
                     .logic
                     .states
-                    .insert(StringId::from("main").unwrap(), (0, commands.len()));
-                mod_init_prefab.components.push(comp_model.name);
+                    .insert(string::new_truncate("main"), (0, commands.len()));
+                mod_init_prefab.components.push(comp_model.name.clone());
                 model.components.push(comp_model);
             }
         }
@@ -251,7 +250,7 @@ impl SimModel {
     pub fn get_entity(&self, name: &StringId) -> Option<&EntityPrefab> {
         self.entities
             .iter()
-            .find(|entity| &entity.name.as_ref() == &name.as_ref())
+            .find(|entity| &entity.name.as_str() == &name.as_str())
     }
 
     /// Get mutable reference to entity prefab using `type_` and `id` args.
@@ -264,7 +263,7 @@ impl SimModel {
         self.components
             .iter()
             .find(|comp| &comp.name == name)
-            .ok_or(Error::NoComponentModel(*name))
+            .ok_or(Error::NoComponentModel(name.clone()))
     }
 
     /// Get mutable reference to component model using `type_` and `id` args.
@@ -508,14 +507,36 @@ impl Scenario {
                     // are the engine feature requirements met?
                     for feature_req in &module_manifest.engine_features {
                         match feature_req.as_str() {
+                            // TODO add more features
                             crate::FEATURE_NAME_MACHINE_SYSINFO => {
                                 if !crate::FEATURE_MACHINE_SYSINFO {
-                                    return Err(Error::Other(format!(
-                                        "required feature \"system_info\" not available"
-                                    )));
+                                    return Err(Error::RequiredEngineFeatureNotAvailable(
+                                        crate::FEATURE_NAME_MACHINE_SYSINFO.to_string(),
+                                        module_manifest.name.clone(),
+                                    ));
                                 }
                             }
-                            _ => (),
+                            crate::FEATURE_NAME_MACHINE => {
+                                if !crate::FEATURE_MACHINE {
+                                    return Err(Error::RequiredEngineFeatureNotAvailable(
+                                        crate::FEATURE_NAME_MACHINE.to_string(),
+                                        module_manifest.name.clone(),
+                                    ));
+                                }
+                            }
+                            crate::FEATURE_NAME_MACHINE_DYNLIB => {
+                                if !crate::FEATURE_MACHINE_DYNLIB {
+                                    return Err(Error::RequiredEngineFeatureNotAvailable(
+                                        crate::FEATURE_NAME_MACHINE_DYNLIB.to_string(),
+                                        module_manifest.name.clone(),
+                                    ));
+                                }
+                            }
+                            f => unimplemented!(
+                                "unimplemented engine feature requirement: {}, module: {}",
+                                f,
+                                module_manifest.name
+                            ),
                         }
                     }
 
@@ -683,7 +704,7 @@ impl ModuleManifest {
                     "features" => {
                         engine_features = value
                             .as_array()
-                            .unwrap()
+                            .expect("`features` entry must be an array")
                             .iter()
                             .map(|v| v.as_str().unwrap().to_string())
                             .collect()
@@ -697,6 +718,8 @@ impl ModuleManifest {
             let mut library_path = None;
             let mut project_path = None;
             let mut project_mode = None;
+            let mut project_features = None;
+            let mut project_inherit_features = false;
             if let Some(table) = lib_value.as_table() {
                 for (name, value) in table {
                     match name.as_str() {
@@ -713,7 +736,17 @@ impl ModuleManifest {
                                         "mode" => {
                                             project_mode = Some(value.as_str().unwrap().to_string())
                                         }
-                                        _ => (),
+                                        "features" => {
+                                            project_features =
+                                                Some(value.as_str().unwrap().to_string())
+                                        }
+                                        "inherit-features" => {
+                                            project_inherit_features = value.as_bool().unwrap()
+                                        }
+                                        _ => warn!(
+                                            "unrecognized option in library definition: {}, module: {}",
+                                            name, deser_manifest._mod.name
+                                        ),
                                     }
                                 }
                             } else {
@@ -731,6 +764,8 @@ impl ModuleManifest {
                 path: library_path,
                 project_path,
                 project_mode,
+                project_features,
+                project_inherit_features,
             };
             libs.push(lib);
         }
@@ -845,6 +880,8 @@ pub struct ModuleLib {
     pub project_path: Option<String>,
     /// Build the project in debug or release mode
     pub project_mode: Option<String>,
+    pub project_features: Option<String>,
+    pub project_inherit_features: bool,
 }
 
 /// Service declared by a module.
@@ -941,7 +978,7 @@ pub struct ComponentModel {
 impl ComponentModel {
     pub fn from_deser(key: &String, val: deser::ComponentEntry) -> Result<Self> {
         Ok(ComponentModel {
-            name: arraystring::new_truncate(key),
+            name: string::new_truncate(key),
             vars: val
                 .vars
                 .into_iter()
@@ -951,7 +988,7 @@ impl ComponentModel {
             triggers: Vec::new(),
             #[cfg(feature = "machine")]
             logic: LogicModel {
-                start_state: arraystring::new_unchecked(START_STATE_NAME),
+                start_state: string::new_truncate(START_STATE_NAME),
                 ..Default::default()
             },
         })
@@ -980,7 +1017,7 @@ pub struct LogicModel {
 impl LogicModel {
     pub fn empty() -> LogicModel {
         LogicModel {
-            start_state: arraystring::new_unchecked(crate::machine::START_STATE_NAME),
+            start_state: string::new_truncate(crate::machine::START_STATE_NAME),
             commands: Vec::new(),
             states: FnvHashMap::default(),
             procedures: FnvHashMap::default(),
@@ -1001,7 +1038,7 @@ impl LogicModel {
 /// Variable model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VarModel {
-    pub id: VarName,
+    pub name: VarName,
     pub type_: VarType,
     pub default: Option<Var>,
 }
@@ -1011,7 +1048,7 @@ impl VarModel {
         let addr = ShortLocalAddress::from_str(key)?;
 
         Ok(VarModel {
-            id: arraystring::new_truncate(&addr.var_name),
+            name: string::new_truncate(&addr.var_name),
             type_: addr.var_type,
             default: val.map(|v| Var::from(v)),
         })

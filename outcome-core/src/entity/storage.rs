@@ -5,7 +5,7 @@ use fnv::FnvHashMap;
 use crate::address::{Address, LocalAddress};
 use crate::error::{Error, Result};
 use crate::model::ComponentModel;
-use crate::{arraystring, CompName, StringId, Var, VarName, VarType};
+use crate::{string, CompName, StringId, Var, VarName, VarType};
 
 pub type StorageIndex = (CompName, VarName);
 // type TypedStorageIndex = (StorageIndex, VarType);
@@ -22,13 +22,13 @@ impl Storage {
     pub fn get_var(&self, idx: &StorageIndex) -> Result<&Var> {
         self.map
             .get(&idx)
-            .ok_or(Error::FailedGettingVarFromEntityStorage(*idx))
+            .ok_or(Error::FailedGettingVarFromEntityStorage(idx.clone()))
     }
 
     pub fn get_var_mut(&mut self, idx: &StorageIndex) -> Result<&mut Var> {
         self.map
             .get_mut(&idx)
-            .ok_or(Error::FailedGettingVarFromEntityStorage(*idx))
+            .ok_or(Error::FailedGettingVarFromEntityStorage(idx.clone()))
     }
 
     pub fn get_all_coerce_to_string(&self) -> HashMap<String, String> {
@@ -56,14 +56,15 @@ impl Storage {
     }
     pub fn set_from_var(&mut self, target: &Address, comp_uid: Option<&CompName>, var: &Var) {
         let target = self
-            .get_var_mut(&(target.component, target.var_name))
+            .get_var_mut(&(target.component.clone(), target.var_name.clone()))
             .unwrap();
         *target = var.clone();
     }
 
     pub fn remove_comp_vars(&mut self, comp_name: &CompName, comp_model: &ComponentModel) {
         for var_model in &comp_model.vars {
-            self.map.remove(&(*comp_name, var_model.id));
+            self.map
+                .remove(&(comp_name.clone(), var_model.name.clone()));
         }
     }
 }

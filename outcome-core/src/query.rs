@@ -160,26 +160,26 @@ impl Query {
                     // let insta = std::time::Instant::now();
                     for entity_id in &selected_entities {
                         if let Some(entity) = entities.get(entity_id) {
-                            if let Ok(pos_x) = entity.storage.get_var(&(
-                                CompName::from("transform").unwrap(),
-                                VarName::from("pos_x").unwrap(),
-                            )) {
+                            if let Ok(pos_x) = entity
+                                .storage
+                                .get_var(&("transform".parse().unwrap(), "pos_x".parse().unwrap()))
+                            {
                                 if (pos_x.to_float() - x).abs() > *dx {
                                     continue;
                                 }
                             }
-                            if let Ok(pos_y) = entity.storage.get_var(&(
-                                CompName::from("transform").unwrap(),
-                                VarName::from("pos_y").unwrap(),
-                            )) {
+                            if let Ok(pos_y) = entity
+                                .storage
+                                .get_var(&("transform".parse().unwrap(), "pos_y".parse().unwrap()))
+                            {
                                 if (pos_y.to_float() - y).abs() > *dy {
                                     continue;
                                 }
                             }
-                            if let Ok(pos_z) = entity.storage.get_var(&(
-                                CompName::from("transform").unwrap(),
-                                VarName::from("pos_z").unwrap(),
-                            )) {
+                            if let Ok(pos_z) = entity
+                                .storage
+                                .get_var(&("transform".parse().unwrap(), "pos_z".parse().unwrap()))
+                            {
                                 if (pos_z.to_float() - z).abs() > *dz {
                                     continue;
                                 }
@@ -227,24 +227,24 @@ impl Query {
                         for entity_id in &selected_entities {
                             if let Some(entity) = entities.get(entity_id) {
                                 if let Ok(pos_x) = entity.storage.get_var(&(
-                                    CompName::from("transform").unwrap(),
-                                    VarName::from("pos_x").unwrap(),
+                                    "transform".parse().unwrap(),
+                                    "pos_x".parse().unwrap(),
                                 )) {
                                     if (pos_x.to_float() - x).abs() > *dx {
                                         continue;
                                     }
                                 }
                                 if let Ok(pos_y) = entity.storage.get_var(&(
-                                    CompName::from("transform").unwrap(),
-                                    VarName::from("pos_y").unwrap(),
+                                    "transform".parse().unwrap(),
+                                    "pos_y".parse().unwrap(),
                                 )) {
                                     if (pos_y.to_float() - y).abs() > *dy {
                                         continue;
                                     }
                                 }
                                 if let Ok(pos_z) = entity.storage.get_var(&(
-                                    CompName::from("transform").unwrap(),
-                                    VarName::from("pos_z").unwrap(),
+                                    "transform".parse().unwrap(),
+                                    "pos_z".parse().unwrap(),
                                 )) {
                                     if (pos_z.to_float() - z).abs() > *dz {
                                         continue;
@@ -333,7 +333,7 @@ impl Query {
                         mapped_data
                             .into_iter()
                             .map(|((ent_id, comp_name, var_name), var)| {
-                                ((*ent_id, *comp_name, *var_name), var.clone())
+                                ((*ent_id, comp_name.clone(), var_name.clone()), var.clone())
                             })
                             .collect(),
                     );
@@ -352,9 +352,9 @@ impl Query {
                             //     .map(|(name, _)| *name)
                             //     .unwrap_or(ent_id.to_string().parse().unwrap()),
                             entity: ent_id.to_string().parse().unwrap(),
-                            component: *comp_name,
+                            component: comp_name.clone(),
                             var_type: var.get_type(),
-                            var_name: *var_name,
+                            var_name: var_name.clone(),
                         };
                         data.insert(addr, var.clone());
                     }
@@ -371,9 +371,9 @@ impl Query {
                             // .map(|(name, _)| *name)
                             // .unwrap_or(ent_id.to_string().parse().unwrap()),
                             entity: ent_id.to_string().parse().unwrap(),
-                            component: *comp_name,
+                            component: comp_name.clone(),
                             var_type: var.get_type(),
-                            var_name: *var_name,
+                            var_name: var_name.clone(),
                         };
                         if var.is_float() {
                             data.floats.insert(addr, var.to_float());

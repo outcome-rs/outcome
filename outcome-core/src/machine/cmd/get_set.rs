@@ -16,7 +16,8 @@ use crate::machine::{ExecutionContext, LocationInfo, Result};
 /// at external address on another entity. Can only be
 /// executed during `pre` phase, as it accesses
 /// data from another entity (it's an `ExtCommand`).
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Get {
     pub target: Address,
     pub source: Address,
@@ -47,7 +48,7 @@ impl Get {
     //     })
     // }
     pub fn execute_loc(&self) -> CommandResult {
-        CommandResult::ExecExt(ExtCommand::Get(*self))
+        CommandResult::ExecExt(ExtCommand::Get(self.clone()))
     }
     pub fn exec_pre(&self, storage: &mut Storage, ent_uid: &EntityName) -> Option<(Address, Var)> {
         unimplemented!();
@@ -66,7 +67,7 @@ impl Get {
         let ent_uid = exec_ctx.ent;
         // println!("{:?}, {:?}", self.source.get_ent_type,
         // self.source.get_ent_id)
-        let ext_ent = match sim.get_entity_str(&self.source.entity)
+        let ext_ent = match sim.get_entity_by_name(&self.source.entity)
             // .entities
             // .get(&(self.source.get_ent_type(), self.source.get_ent_id()))
         {
@@ -99,7 +100,8 @@ impl Get {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Set {
     pub var1: Address,
     pub var2: Option<Address>,
@@ -137,8 +139,8 @@ impl Set {
 }
 impl Set {
     pub fn execute_loc(&self, es: &mut Storage) -> CommandResult {
-        if let Some(u) = self.var2 {
-            es.set_from_addr(&self.var1, &self.var2.unwrap());
+        if let Some(u) = &self.var2 {
+            es.set_from_addr(&self.var1, &self.var2.clone().unwrap());
         } else if let Some(v) = &self.val {
             es.set_from_str(&self.var1, v.as_str());
         }
@@ -174,7 +176,8 @@ impl ExtSetVar {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct ExtSet {
     pub target: Address,
     pub source: Address,
@@ -191,23 +194,29 @@ impl ExtSet {
         let var = match sim.get_var(&self.source) {
             Ok(v) => v.clone(),
             Err(e) => {
-                if let Some(out) = self.out {
+                if let Some(out) = &self.out {
                     *sim.get_var_mut(&out)? = Var::Bool(false).coerce(out.var_type)?;
                 }
-                return Err(Error::new(*location, ErrorKind::CoreError(e.to_string())));
+                return Err(Error::new(
+                    location.clone(),
+                    ErrorKind::CoreError(e.to_string()),
+                ));
             }
         };
         match sim.get_var_mut(&self.target) {
             Ok(target) => *target = var,
             Err(e) => {
-                if let Some(out) = self.out {
+                if let Some(out) = &self.out {
                     *sim.get_var_mut(&out)? = Var::Bool(false).coerce(out.var_type)?;
                 }
-                return Err(Error::new(*location, ErrorKind::CoreError(e.to_string())));
+                return Err(Error::new(
+                    location.clone(),
+                    ErrorKind::CoreError(e.to_string()),
+                ));
             }
         }
 
-        if let Some(out) = self.out {
+        if let Some(out) = &self.out {
             *sim.get_var_mut(&out)? = Var::Bool(true).coerce(out.var_type)?;
         }
 

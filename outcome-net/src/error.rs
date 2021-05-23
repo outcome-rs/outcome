@@ -1,4 +1,5 @@
 use crate::msg::{Message, MessageType};
+use crate::server::ClientId;
 use crate::{msg, Transport};
 use num_enum::TryFromPrimitiveError;
 use thiserror::Error;
@@ -24,6 +25,8 @@ pub enum Error {
     WrongSocketAddressType,
     #[error("handshake failed, got: {0}")]
     HandshakeFailed(String),
+    #[error("failed getting client by id: {0}")]
+    FailedGettingClientById(ClientId),
 
     #[error("other: {0}")]
     Other(String),

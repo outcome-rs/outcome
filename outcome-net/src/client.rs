@@ -5,9 +5,10 @@ use std::thread;
 use std::time::Duration;
 
 use crate::msg::{
-    DataTransferRequest, DataTransferResponse, Message, PingRequest, RegisterClientRequest,
-    RegisterClientResponse, ScheduledDataTransferRequest, StatusRequest, StatusResponse,
-    TransferResponseData, TurnAdvanceRequest, TypedSimDataPack,
+    DataTransferRequest, DataTransferResponse, ExportSnapshotRequest, ExportSnapshotResponse,
+    Message, PingRequest, RegisterClientRequest, RegisterClientResponse,
+    ScheduledDataTransferRequest, StatusRequest, StatusResponse, TransferResponseData,
+    TurnAdvanceRequest, TypedSimDataPack,
 };
 use crate::socket::{
     CompositeSocketAddress, Encoding, Socket, SocketAddress, SocketConfig, SocketType, Transport,
@@ -268,5 +269,20 @@ impl Client {
             },
             None,
         )
+    }
+
+    // blocking
+    pub fn snapshot_request(&mut self, name: String, save_to_disk: bool) -> Result<Vec<u8>> {
+        let req = ExportSnapshotRequest {
+            name,
+            save_to_disk,
+            send_back: true,
+        };
+        self.connection.send_payload(req, None)?;
+        println!("sent");
+        let (_, v) = self.connection.recv_msg()?;
+        println!("received: message type: {:?}", v.type_);
+        let resp: ExportSnapshotResponse = v.unpack_payload(self.connection.encoding())?;
+        Ok(resp.snapshot)
     }
 }

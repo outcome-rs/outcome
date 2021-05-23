@@ -66,6 +66,8 @@ pub enum Error {
     #[cfg(feature = "lz4")]
     #[error("failed decompressing snapshot: {0}")]
     SnapshotDecompressionError(String),
+    #[error("failed reading snapshot header: {0}")]
+    FailedReadingSnapshotHeader(String),
     #[error("failed reading snapshot: {0}")]
     FailedReadingSnapshot(String),
     #[error("failed creating snapshot: {0}")]
@@ -79,10 +81,10 @@ pub enum Error {
     #[error("model: no component named: {0}")]
     NoComponentModel(CompName),
 
-    #[error("no entity found: {0}")]
-    NoEntity(u32),
-    #[error("no entity found: {0}")]
-    NoEntityIndexed(String),
+    #[error("failed getting entity with id: {0}")]
+    FailedGettingEntityById(u32),
+    #[error("failed getting entity with name: {0}")]
+    FailedGettingEntityByName(String),
     #[error("failed getting variable: {0}")]
     FailedGettingVarFromSim(Address),
     #[error(
@@ -96,6 +98,12 @@ pub enum Error {
     FailedCreatingAddress(String),
     #[error("failed creating variable from string: {0}")]
     FailedCreatingVar(String),
+
+    #[error("project root not found for file: {0}")]
+    ProjectRootNotFound(String),
+
+    #[error("required engine feature not available: {0}, required by module: {1}")]
+    RequiredEngineFeatureNotAvailable(String, String),
 
     #[error("other error: {0}")]
     Other(String),

@@ -2,8 +2,8 @@ use super::{Command, CommandResult};
 use crate::address::{Address, LocalAddress, ShortLocalAddress};
 use crate::entity::{Entity, Storage};
 use crate::var::{Var, VarType};
-use crate::{address, arraystring};
-use crate::{CompName, EntityId, EntityName, MedString, StringId};
+use crate::{address, string};
+use crate::{CompName, EntityId, EntityName, StringId};
 
 use super::super::LocationInfo;
 use crate::machine::cmd::get_set::ExtSet;
@@ -53,27 +53,27 @@ impl Target {
                 return Ok(Target::LocalAddress(ShortLocalAddress {
                     comp: None,
                     var_type: VarType::from_str(split[0])?,
-                    var_name: arraystring::new_truncate(split[1]),
+                    var_name: string::new_truncate(split[1]),
                 }));
             } else if split.len() == 3 {
                 return Ok(Target::LocalAddress(ShortLocalAddress {
-                    comp: Some(arraystring::new_truncate(split[0])),
+                    comp: Some(string::new_truncate(split[0])),
                     var_type: VarType::from_str(split[1])?,
-                    var_name: arraystring::new_truncate(split[2]),
+                    var_name: string::new_truncate(split[2]),
                 }));
             } else if split.len() == 4 {
                 return Ok(Target::Address(Address {
-                    entity: arraystring::new_truncate(split[0]),
-                    component: arraystring::new_truncate(split[1]),
+                    entity: string::new_truncate(split[0]),
+                    component: string::new_truncate(split[1]),
                     var_type: VarType::from_str(split[2])?,
-                    var_name: arraystring::new_truncate(split[3]),
+                    var_name: string::new_truncate(split[3]),
                 }));
             } else {
                 unimplemented!()
             }
         }
         Err(Error::new(
-            *location,
+            location.clone(),
             ErrorKind::Other("failed parsing set.target".to_string()),
         ))
     }
@@ -101,20 +101,20 @@ impl Source {
                 return Ok(Source::LocalAddress(ShortLocalAddress {
                     comp: None,
                     var_type: VarType::from_str(split[0])?,
-                    var_name: arraystring::new_truncate(split[1]),
+                    var_name: string::new_truncate(split[1]),
                 }));
             } else if split.len() == 3 {
                 return Ok(Source::LocalAddress(ShortLocalAddress {
-                    comp: Some(arraystring::new_truncate(split[0])),
+                    comp: Some(string::new_truncate(split[0])),
                     var_type: VarType::from_str(split[1])?,
-                    var_name: arraystring::new_truncate(split[2]),
+                    var_name: string::new_truncate(split[2]),
                 }));
             } else if split.len() == 4 {
                 return Ok(Source::Address(Address {
-                    entity: arraystring::new_truncate(split[0]),
-                    component: arraystring::new_truncate(split[1]),
+                    entity: string::new_truncate(split[0]),
+                    component: string::new_truncate(split[1]),
                     var_type: VarType::from_str(split[2])?,
-                    var_name: arraystring::new_truncate(split[3]),
+                    var_name: string::new_truncate(split[3]),
                 }));
             } else {
                 unimplemented!()
@@ -124,7 +124,7 @@ impl Source {
                 Ok(v) => v,
                 Err(e) => {
                     return Err(Error::new(
-                        *location,
+                        location.clone(),
                         ErrorKind::InvalidCommandBody(format!(
                             "can't parse from source into target type: {}",
                             e
@@ -175,13 +175,13 @@ impl Set {
         location: &LocationInfo,
     ) -> CommandResult {
         let var_type = self.target.var_type();
-        let target_addr = match self.target {
-            Target::Address(addr) => addr,
+        let target_addr = match &self.target {
+            Target::Address(addr) => addr.clone(),
             Target::LocalAddress(loc_addr) => Address {
-                entity: arraystring::new_truncate(&ent_uid.to_string()),
-                component: loc_addr.comp.unwrap_or(*comp_name),
+                entity: string::new_truncate(&ent_uid.to_string()),
+                component: loc_addr.comp.clone().unwrap_or(comp_name.clone()),
                 var_type: loc_addr.var_type,
-                var_name: loc_addr.var_name,
+                var_name: loc_addr.var_name.clone(),
             },
         };
 
@@ -190,18 +190,22 @@ impl Set {
                 // entity_db.set_from_addr(&self.target, &addr)
 
                 *entity_db.get_var_mut(&target_addr.storage_index()).unwrap() = entity_db
-                    .get_var(&loc_addr.storage_index_using(*comp_name))
+                    .get_var(&loc_addr.storage_index_using(comp_name.clone()))
                     .unwrap()
                     .clone();
             }
             Source::Address(addr) => {
                 return CommandResult::ExecExt(ExtCommand::Set(ExtSet {
-                    target: target_addr,
-                    source: *addr,
+                    target: target_addr.clone(),
+                    source: addr.clone(),
                     out: Some(
                         self.out
+                            .clone()
                             .map(|a| {
-                                a.into_address(ent_uid.to_string().parse().unwrap(), *comp_name)
+                                a.into_address(
+                                    ent_uid.to_string().parse().unwrap(),
+                                    comp_name.clone(),
+                                )
                             })
                             .unwrap()
                             .unwrap(),

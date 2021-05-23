@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use shlex;
 
-use crate::{CompName, MedString, StringId, VarType};
+use crate::{CompName, StringId, VarType};
 
 use crate::address::{Address, PartialAddress, ShortLocalAddress};
 use crate::entity::Storage;
@@ -86,7 +86,7 @@ impl PrintFmt {
             let mut output = self.fmt.clone();
             let mut track_added = 0;
             for (index, addr) in &self.inserts {
-                match entity_db.get_var(&addr.storage_index_using(*comp_uid)) {
+                match entity_db.get_var(&addr.storage_index_using(comp_uid.clone())) {
                     Ok(substring) => {
                         let substring = substring.to_string();
                         output.insert_str(*index + track_added, &substring);
@@ -106,7 +106,8 @@ impl PrintFmt {
 }
 
 /// Print
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct Print {
     pub source: Address,
 }

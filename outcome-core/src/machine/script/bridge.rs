@@ -86,7 +86,7 @@ impl cmd::register::Extend {
                 cmd_locations.push(location);
             }
 
-            let comp_uid = self.comp_signature;
+            let comp_uid = self.comp_signature.clone();
             let mut comp_model = sim.model.get_component_mut(&comp_uid).unwrap();
 
             let offset = comp_model.logic.commands.len();

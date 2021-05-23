@@ -12,9 +12,7 @@ use smallvec::SmallVec;
 
 use crate::address::LocalAddress;
 use crate::entity::StorageIndex;
-use crate::{
-    CompName, EntityId, EntityName, LongString, MedString, ShortString, StringId, VarType,
-};
+use crate::{CompName, EntityId, EntityName, LongString, ShortString, StringId, VarType};
 use std::collections::BTreeMap;
 
 pub const START_STATE_NAME: &'static str = "start";
@@ -25,7 +23,8 @@ pub type Libraries = BTreeMap<String, Library>;
 use libloading::Library;
 
 /// Holds instruction location information.
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct LocationInfo {
     /// Path to project root
     pub root: Option<LongString>,
@@ -62,8 +61,8 @@ impl LocationInfo {
     }
 
     pub fn with_source(mut self, root: &str, source: &str) -> Self {
-        self.root = Some(crate::arraystring::new_truncate(root));
-        self.source = Some(crate::arraystring::new_truncate(source));
+        self.root = Some(root.parse().unwrap());
+        self.source = Some(source.parse().unwrap());
         self
     }
 }
@@ -89,7 +88,8 @@ pub(crate) type CommandResultVec = SmallVec<[cmd::CommandResult; 2]>;
 
 /// Struct containing basic information about where the execution is
 /// taking place.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct ExecutionContext {
     pub ent: EntityId,
     pub comp: CompName,
@@ -124,7 +124,8 @@ pub enum RegistryTarget {
 }
 
 /// Information about a single call.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub enum CallInfo {
     Procedure(ProcedureCallInfo),
     ForIn(ForInCallInfo),
@@ -144,7 +145,8 @@ pub struct ProcedureCallInfo {
 }
 
 /// Information about a single forin call.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct ForInCallInfo {
     /// Target that will be iterated over
     pub target: Option<LocalAddress>,
@@ -181,7 +183,8 @@ pub struct IfElseMetaData {
 }
 
 /// Contains information about a single component block call.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "stack_stringid", derive(Copy))]
 pub struct ComponentCallInfo {
     pub name: CompName,
     pub start_line: usize,
@@ -211,7 +214,7 @@ pub(crate) fn command_search(
 ) -> Result<Option<(usize, Vec<usize>)>> {
     if defs.0.is_empty() {
         return Err(Error::new(
-            *location,
+            location.clone(),
             ErrorKind::CommandSearchFailed(
                 "command search requires begin definitions to be non-empty".to_string(),
             ),
@@ -219,7 +222,7 @@ pub(crate) fn command_search(
     }
     if defs.2.is_empty() {
         return Err(Error::new(
-            *location,
+            location.clone(),
             ErrorKind::CommandSearchFailed(
                 "command search requires ending definitions to be non-empty".to_string(),
             ),
@@ -260,7 +263,7 @@ pub(crate) fn command_search(
                                     }
                                     None => {
                                         return Err(Error::new(
-                                            *location,
+                                            location.clone(),
                                             ErrorKind::CommandSearchFailed(format!(
                                                 "bad nesting: got {} but end not found",
                                                 command
@@ -272,7 +275,7 @@ pub(crate) fn command_search(
                             };
                         } else {
                             return Err(Error::new(
-                                *location,
+                                location.clone(),
                                 ErrorKind::CommandSearchFailed(format!(
                                     "bad nesting: got {}",
                                     command,
@@ -288,7 +291,7 @@ pub(crate) fn command_search(
     }
 
     Err(Error::new(
-        *location,
+        location.clone(),
         ErrorKind::CommandSearchFailed(format!(
             "no end of structure for begin defs: {:?}",
             &defs.0

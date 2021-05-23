@@ -2,7 +2,7 @@ use smallvec::SmallVec;
 
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::{CompName, MedString};
+use crate::CompName;
 
 use super::super::super::{
     error::Error, CallInfo, CallStackVec, ForInCallInfo, IfElseCallInfo, IfElseMetaData,
@@ -27,7 +27,7 @@ impl Condition {
     pub fn evaluate(&self, storage: &Storage, comp_name: &CompName) -> Result<bool> {
         match self {
             Condition::VarAddress(addr) => Ok(storage
-                .get_var(&addr.storage_index(Some(*comp_name))?)?
+                .get_var(&addr.storage_index(Some(comp_name.clone()))?)?
                 .to_bool()
                 == true),
             Condition::BoolValue(b) => Ok(*b),
@@ -52,7 +52,7 @@ impl If {
     ) -> Result<If> {
         if args.len() == 0 {
             return Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("no arguments provided".to_string()),
             ));
         }
@@ -88,7 +88,7 @@ impl If {
             Ok(po) => po,
             Err(e) => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(e.to_string()),
                 ))
             }
@@ -111,7 +111,7 @@ impl If {
                 else_lines: SmallVec::from(positions.1),
             }),
             None => Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("end of if/else block not found.".to_string()),
             )),
         }
@@ -208,7 +208,7 @@ impl Else {
                 call_stack.push(call_info);
             }
             None => {
-                result = CommandResult::Err(Error::new(*location, ErrorKind::StackEmpty));
+                result = CommandResult::Err(Error::new(location.clone(), ErrorKind::StackEmpty));
             }
         }
         result

@@ -31,7 +31,7 @@ component greeting
 	state main
 	    #spawn greeter
         #invoke additional
-        lib_call hello_lib fn calculate_entity
+        #lib_call hello_lib fn calculate_entity
 	    set str:realm world:realm:str:name => bool:do
 	    if bool:do
 		    print "{}, {}" str:hello str:realm

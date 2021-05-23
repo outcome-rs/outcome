@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use fnv::FnvHashMap;
 use id_pool::IdPool;
-use outcome::{arraystring, Address, EventName, Sim, SimModel, StringId, VarType};
+use outcome::{string, Address, EventName, Sim, SimModel, StringId, VarType};
 
 use crate::msg::*;
 use crate::service::Service;
@@ -24,6 +24,7 @@ use crate::socket::{
 use crate::{error::Error, Result, TaskId};
 use crate::{Organizer, Worker};
 use outcome::distr::{CentralCommunication, NodeCommunication, Signal};
+use std::fs::File;
 use std::str::FromStr;
 
 mod pull;
@@ -33,6 +34,8 @@ mod turn;
 pub type ClientId = u32;
 
 pub enum ServerTask {
+    WaitForOrganizerSnapshotResponses(ClientId, ExportSnapshotRequest),
+
     WaitForCoordQueryResponse(ClientId),
 }
 
@@ -89,7 +92,7 @@ impl Client {
         query: outcome::Query,
     ) -> Result<()> {
         if !self.scheduled_queries.contains_key(&event) {
-            self.scheduled_queries.insert(event, Vec::new());
+            self.scheduled_queries.insert(event.clone(), Vec::new());
         }
         self.scheduled_queries
             .get_mut(&event)
@@ -467,11 +470,11 @@ impl Server {
         }
 
         // handle coord poll if applicable
-        if let SimConnection::UnionOrganizer(coord) = &mut self.sim {
+        if let SimConnection::UnionOrganizer(organ) = &mut self.sim {
             // perform the manual poll
-            coord.manual_poll()?;
+            organ.manual_poll()?;
             // handle any tasks that might have been finished
-            Server::handle_coord_tasks(&mut self.tasks, &self.clients, coord)?;
+            Server::handle_coord_tasks(&mut self.tasks, &self.clients, organ)?;
         }
 
         // handle worker poll if applicable
@@ -509,7 +512,11 @@ impl Server {
             }
             self.time_since_last_msg = Duration::from_millis(0);
             if let Err(e) = self.handle_event(event, &client_id) {
-                error!("{}", e);
+                if let Error::WouldBlock = e {
+                    //
+                } else {
+                    error!("{}", e);
+                }
             }
         }
         Ok(())
@@ -778,33 +785,38 @@ impl Server {
         msg: Message,
         client_id: &ClientId,
     ) -> Result<()> {
-        let client = self.clients.get(client_id).unwrap();
+        let client = self
+            .clients
+            .get(client_id)
+            .ok_or(Error::FailedGettingClientById(client_id.clone()))?;
         let req: ExportSnapshotRequest = msg.unpack_payload(client.connection.encoding())?;
-        if req.save_to_disk {
-            let snap = match &self.sim {
-                SimConnection::Local(sim) => sim.to_snapshot(false)?,
-                _ => unimplemented!(),
-            };
-            let target_path = match &self.sim {
-                SimConnection::Local(sim) => {
-                    sim.model.scenario.path.join("snapshots").join(req.name)
+        let snap = match &mut self.sim {
+            SimConnection::Local(sim) => {
+                if req.save_to_disk {
+                    sim.save_snapshot(&req.name, false)?;
                 }
-                _ => unimplemented!(),
-            };
-            // let target_path = self.local_project_path.join("snapshots").join(req.name);
-            if std::fs::File::open(&target_path).is_ok() {
-                std::fs::remove_file(&target_path);
+                if req.send_back {
+                    let resp = ExportSnapshotResponse {
+                        error: "".to_string(),
+                        snapshot: vec![],
+                    };
+                    client.connection.send_payload(resp, None);
+                }
+                return Ok(());
             }
-            let mut file = std::fs::File::create(target_path)?;
-            file.write(&snap);
-        }
-
-        let resp = ExportSnapshotResponse {
-            error: "".to_string(),
-            snapshot: vec![],
+            SimConnection::UnionOrganizer(organizer) => {
+                let task_id = organizer.download_snapshots()?;
+                // TODO perhaps request separate id for organizer and server levels
+                self.tasks.insert(
+                    task_id,
+                    ServerTask::WaitForOrganizerSnapshotResponses(task_id, req),
+                );
+                return Err(Error::WouldBlock);
+            }
+            _ => unimplemented!(),
         };
 
-        client.connection.send_payload(resp, None)
+        // client.connection.send_payload(resp, None)
     }
 
     pub fn handle_spawn_entities_request(
@@ -821,18 +833,22 @@ impl Server {
             trace!("handling prefab: {}", prefab);
             let entity_name = match req.entity_names[i].as_str() {
                 "" => None,
-                _ => Some(arraystring::new_truncate(&req.entity_names[i])),
+                _ => Some(string::new_truncate(&req.entity_names[i])),
             };
             match &mut self.sim {
                 SimConnection::Local(sim) => {
-                    match sim.spawn_entity(
-                        Some(&outcome::arraystring::new_truncate(&prefab)),
-                        entity_name,
-                    ) {
+                    match sim
+                        .spawn_entity(Some(&outcome::string::new_truncate(&prefab)), entity_name)
+                    {
                         Ok(entity_id) => out_names.push(entity_id.to_string()),
                         Err(e) => error = e.to_string(),
                     }
                 }
+                SimConnection::UnionOrganizer(organizer) => organizer.central.spawn_entity(
+                    Some(prefab.clone()),
+                    entity_name,
+                    outcome::distr::DistributionPolicy::Random,
+                )?,
                 _ => unimplemented!(),
             }
         }
@@ -946,7 +962,7 @@ impl Server {
                 handle_data_transfer_request_local(&dtr, sim_instance, client)?
             }
             SimConnection::UnionOrganizer(coord) => {
-                let mut collection = Vec::new();
+                let mut vars = FnvHashMap::default();
                 match dtr.transfer_type.as_str() {
                     "Full" => {
                         for (worker_id, worker) in &mut coord.net.workers {
@@ -958,30 +974,13 @@ impl Server {
                         for (worker_id, worker) in &mut coord.net.workers {
                             let (_, sig) = worker.connection.recv_sig()?;
                             match sig.into_inner().1 {
-                                outcome::distr::Signal::DataResponse(data) => {
-                                    collection.extend(data)
-                                }
+                                outcome::distr::Signal::DataResponse(data) => vars.extend(data),
                                 s => warn!("unhandled signal: {:?}", s),
-                            }
-                        }
-                        let mut sdp = TypedSimDataPack::empty();
-                        for (addr, var) in collection {
-                            match addr.var_type {
-                                VarType::String => {
-                                    sdp.strings.insert(addr.into(), var.to_string());
-                                }
-                                VarType::Int => {
-                                    sdp.ints.insert(addr.into(), var.to_int());
-                                }
-                                VarType::Float => {
-                                    sdp.floats.insert(addr.into(), var.to_float());
-                                }
-                                _ => (),
                             }
                         }
 
                         let response = DataTransferResponse {
-                            data: TransferResponseData::Typed(sdp),
+                            data: TransferResponseData::Var(VarSimDataPack { vars }),
                         };
                         client.connection.send_payload(response, None)?;
                     }
@@ -1008,17 +1007,15 @@ impl Server {
                 if let Signal::DataResponse(data_vec) = resp {
                     let mut data_pack = VarSimDataPack::default();
                     for (addr, var) in data_vec {
-                        data_pack
-                            .vars
-                            .insert((addr.entity, addr.component, addr.var_name), var);
+                        data_pack.vars.insert((addr.0, addr.1, addr.2), var);
                     }
                     for (entity_id, entity) in &worker.sim_node.as_ref().unwrap().entities {
                         for ((comp_name, var_name), var) in &entity.storage.map {
                             data_pack.vars.insert(
                                 (
-                                    outcome::EntityName::from(&entity_id.to_string()).unwrap(),
-                                    *comp_name,
-                                    *var_name,
+                                    outcome::string::new_truncate(&entity_id.to_string()),
+                                    comp_name.clone(),
+                                    var_name.clone(),
                                 ),
                                 var.clone(),
                             );
@@ -1079,17 +1076,14 @@ impl Server {
                                                 .entity_idx
                                                 .iter()
                                                 .find(|(e_id, e_idx)| e_idx == &entity_uid)
-                                                .map(|(e_id, _)| *e_id)
-                                                .unwrap_or(
-                                                    outcome::EntityName::from(
-                                                        &entity_uid.to_string(),
-                                                    )
-                                                    .unwrap(),
-                                                ),
+                                                .map(|(e_id, _)| e_id.clone())
+                                                .unwrap_or(outcome::string::new_truncate(
+                                                    &entity_uid.to_string(),
+                                                )),
                                             // entity: entity_uid.parse().unwrap(),
-                                            component: *comp_name,
+                                            component: comp_name.clone(),
                                             var_type: VarType::Float,
-                                            var_name: *var_id,
+                                            var_name: var_id.clone(),
                                         }
                                         .into(),
                                         // comp_name.to_string(),
@@ -1125,9 +1119,11 @@ impl Server {
         let sdtr: ScheduledDataTransferRequest =
             msg.unpack_payload(client.connection.encoding())?;
         for event_trigger in sdtr.event_triggers {
-            let event_id = outcome::arraystring::new(&event_trigger)?;
+            let event_id = outcome::string::new(&event_trigger)?;
             if !client.scheduled_transfers.contains_key(&event_id) {
-                client.scheduled_transfers.insert(event_id, Vec::new());
+                client
+                    .scheduled_transfers
+                    .insert(event_id.clone(), Vec::new());
             }
             let dtr = DataTransferRequest {
                 transfer_type: sdtr.transfer_type.clone(),
@@ -1195,15 +1191,21 @@ impl Server {
 
 fn handle_data_transfer_request_local(
     request: &DataTransferRequest,
-    sim_instance: &Sim,
+    sim: &Sim,
     client: &mut Client,
 ) -> Result<()> {
-    let model = &sim_instance.model;
+    let model = &sim.model;
     match request.transfer_type.as_str() {
         "Full" => {
             let mut data_pack = VarSimDataPack::default();
-            for (entity_uid, entity) in &sim_instance.entities {
+            for (entity_id, entity) in &sim.entities {
                 for ((comp_name, var_id), v) in entity.storage.map.iter() {
+                    let mut ent_name = outcome::EntityName::from(entity_id.to_string());
+                    if let Some((_ent_name, _)) =
+                        sim.entity_idx.iter().find(|(_, id)| id == &entity_id)
+                    {
+                        ent_name = _ent_name.clone();
+                    }
                     data_pack.vars.insert(
                         // format!(
                         //     "{}:{}:{}:{}",
@@ -1212,11 +1214,7 @@ fn handle_data_transfer_request_local(
                         //     v.get_type().to_str(),
                         //     var_id
                         // ),
-                        (
-                            arraystring::new_truncate(&entity_uid.to_string()),
-                            *comp_name,
-                            *var_id,
-                        ),
+                        (ent_name, comp_name.clone(), var_id.clone()),
                         v.clone(),
                     );
                 }
@@ -1248,7 +1246,7 @@ fn handle_data_transfer_request_local(
                     Ok(a) => a,
                     Err(_) => continue,
                 };
-                if let Ok(var) = sim_instance.get_var(&address) {
+                if let Ok(var) = sim.get_var(&address) {
                     if var.is_float() {
                         data_pack
                             .floats
@@ -1273,7 +1271,7 @@ fn handle_data_transfer_request_local(
                 let order_id = 1;
                 let order = client.order_store.get(&order_id).unwrap();
                 for addr in order {
-                    if let Ok(var) = sim_instance.get_var(&addr) {
+                    if let Ok(var) = sim.get_var(&addr) {
                         data.vars.push(var.clone());
                     }
                 }
@@ -1286,22 +1284,22 @@ fn handle_data_transfer_request_local(
 
                 for query in selection {
                     if query.contains("*") {
-                        for (id, entity) in &sim_instance.entities {
+                        for (id, entity) in &sim.entities {
                             if id == &0 || id == &1 {
                                 continue;
                             }
                             let _query = query.replace("*", &id.to_string());
                             let addr = outcome::Address::from_str(&_query)?;
-                            order.push(addr);
-                            if let Ok(var) = sim_instance.get_var(&addr) {
+                            order.push(addr.clone());
+                            if let Ok(var) = sim.get_var(&addr) {
                                 data.vars.push(var.clone());
                             }
                         }
                     } else {
                         // TODO save the ordered list of addresses on the server for handling response
                         let addr = outcome::Address::from_str(query)?;
-                        order.push(addr);
-                        if let Ok(var) = sim_instance.get_var(&addr) {
+                        order.push(addr.clone());
+                        if let Ok(var) = sim.get_var(&addr) {
                             data.vars.push(var.clone());
                         }
                     }
@@ -1328,23 +1326,23 @@ impl Server {
     fn handle_coord_tasks(
         tasks: &mut HashMap<TaskId, ServerTask>,
         clients: &HashMap<ClientId, Client>,
-        coord: &mut Organizer,
+        organ: &mut Organizer,
     ) -> Result<()> {
         let mut finished_tasks = Vec::new();
-        for (task_id, coord_task) in &mut coord.tasks {
-            if coord_task.is_finished() {
+        for (task_id, organ_task) in &mut organ.tasks {
+            if organ_task.is_finished() {
                 finished_tasks.push(*task_id);
             }
         }
         for task_id in finished_tasks {
-            if let Some(coord_task) = coord.tasks.remove(&task_id) {
-                if coord_task.is_finished() {
+            if let Some(organ_task) = organ.tasks.remove(&task_id) {
+                if organ_task.is_finished() {
                     println!("task {} is finished", task_id);
                     if let Some(server_task) = tasks.get(&task_id) {
                         match server_task {
                             ServerTask::WaitForCoordQueryResponse(client_id) => {
                                 if let Some(client) = clients.get(client_id) {
-                                    match coord_task {
+                                    match organ_task {
                                         OrganizerTask::WaitForQueryResponses {
                                             products, ..
                                         } => {
@@ -1367,6 +1365,54 @@ impl Server {
                                             )?;
                                         }
                                         _ => (),
+                                    }
+                                }
+                            }
+                            ServerTask::WaitForOrganizerSnapshotResponses(client_id, req) => {
+                                let client = clients
+                                    .get(client_id)
+                                    .ok_or(Error::FailedGettingClientById(*client_id))?;
+                                if let OrganizerTask::WaitForSnapshotResponses {
+                                    snapshots, ..
+                                } = organ_task
+                                {
+                                    let mut bytes = Vec::new();
+                                    // consolidate the snapshot
+                                    // TODO implement Snap on Organizer
+                                    let header = outcome::snapshot::SnapshotHeader {
+                                        metadata: outcome::snapshot::SnapshotMetadata {
+                                            created: chrono::Utc::now(),
+                                            // TODO
+                                            starter: outcome::SimStarter::Scenario("".to_string()),
+                                        },
+                                        clock: organ.central.clock.clone(),
+                                        model: organ.central.model.clone(),
+                                        entities_idx: organ.central.entities_idx.clone(),
+                                        event_queue: organ.central.event_queue.clone(),
+                                        entity_pool: organ.central.entity_idpool.clone(),
+                                    };
+                                    bytes.extend(bincode::serialize(&header)?);
+                                    for part in &snapshots {
+                                        bytes.extend(bincode::serialize(part)?);
+                                    }
+
+                                    if req.save_to_disk {
+                                        let project_path = outcome::util::find_project_root(
+                                            organ.central.model.scenario.path.clone(),
+                                            3,
+                                        )?;
+                                        let snapshot_path = project_path
+                                            .join(outcome::SNAPSHOTS_DIR_NAME)
+                                            .join(req.name.clone());
+                                        let mut file = File::create(snapshot_path)?;
+                                        file.write_all(&bytes);
+                                    }
+                                    if req.send_back {
+                                        let payload = ExportSnapshotResponse {
+                                            error: "".to_string(),
+                                            snapshot: bytes,
+                                        };
+                                        client.connection.send_payload(payload, None);
                                     }
                                 }
                             }

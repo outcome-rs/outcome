@@ -3,7 +3,7 @@ name = "outcome-core"
 version = "0.1.0"
 authors = ["adamsky <adamsky@enum.space>"]
 edition = "2018"
-repository = "https://github.com/outcome-rs/outcome"
+repository = "https://github.com/outcome-sim/outcome"
 homepage = "https://theoutcomeproject.com"
 description = "Easy to use distributed simulation engine."
 keywords = ["distributed", "simulation", "engine", "modeling", "entity-component"]
@@ -23,7 +23,9 @@ machine_sysinfo = ["sysinfo"] # expose system information to preprocessor and ru
 machine_sandbox = ["machine", "machine_script"] # don't allow execution of user-provided code
 machine_complete = ["machine", "machine_script", "machine_dynlib", "machine_lua", "machine_sysinfo"]
 
+stack_stringid = []
 short_stringid = [] # make the fixed-size string ids 10 chars long (default is 23)
+
 load_img = ["image"] # enable loading images as grid data
 big_nums = [] # use 64 bit integers and floating point numbers instead of default 32 bit
 # byte_var = [] # add 8 bit unsigned integer variable type
@@ -68,3 +70,15 @@ criterion = "0.3.3"
 [[bench]]
 name = "barebones"
 harness = false
+
+[[bench]]
+name = "sim"
+harness = false
+
+#[[bench]]
+#name = "storage"
+#harness = false
+#
+#[[bench]]
+#name = "model"
+#harness = false

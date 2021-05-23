@@ -11,8 +11,8 @@ use fnv::FnvHashMap;
 
 use crate::error::{Error, Result};
 use crate::model::{ComponentModel, EntityPrefab};
-use crate::{arraystring, EntityName, EventName, SimModel};
 use crate::{model, CompName, StringId};
+use crate::{string, EntityName, EventName, SimModel};
 
 #[cfg(feature = "machine_dynlib")]
 use libloading::Library;
@@ -22,7 +22,7 @@ use rlua::Lua;
 pub use storage::StorageIndex;
 
 /// Basic building block of the simulation state.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entity {
     /// All data associated with the entity is stored here
     pub storage: Storage,
@@ -45,7 +45,7 @@ pub struct Entity {
 }
 
 /// Contains all the non-serializable constructs stored on an entity instance.
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EntityNonSer {}
 
 impl Entity {
@@ -60,19 +60,17 @@ impl Entity {
             //     arraystring::new_unchecked(crate::DEFAULT_STEP_EVENT),
             //     Vec::new(),
             // );
-            ent.comp_queue.insert(
-                arraystring::new_unchecked(crate::DEFAULT_INIT_EVENT),
-                Vec::new(),
-            );
+            ent.comp_queue
+                .insert(string::new_truncate(crate::DEFAULT_INIT_EVENT), Vec::new());
 
             for event in &model.events {
                 ent.comp_queue
-                    .insert(arraystring::new_truncate(&event.id), Vec::new());
+                    .insert(string::new_truncate(&event.id), Vec::new());
             }
         }
 
         for comp in &prefab.components {
-            ent.attach(*comp, model)?;
+            ent.attach(comp.clone(), model)?;
         }
 
         // TODO setup dyn libs
@@ -85,7 +83,7 @@ impl Entity {
         trace!("creating entity from prefab name: {}", prefab);
         let ent_model = sim_model
             .get_entity(prefab)
-            .ok_or(Error::NoEntityPrefab(*prefab))?;
+            .ok_or(Error::NoEntityPrefab(prefab.clone()))?;
         Entity::from_prefab(ent_model, sim_model)
     }
 
@@ -106,11 +104,11 @@ impl Entity {
         let comp_model = model.get_component(&component)?;
         debug!("attaching component: {:?}", comp_model);
 
-        self.components.push(component);
+        self.components.push(component.clone());
 
         for var_model in &comp_model.vars {
             self.storage.insert(
-                (component, var_model.id),
+                (component.clone(), var_model.name.clone()),
                 var_model
                     .default
                     .to_owned()
@@ -122,14 +120,16 @@ impl Entity {
         {
             trace!("triggers: {:?}", comp_model.triggers);
             for trigger in &comp_model.triggers {
-                let t = arraystring::new_truncate(trigger);
+                let t = string::new_truncate(trigger);
                 if let Some(q) = self.comp_queue.get_mut(&t) {
                     trace!("pushing to comp_queue: {}", comp_model.name);
-                    q.push(comp_model.name);
+                    q.push(comp_model.name.clone());
                 }
             }
-            self.comp_state
-                .insert(comp_model.name, comp_model.logic.start_state);
+            self.comp_state.insert(
+                comp_model.name.clone(),
+                comp_model.logic.start_state.clone(),
+            );
         }
 
         // debug!("start_state: {}", comp_model.start_state);
@@ -145,9 +145,9 @@ impl Entity {
             if !self.comp_state.contains_key(&component) {
                 for trigger in &comp_model.triggers {
                     //                println!("trigger: {}", trigger);
-                    let t = StringId::from(trigger).unwrap();
+                    let t = crate::string::new_truncate(trigger);
                     #[cfg(feature = "machine")]
-                    self.comp_queue.get_mut(&t).unwrap().push(component);
+                    self.comp_queue.get_mut(&t).unwrap().push(component.clone());
                 }
             }
         }

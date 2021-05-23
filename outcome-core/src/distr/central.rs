@@ -5,27 +5,27 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "machine")]
+use rayon::prelude::*;
+
+use fnv::FnvHashMap;
+use id_pool::IdPool;
 use rand::prelude::SliceRandom;
+
+#[cfg(feature = "machine")]
+use crate::machine::{cmd::CentralRemoteCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
 
 use crate::distr::{
     CentralCommunication, DistributionPolicy, NodeCommunication, NodeId, Signal, TaskId,
 };
+use crate::entity::Entity;
 use crate::error::{Error, Result};
 use crate::model::Scenario;
-use crate::{
-    arraystring, Address, EntityId, EntityName, EventName, PrefabName, ShortString, SimModel,
-    StringId, Var,
-};
-
-#[cfg(feature = "machine")]
-use crate::machine::{cmd::CentralRemoteCommand, cmd::Command, cmd::ExtCommand, ExecutionContext};
-#[cfg(feature = "machine")]
-use rayon::prelude::*;
-
-use crate::entity::Entity;
 use crate::snapshot::Snapshot;
-use fnv::FnvHashMap;
-use id_pool::IdPool;
+use crate::{
+    string, Address, EntityId, EntityName, EventName, PrefabName, ShortString, Sim, SimModel,
+    SimStarter, StringId, Var, SCENARIOS_DIR_NAME, SNAPSHOTS_DIR_NAME,
+};
 
 /// Distributed simulation central authority. Does the necessary coordination
 /// work for distributed sim instances.
@@ -40,6 +40,7 @@ use id_pool::IdPool;
 /// - load balancing, distribution of entities between nodes
 #[derive(Serialize, Deserialize)]
 pub struct SimCentral {
+    pub starter: Option<SimStarter>,
     pub model: SimModel,
     pub clock: usize,
     pub event_queue: Vec<EventName>,
@@ -51,7 +52,7 @@ pub struct SimCentral {
     pub node_entities: FnvHashMap<NodeId, Vec<EntityId>>,
     // pub entity_node_routes: FnvHashMap<>
     pub entities_idx: FnvHashMap<EntityName, EntityId>,
-    entity_idpool: IdPool,
+    pub entity_idpool: IdPool,
 
     ent_spawn_queue: FnvHashMap<NodeId, Vec<(EntityId, Option<PrefabName>, Option<EntityName>)>>,
     pub model_changes_queue: SimModel,
@@ -77,10 +78,49 @@ impl SimCentral {
         Ok(())
     }
 
+    pub fn new_from_project_starter(project_path: PathBuf, starter: SimStarter) -> Result<Self> {
+        // organizer cannot load any data onto itself, therefore
+        // it has to wait with initialization until at least one
+        // worker is available
+
+        match &starter {
+            SimStarter::Scenario(scenario) => {
+                let scenario =
+                    Scenario::from_path(project_path.join(SCENARIOS_DIR_NAME).join(scenario))?;
+                let model = SimModel::from_scenario(scenario)?;
+                Self::from_model(model, Some(starter.clone()))
+            }
+            SimStarter::Snapshot(snapshot) => {
+                // TODO save snapshots so that model can be accessed without loading everything
+                let sim = Sim::from_snapshot_at(
+                    project_path
+                        .join(SNAPSHOTS_DIR_NAME)
+                        .join(snapshot)
+                        .to_str()
+                        .unwrap(),
+                )?;
+                Ok(Self {
+                    starter: Some(starter.clone()),
+                    model: sim.model,
+                    clock: sim.clock,
+                    event_queue: sim.event_queue,
+                    distribution_policy: DistributionPolicy::Random,
+                    node_entities: Default::default(),
+                    entities_idx: sim.entity_idx,
+                    entity_idpool: sim.entity_pool,
+                    ent_spawn_queue: Default::default(),
+                    model_changes_queue: Default::default(),
+                })
+            }
+            SimStarter::Experiment(_) => unimplemented!(),
+        }
+    }
+
     /// Creates a new `SimCentral` using a model object.
-    pub fn from_model(model: SimModel) -> Result<SimCentral> {
-        let mut event_queue = vec![arraystring::new_truncate("step")];
+    pub fn from_model(model: SimModel, starter: Option<SimStarter>) -> Result<SimCentral> {
+        let mut event_queue = vec![string::new_truncate("step")];
         let mut sim_central = SimCentral {
+            starter,
             model: model.clone(),
             clock: 0,
             event_queue,
@@ -135,16 +175,16 @@ impl SimCentral {
     ) -> Result<()> {
         trace!("spawning entity from central");
 
-        let new_uid = self.entity_idpool.request_id().unwrap();
+        let new_id = self.entity_idpool.request_id().unwrap();
 
-        if let Some(n) = name {
-            if self.entities_idx.contains_key(&n) {
+        if let Some(n) = &name {
+            if self.entities_idx.contains_key(n) {
                 return Err(Error::Other(format!(
                     "Failed to add entity: entity named \"{}\" already exists",
                     n,
                 )));
             }
-            self.entities_idx.insert(n, new_uid);
+            self.entities_idx.insert(n.clone(), new_id);
         }
 
         match policy {
@@ -152,10 +192,11 @@ impl SimCentral {
                 if !self.ent_spawn_queue.contains_key(&node_id) {
                     self.ent_spawn_queue.insert(node_id, Vec::new());
                 }
-                self.ent_spawn_queue
-                    .get_mut(&node_id)
-                    .unwrap()
-                    .push((new_uid, prefab, name));
+                self.ent_spawn_queue.get_mut(&node_id).unwrap().push((
+                    new_id,
+                    prefab,
+                    name.clone(),
+                ));
             }
             // TODO
             DistributionPolicy::Random => {
@@ -175,10 +216,11 @@ impl SimCentral {
                 }
 
                 // push to the queue
-                self.ent_spawn_queue
-                    .get_mut(&node_id)
-                    .unwrap()
-                    .push((new_uid, prefab, name));
+                self.ent_spawn_queue.get_mut(&node_id).unwrap().push((
+                    new_id,
+                    prefab,
+                    name.clone(),
+                ));
             }
             _ => unimplemented!(),
         }
@@ -255,7 +297,7 @@ impl SimCentral {
         network: &mut N,
         event_queue: Vec<StringId>,
     ) -> Result<()> {
-        debug!("starting processing step");
+        debug!("starting processing step, event queue: {:?}", event_queue);
 
         // tell nodes to start processing next step
         network.broadcast_sig(0, Signal::StartProcessStep(event_queue))?;

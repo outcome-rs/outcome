@@ -4,7 +4,7 @@
 
 use super::{DirectivePrototype, Instruction, InstructionType};
 
-use crate::{arraystring, ShortString};
+use crate::{string, ShortString};
 use crate::{util, LongString};
 
 use crate::machine::error::{Error, ErrorKind, Result};
@@ -26,7 +26,7 @@ pub(crate) fn parse_script_at(
     debug!("parsing script at: {}", full_path);
     let text = util::read_text_file(&full_path).map_err(|e| {
         Error::new(
-            location,
+            location.clone(),
             ErrorKind::ErrorReadingFile(script_relative_path.to_string()),
         )
     })?;
@@ -34,7 +34,7 @@ pub(crate) fn parse_script_at(
 }
 
 /// Parses multiple lines from a script at given path.
-pub(crate) fn parse_lines(lines: &str, location: LocationInfo) -> Result<Vec<Instruction>> {
+pub fn parse_lines(lines: &str, location: LocationInfo) -> Result<Vec<Instruction>> {
     let mut instructions = vec![];
 
     // multiline switch
@@ -191,7 +191,7 @@ fn parse_command(
                 index = next_index;
 
                 if let Some(val) = value {
-                    location_info.tag = Some(arraystring::new_truncate(&val[1..]));
+                    location_info.tag = Some(string::new_truncate(&val[1..]));
                 }
                 //if value.is_some() {
                 //location_info.tag = Some(ArrStr10::from_str_truncate(value));
@@ -235,7 +235,8 @@ fn parse_arguments_posix(
     start_index: usize,
     location: &LocationInfo,
 ) -> Result<Vec<String>> {
-    shlex::split(&text[start_index..]).ok_or(Error::new(*location, ErrorKind::MissingEndQuotes))
+    shlex::split(&text[start_index..])
+        .ok_or(Error::new(location.clone(), ErrorKind::MissingEndQuotes))
 }
 
 fn parse_arguments(
@@ -309,7 +310,10 @@ fn parse_next_value(
                             in_control = false;
                             found_variable_prefix = false;
                         } else {
-                            return Err(Error::new(*location, ErrorKind::ControlWithoutValidValue));
+                            return Err(Error::new(
+                                location.clone(),
+                                ErrorKind::ControlWithoutValidValue,
+                            ));
                         }
                     } else if character == '\\' || character == '"' {
                         argument.push(character);
@@ -326,14 +330,20 @@ fn parse_next_value(
                     } else if character == '$' {
                         found_variable_prefix = true;
                     } else {
-                        return Err(Error::new(*location, ErrorKind::ControlWithoutValidValue));
+                        return Err(Error::new(
+                            location.clone(),
+                            ErrorKind::ControlWithoutValidValue,
+                        ));
                     }
                 } else if character == '\\' {
                     if allow_control {
                         in_control = true;
                         found_variable_prefix = false;
                     } else {
-                        return Err(Error::new(*location, ErrorKind::InvalidControlLocation));
+                        return Err(Error::new(
+                            location.clone(),
+                            ErrorKind::InvalidControlLocation,
+                        ));
                     }
                 } else if using_quotes && character == '"' {
                     found_end = true;
@@ -363,13 +373,19 @@ fn parse_next_value(
                     if allow_quotes {
                         using_quotes = true;
                     } else {
-                        return Err(Error::new(*location, ErrorKind::InvalidQuotesLocation));
+                        return Err(Error::new(
+                            location.clone(),
+                            ErrorKind::InvalidQuotesLocation,
+                        ));
                     }
                 } else if character == '\\' {
                     if allow_control {
                         in_control = true;
                     } else {
-                        return Err(Error::new(*location, ErrorKind::InvalidControlLocation));
+                        return Err(Error::new(
+                            location.clone(),
+                            ErrorKind::InvalidControlLocation,
+                        ));
                     }
                 } else {
                     argument.push(character);
@@ -379,9 +395,12 @@ fn parse_next_value(
 
         if in_argument && !found_end && (in_control || using_quotes) {
             if in_control {
-                Err(Error::new(*location, ErrorKind::ControlWithoutValidValue))
+                Err(Error::new(
+                    location.clone(),
+                    ErrorKind::ControlWithoutValidValue,
+                ))
             } else {
-                Err(Error::new(*location, ErrorKind::MissingEndQuotes))
+                Err(Error::new(location.clone(), ErrorKind::MissingEndQuotes))
             }
         } else if argument.is_empty() {
             if using_quotes {
@@ -420,7 +439,7 @@ fn find_tag(
                         match value {
                             Some(label_value) => {
                                 if label_value.is_empty() {
-                                    return Err(Error::new(*location, ErrorKind::EmptyTag));
+                                    return Err(Error::new(location.clone(), ErrorKind::EmptyTag));
                                 }
 
                                 let mut text = String::new();
@@ -505,7 +524,7 @@ fn test_parse_directive() {
         !include foo.bar
         !log "foo"
     "###;
-    let instructions = parse_lines(text, "").unwrap();
+    let instructions = parse_lines(text, LocationInfo::empty()).unwrap();
     let expected = vec![
         Instruction {
             location: LocationInfo::empty(),

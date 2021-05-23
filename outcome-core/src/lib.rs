@@ -84,16 +84,15 @@ pub use sim::Sim;
 pub use var::{Var, VarType};
 
 pub mod address;
-pub mod arraystring;
 pub mod distr;
 pub mod entity;
 pub mod error;
 pub mod model;
 pub mod sim;
 pub mod snapshot;
+pub mod string;
+pub mod util;
 pub mod var;
-
-mod util;
 
 // features
 pub const FEATURE_NAME_BIG_NUMS: &str = "big_nums";
@@ -101,6 +100,12 @@ pub const FEATURE_NAME_BIG_NUMS: &str = "big_nums";
 pub const FEATURE_BIG_NUMS: bool = false;
 #[cfg(feature = "big_nums")]
 pub const FEATURE_BIG_NUMS: bool = true;
+
+pub const FEATURE_NAME_STACK_STRINGID: &str = "stack_stringid";
+#[cfg(not(feature = "stack_stringid"))]
+pub const FEATURE_STACK_STRINGID: bool = false;
+#[cfg(feature = "stack_stringid")]
+pub const FEATURE_STACK_STRINGID: bool = true;
 
 pub const FEATURE_NAME_SHORT_STRINGID: &str = "short_stringid";
 #[cfg(not(feature = "short_stringid"))]
@@ -199,16 +204,16 @@ pub type Int = i32;
 ///
 /// Default length is 23 characters, but it can be restricted to just
 /// 10 characters using the `short_stringid` feature.
-#[cfg(not(feature = "short_stringid"))]
+#[cfg(all(feature = "stack_stringid", not(feature = "short_stringid")))]
 pub type StringId = arrayvec::ArrayString<[u8; 23]>;
 /// Fixed-size string used internally for indexing objects.
-#[cfg(feature = "short_stringid")]
+#[cfg(all(feature = "stack_stringid", feature = "short_stringid"))]
 pub type StringId = arrayvec::ArrayString<[u8; 10]>;
+#[cfg(not(feature = "stack_stringid"))]
+pub type StringId = String;
 
 /// Short fixed-size string.
 pub type ShortString = arrayvec::ArrayString<[u8; 23]>;
-/// Medium-length fixed-size string.
-type MedString = arrayvec::ArrayString<[u8; 40]>;
 /// Long fixed-size string.
 type LongString = arrayvec::ArrayString<[u8; 100]>;
 
@@ -225,3 +230,10 @@ pub type EventName = StringId;
 
 /// Entity unique integer identifier.
 pub type EntityId = u32;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SimStarter {
+    Scenario(String),
+    Snapshot(String),
+    Experiment(String),
+}

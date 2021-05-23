@@ -95,9 +95,9 @@ impl TryInto<outcome::Query> for Query {
 
         query.trigger = match self.trigger.type_ {
             TriggerType::Immediate => outcome::query::Trigger::Immediate,
-            TriggerType::Event => outcome::query::Trigger::Event(
-                outcome::arraystring::new_truncate(&self.trigger.args[0]),
-            ),
+            TriggerType::Event => {
+                outcome::query::Trigger::Event(outcome::string::new_truncate(&self.trigger.args[0]))
+            }
             TriggerType::Mutation => {
                 outcome::query::Trigger::Mutation(self.trigger.args[0].parse()?)
             }
@@ -122,21 +122,21 @@ impl TryInto<outcome::Query> for Query {
                     filter
                         .args
                         .into_iter()
-                        .map(|s| outcome::arraystring::new_truncate(&s))
+                        .map(|s| outcome::string::new_truncate(&s))
                         .collect(),
                 ),
                 FilterType::SomeComponents => outcome::query::Filter::AllComponents(
                     filter
                         .args
                         .into_iter()
-                        .map(|s| outcome::arraystring::new_truncate(&s))
+                        .map(|s| outcome::string::new_truncate(&s))
                         .collect(),
                 ),
                 FilterType::Name => outcome::query::Filter::Name(
                     filter
                         .args
                         .into_iter()
-                        .map(|s| outcome::arraystring::new_truncate(&s))
+                        .map(|s| outcome::string::new_truncate(&s))
                         .collect(),
                 ),
                 FilterType::Id => outcome::query::Filter::Id(
@@ -164,18 +164,18 @@ impl TryInto<outcome::Query> for Query {
                 MapType::All => outcome::query::Map::All,
                 MapType::Var => outcome::query::Map::Var(
                     outcome::VarType::from_str(&map.args[0])?,
-                    outcome::arraystring::new_truncate(&map.args[1]),
+                    outcome::string::new_truncate(&map.args[1]),
                 ),
                 MapType::VarType => {
                     outcome::query::Map::VarType(outcome::VarType::from_str(&map.args[0])?)
                 }
                 MapType::VarName => {
-                    outcome::query::Map::VarName(outcome::arraystring::new_truncate(&map.args[1]))
+                    outcome::query::Map::VarName(outcome::string::new_truncate(&map.args[1]))
                 }
                 MapType::Components => outcome::query::Map::Components(
                     map.args
                         .iter()
-                        .map(|s| outcome::arraystring::new_truncate(s))
+                        .map(|s| outcome::string::new_truncate(s))
                         .collect(),
                 ),
                 _ => unimplemented!()

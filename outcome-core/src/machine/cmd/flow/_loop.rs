@@ -2,7 +2,6 @@ use smallvec::SmallVec;
 
 use crate::entity::{Entity, Storage};
 use crate::model::{ComponentModel, SimModel};
-use crate::MedString;
 
 use super::super::super::{
     error::Error, CallInfo, CallStackVec, ForInCallInfo, IfElseCallInfo, IfElseMetaData,
@@ -74,7 +73,7 @@ impl Loop {
             Ok(po) => po,
             Err(e) => {
                 return Err(Error::new(
-                    *location,
+                    location.clone(),
                     ErrorKind::InvalidCommandBody(e.to_string()),
                 ))
             }
@@ -98,7 +97,7 @@ impl Loop {
                 end: positions.0,
             }),
             None => Err(Error::new(
-                *location,
+                location.clone(),
                 ErrorKind::InvalidCommandBody("end of if/else block not found.".to_string()),
             )),
         }
@@ -142,7 +141,7 @@ impl Break {
                     CommandResult::Continue
                 }
             }
-            None => CommandResult::Err(Error::new(*location, ErrorKind::StackEmpty)),
+            None => CommandResult::Err(Error::new(location.clone(), ErrorKind::StackEmpty)),
         }
         // result
         // CommandResult::Ok
